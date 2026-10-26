@@ -1,0 +1,61 @@
+# Integración continua: ejecuta las pruebas de cada servicio en GitHub Actions.
+#
+# Se ejecuta en cada pull request hacia main y en cada push a main.
+# Hay un job por servicio. Para agregar un servicio en una fase siguiente,
+# copiar el job "airport-service" y cambiar su nombre y la carpeta del servicio
+# (en working-directory y en cache-dependency-path).
+
+name: Pruebas
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Solo lectura: el workflow no necesita escribir en el repositorio
+permissions:
+  contents: read
+
+# Si llega un push nuevo al mismo PR o rama, se cancela la ejecución anterior
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  airport-service:
+    name: Airport Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/airport-service
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/airport-service/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ejecutar pruebas
+        run: pytest -v
+
+  # Fase 3: copiar el job anterior para Itinerary Service, por ejemplo:
+  # itinerary-service:
+  #   name: Itinerary Service
+  #   ...
+  #   defaults:
+  #     run:
+  #       working-directory: services/itinerary-service
+  #   ...
+  #       cache-dependency-path: services/itinerary-service/requirements.txt
