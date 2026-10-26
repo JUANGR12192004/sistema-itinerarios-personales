@@ -116,14 +116,19 @@ Nunca subas al repositorio credenciales, archivos `.env` ni entornos virtuales.
 | Herramienta | Versión / detalle |
 |---|---|
 | Sistema operativo | Windows 11 (los tres integrantes) |
-| Terminal | **PowerShell** (no CMD, no Bash) |
+| Terminal | **PowerShell** y **CMD** (no Bash) |
 | Python | **3.12** (usar `py -3.12`) |
 | Git | Git for Windows |
 | Contenedores | Docker Desktop con WSL 2 (desde la Fase 2) |
 
 ### 4.1. Reglas para los comandos
 
-- Todos los comandos que des deben funcionar en **PowerShell de Windows 11**.
+- Todos los comandos se dan **para PowerShell y para CMD** de Windows 11 (los dos bloques, o uno solo
+  si el comando es idéntico en ambas terminales y se indica así).
+- PowerShell de Windows 11 es la versión **5.1**: no usar parámetros que solo existen en PowerShell 7
+  (por ejemplo `-SkipHttpErrorCheck`). PowerShell 5.1 muestra mal las tildes de respuestas JSON sin
+  `charset`; para demostraciones usar Swagger o `curl.exe`. En CMD, ejecutar `chcp 65001` antes de
+  `curl.exe` para ver bien las tildes.
 - Usa rutas de Windows (`.\carpeta\archivo`) en los comandos.
 - El proyecto vive en `$HOME\proyectos\sistema-itinerarios-personales`. Nunca trabajes en
   `C:\WINDOWS\system32` ni pidas ejecutar PowerShell como administrador salvo que sea indispensable
@@ -417,7 +422,7 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Mensajes de commit | En español, con el prefijo de Conventional Commits en inglés (`feat: agrega ...`) |
 | Uvicorn | Servidor ASGI para ejecutar FastAPI (agregado a `requirements.txt` en la entrega 1A) |
 | Traducción de API Colombia (1B) | El mapper convierte `"N/A"` en `None` (códigos IATA/OACI) y deja `coordinates = None` cuando llegan `0, 0` |
-| Corrección de coordenadas (1B) | No se invierten siempre: el mapper **detecta** el intercambio. Invierte solo si el valor de `latitude` está fuera del rango de latitudes de Colombia (aprox. −5 a 14) y el de `longitude` sí está dentro. Cada corrección registra un `warning` en el log. Pruebas obligatorias: coordenadas intercambiadas, correctas y `0, 0` |
+| Corrección de coordenadas (1B) | No se invierten siempre: el mapper **detecta** el intercambio. Invierte solo si el valor de `latitude` está fuera del rango de latitudes de Colombia (aprox. −5 a 14) y el de `longitude` sí está dentro. El mapper registra cada corrección en `DEBUG` y el Adapter registra **un solo `WARNING` por respuesta** con el total de aeropuertos corregidos (por ejemplo "51 de 52"). Pruebas obligatorias: coordenadas intercambiadas, correctas y `0, 0` |
 | Tolerant Reader en la lista (1B) | En `list_airports`, un aeropuerto con formato inesperado o que viola el dominio se **omite** con un `warning` que lo identifica por su id (o por su posición si no tiene id); se devuelven los demás. Si la respuesta completa no es una lista o no es JSON válido → 502. Si la lista no está vacía pero **todos** sus aeropuertos son inválidos → 502 (indica un cambio de contrato del proveedor); una lista vacía `[]` se devuelve vacía. En `get_airport_by_id`, un aeropuerto inválido → 502 |
 | Pruebas asíncronas (1B) | Plugin de pytest de `anyio` (`@pytest.mark.anyio`), ya instalado como dependencia de httpx/FastAPI; no se agrega `pytest-asyncio` |
 | Nombres externos (1B) | El campo `deparmentId` (con error ortográfico) solo existe en el DTO externo; el dominio usa nombres correctos |
@@ -444,6 +449,7 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
 | Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
+| Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
 (explicando el cambio antes de hacerlo).
@@ -617,5 +623,9 @@ pytest -v
   - Entrega **1B** completada: puerto `AirportProvider`, excepciones de aplicación, `ApiColombiaClient`,
     DTO externo, mapper (corrección detectada de coordenadas, `"N/A"` → `None`, `0, 0` → sin ubicación)
     y `ApiColombiaAirportAdapter` (Tolerant Reader en la lista), con pruebas respx.
-  - Siguiente: entrega **1C** cuando el usuario lo confirme.
+  - Entrega **1C** implementada (pendiente de verificación y commit): casos de uso, rutas REST,
+    esquemas, manejador único de errores (`AIRPORT_NOT_FOUND`, `VALIDATION_ERROR`,
+    `AIRPORT_PROVIDER_BAD_RESPONSE`, `AIRPORT_PROVIDER_UNAVAILABLE`, `ROUTE_NOT_FOUND`, `INTERNAL_ERROR`),
+    correlation ID por header `X-Correlation-ID`, inyección de dependencias, `main.py`, logging de `app.*`
+    en consola y pruebas de API con proveedor falso.
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
