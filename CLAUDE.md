@@ -157,8 +157,8 @@ que normalice a LF los archivos de texto (en especial scripts `.sh`, `Dockerfile
 - Repositorio: `https://github.com/JUANGR12192004/sistema-itinerarios-personales`
 - Rama principal: `main`. **No se trabaja directamente sobre `main`.**
 - Una rama por fase: `fase-1-airport-service`, `fase-2-resiliencia`, `fase-3-itinerary-service`, etc.
-- Un commit por entrega, con mensajes en formato Conventional Commits, en español o inglés
-  según el estilo existente (el repo ya usa `docs: ...`):
+- Un commit por entrega, con mensajes en formato Conventional Commits: el prefijo en inglés y
+  la descripción en español (por ejemplo `feat: agrega capa de dominio de Airport Service`):
   - `feat: ...` nueva funcionalidad
   - `fix: ...` corrección
   - `docs: ...` documentación
@@ -354,8 +354,19 @@ Usa siempre estos nombres. No inventes sinónimos (`user`, `trip`, `origin`) en 
 ### 8.3. Entidades
 
 **Airport** (solo lectura): `id`, `name`, `iata_code`, `oaci_code`, `type`, `city`, `department`,
-`coordinates`. Los campos definitivos se fijan **después de verificar la respuesta real** de
-API Colombia (entrega 1A).
+`coordinates`. `iata_code`, `oaci_code` y `coordinates` pueden ser `None`.
+
+Hallazgos de la verificación real de API Colombia (entrega 1A, 2026-10-26):
+
+- `GET /Airport` devuelve 52 aeropuertos (ids 1 a 52). Campos externos: `id`, `name`, `iataCode`,
+  `oaciCode`, `type`, `deparmentId` (sic, con error ortográfico), `department` (objeto con `name`),
+  `cityId`, `city` (objeto con `name`), `latitude`, `longitude`.
+- **Coordenadas intercambiadas** en 51 de 52: `latitude` trae la longitud (≈ −75) y `longitude` trae
+  la latitud (≈ 4). El dominio no puede detectarlo por rangos: lo corrige el mapper (1B).
+- El id 43 ("Aeropuerto del Café", en construcción) trae `0, 0`: ubicación desconocida.
+- Los códigos faltantes llegan como el texto `"N/A"` (5 sin IATA, 3 sin OACI).
+- Tipos observados: `Internacional`, `Nacional`, `Militar`, `En Construccion`.
+- ID inexistente (9999) → 404 con cuerpo vacío. ID 0 o no numérico → 400 con cuerpo vacío.
 
 **Coordinates** (objeto de valor): latitud entre −90 y 90, longitud entre −180 y 180.
 
@@ -399,17 +410,24 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Redis | Caché en Airport Service (ADR-007) |
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana, logs estructurados (ADR-010) |
 | Entorno | Windows 11, PowerShell, Python 3.12 |
+| Idioma | Código en inglés, documentación en español (ADR-011) |
+| Formato de errores | Formato único de la sección 10.2 para todos los servicios (ADR-012) |
+| Endpoints de Airport Service | Los de la sección 10.1 (ADR-012) |
+| Puertos de Itinerary Service en el diagrama de componentes | Itinerary usa el puerto `AirportCatalog` + adaptador HTTP hacia el controlador REST de Airport, y el puerto `EventPublisher` en lugar de hablar directo con RabbitMQ (ADR-013) |
+| Mensajes de commit | En español, con el prefijo de Conventional Commits en inglés (`feat: agrega ...`) |
+| Uvicorn | Servidor ASGI para ejecutar FastAPI (agregado a `requirements.txt` en la entrega 1A) |
+| Traducción de API Colombia (1B) | El mapper convierte `"N/A"` en `None` (códigos IATA/OACI) y deja `coordinates = None` cuando llegan `0, 0` |
+| Corrección de coordenadas (1B) | No se invierten siempre: el mapper **detecta** el intercambio. Invierte solo si el valor de `latitude` está fuera del rango de latitudes de Colombia (aprox. −5 a 14) y el de `longitude` sí está dentro. Cada corrección registra un `warning` en el log. Pruebas obligatorias: coordenadas intercambiadas, correctas y `0, 0` |
+| Nombres externos (1B) | El campo `deparmentId` (con error ortográfico) solo existe en el DTO externo; el dominio usa nombres correctos |
+| Validación del id (1C) | `GET /airports/{id}` valida que el id sea un entero mayor que 0 (422) antes de llamar a API Colombia. Un 404 de API Colombia se convierte en `AirportNotFoundError` (404) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
 | Decisión | Propuesta | Se necesita en |
 |---|---|---|
-| Idioma del código | Código en inglés, documentación en español | Fase 1 |
-| Formato de errores | Ver sección 10.2 | Fase 1 |
-| Endpoints | Ver sección 10.1 | Fase 1 y 3 |
+| Endpoints de Itinerary Service | Ver sección 10.1 | Fase 3 |
 | Contrato del evento | Ver sección 11 | Fase 4 |
 | Topología RabbitMQ | Ver sección 11.2 | Fase 4 |
-| Corrección del diagrama de componentes en `docs/05-diagramas.md` | Itinerary usa el puerto `AirportCatalog` + adaptador HTTP hacia el controlador REST de Airport, y el puerto `EventPublisher` en lugar de hablar directo con RabbitMQ | Antes o durante la Fase 1 |
 | Mejora del lenguaje ubicuo en `docs/03-dominio.md` | Separar términos del negocio de términos técnicos; agregar viajero, fecha de viaje, duración | Antes de la Fase 3 |
 | Rama "Airport Service no disponible" en el diagrama de secuencia | Agregar respuesta 503 | Antes de la Fase 3 |
 | Orden del flujo de resiliencia en `docs/05-diagramas.md` | Circuit breaker → llamada con timeout → retry con backoff → fallback. Un 404 no se reintenta ni activa fallback | Fase 2 |
@@ -434,6 +452,9 @@ Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-
 
 ### 10.1. Endpoints previstos
 
+Los endpoints de Airport Service están **aceptados**; los de Itinerary Service siguen como
+propuesta hasta la Fase 3.
+
 | Servicio | Método y ruta | Éxito | Errores |
 |---|---|---|---|
 | Airport | `GET /airports` | 200 | 502, 503 |
@@ -451,7 +472,7 @@ En el Gateway: `/api/airports/...` → Airport Service y `/api/itineraries/...` 
 
 El endpoint `map-data` tiene formato de presentación, así que vive en la capa `api`, no en el dominio.
 
-### 10.2. Códigos de error
+### 10.2. Códigos de error (aceptado)
 
 | Situación | Código |
 |---|---|
@@ -588,5 +609,8 @@ pytest -v
 > Actualiza esta sección al terminar cada entrega o fase (explicando el cambio).
 
 - **Fase 0:** completada (documentación en `docs/`).
-- **Fase 1:** no iniciada. Comenzar por la entrega **1A** cuando el usuario lo indique.
-- Pendiente de aprobación: corrección del diagrama de componentes en `docs/05-diagramas.md`.
+- **Fase 1:** en curso en la rama `fase-1-airport-service`.
+  - Entrega **1A** completada: `.gitignore`, `.gitattributes`, entorno y `requirements.txt` de
+    Airport Service, capa de dominio (`Airport`, `Coordinates`, excepciones) con pruebas.
+  - Siguiente: entrega **1B** cuando el usuario lo confirme.
+- Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
