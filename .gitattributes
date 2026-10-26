@@ -1,0 +1,22 @@
+# Git detecta los archivos de texto y los guarda en el repositorio con finales de línea LF.
+# Así los contenedores Linux (desde la Fase 10) reciben los archivos sin CRLF de Windows.
+* text=auto eol=lf
+
+# Archivos que siempre deben usar LF
+*.py         text eol=lf
+*.sh         text eol=lf
+Dockerfile   text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.md         text eol=lf
+*.txt        text eol=lf
+*.ini        text eol=lf
+*.toml       text eol=lf
+
+# Archivos binarios: Git no los modifica
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
