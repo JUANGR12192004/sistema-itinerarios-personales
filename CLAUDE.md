@@ -159,18 +159,39 @@ que normalice a LF los archivos de texto (en especial scripts `.sh`, `Dockerfile
 
 ## 5. Flujo de trabajo con Git
 
+El flujo completo del equipo, para personas, está en [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Estas son las reglas que debes seguir tú:
+
 - Repositorio: `https://github.com/JUANGR12192004/sistema-itinerarios-personales`
 - Rama principal: `main`. **No se trabaja directamente sobre `main`.**
-- Una rama por fase: `fase-1-airport-service`, `fase-2-resiliencia`, `fase-3-itinerary-service`, etc.
-- Un commit por entrega, con mensajes en formato Conventional Commits: el prefijo en inglés y
-  la descripción en español (por ejemplo `feat: agrega capa de dominio de Airport Service`):
+- Ramas desde `main` actualizado:
+  - una rama por fase: `fase-1-airport-service`, `fase-2-resiliencia`, `fase-3-itinerary-service`, etc.;
+  - una rama por tarea fuera de una fase: `tipo/descripcion-corta` (por ejemplo `chore/github-practices`).
+- Un commit por entrega (o varios separados por tipo), con mensajes en formato Conventional Commits:
+  el prefijo en inglés y la descripción en español (por ejemplo `feat: agrega capa de dominio de Airport Service`):
   - `feat: ...` nueva funcionalidad
   - `fix: ...` corrección
   - `docs: ...` documentación
   - `test: ...` pruebas
+  - `ci: ...` integración continua (GitHub Actions)
   - `chore: ...` configuración, dependencias, estructura
 - Antes de hacer commit, muestra qué archivos cambiaron y propone el mensaje.
+- Un issue por entrega (plantilla `.github/ISSUE_TEMPLATE/entrega.md`), con un milestone por fase.
+  **Cuando una entrega tenga issue, el commit o el PR deben incluir `Closes #N`.**
+- Los PR usan la plantilla `.github/pull_request_template.md`. Los PR los crea el equipo
+  (pide confirmación antes de crear uno, sección 3.3).
+- Antes del merge: la integración continua (`.github/workflows/tests.yml`, check "Pruebas") debe
+  pasar y debe haber **1 aprobación de otro integrante** (acuerdo del equipo; `main` aún no tiene
+  protección en GitHub). Quien revisa aprueba y quien hizo el PR fusiona, con
+  **"Create a merge commit"**, y después se borra la rama.
+- **Nunca intentes aprobar ni fusionar pull requests**, aunque tengas acceso para hacerlo.
 - La integración a `main` se hace cuando la lista de verificación de la fase está completa.
+- **Al terminar cada fase, después del merge, propone crear la etiqueta anotada `fase-N`** sobre el
+  commit de merge (`git tag -a fase-N -m "..."` y `git push origin fase-N`), y espera confirmación.
+- Las fases rotan entre los tres integrantes; el responsable de cada fase figura en su milestone.
+- El correo de los commits se configura solo para este repositorio (`git config user.email`, sin
+  `--global`). No cambies la configuración de Git del equipo.
+- Cuando agregues un servicio con pruebas, agrega su job en `.github/workflows/tests.yml`.
 
 ---
 
@@ -255,6 +276,11 @@ mismo puerto y envuelve al Adapter. No se modifica el Adapter para cachear.
 sistema-itinerarios-personales/
 ├── CLAUDE.md
 ├── README.md
+├── CONTRIBUTING.md                 ← flujo de trabajo del equipo
+├── .github/
+│   ├── pull_request_template.md
+│   ├── ISSUE_TEMPLATE/entrega.md
+│   └── workflows/tests.yml         ← integración continua (un job por servicio)
 ├── .gitignore
 ├── .gitattributes
 ├── docker-compose.yml              ← Fase 10
@@ -617,8 +643,8 @@ pytest -v
 > Actualiza esta sección al terminar cada entrega o fase (explicando el cambio).
 
 - **Fase 0:** completada (documentación en `docs/`).
-- **Fase 1:** completada en la rama `fase-1-airport-service` (97 pruebas). Documentación del servicio en
-  `services/airport-service/README.md`. Pendiente: pull request hacia `main` para revisión del equipo.
+- **Fase 1:** completada y **fusionada en `main`** (PR #2, merge `ee183bc`) con la **etiqueta `fase-1`**
+  (97 pruebas). Documentación del servicio en `services/airport-service/README.md`.
   - Entrega **1A** completada: `.gitignore`, `.gitattributes`, entorno y `requirements.txt` de
     Airport Service, capa de dominio (`Airport`, `Coordinates`, excepciones) con pruebas.
   - Entrega **1B** completada: puerto `AirportProvider`, excepciones de aplicación, `ApiColombiaClient`,
@@ -631,3 +657,6 @@ pytest -v
     correlation ID por header `X-Correlation-ID`, inyección de dependencias, `main.py`, logging de `app.*`
     en consola y pruebas de API con proveedor falso.
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
+- Buenas prácticas del repositorio (rama `chore/github-practices`): plantillas de PR e issue,
+  integración continua con GitHub Actions y `CONTRIBUTING.md`.
+- **Siguiente:** Fase 2 (Resiliencia y caché), cuando el usuario escriba `CONTINUAR A LA SIGUIENTE FASE`.
