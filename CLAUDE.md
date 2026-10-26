@@ -617,15 +617,17 @@ pytest -v
 > Actualiza esta sección al terminar cada entrega o fase (explicando el cambio).
 
 - **Fase 0:** completada (documentación en `docs/`).
-- **Fase 1:** en curso en la rama `fase-1-airport-service`.
+- **Fase 1:** completada en la rama `fase-1-airport-service` (97 pruebas). Documentación del servicio en
+  `services/airport-service/README.md`. Pendiente: pull request hacia `main` para revisión del equipo.
   - Entrega **1A** completada: `.gitignore`, `.gitattributes`, entorno y `requirements.txt` de
     Airport Service, capa de dominio (`Airport`, `Coordinates`, excepciones) con pruebas.
   - Entrega **1B** completada: puerto `AirportProvider`, excepciones de aplicación, `ApiColombiaClient`,
     DTO externo, mapper (corrección detectada de coordenadas, `"N/A"` → `None`, `0, 0` → sin ubicación)
     y `ApiColombiaAirportAdapter` (Tolerant Reader en la lista), con pruebas respx.
-  - Entrega **1C** implementada (pendiente de verificación y commit): casos de uso, rutas REST,
+  - Entrega **1C** completada: casos de uso, rutas REST,
     esquemas, manejador único de errores (`AIRPORT_NOT_FOUND`, `VALIDATION_ERROR`,
-    `AIRPORT_PROVIDER_BAD_RESPONSE`, `AIRPORT_PROVIDER_UNAVAILABLE`, `ROUTE_NOT_FOUND`, `INTERNAL_ERROR`),
+    `AIRPORT_PROVIDER_BAD_RESPONSE`, `AIRPORT_PROVIDER_UNAVAILABLE`, `ROUTE_NOT_FOUND`, `METHOD_NOT_ALLOWED`,
+    `INTERNAL_ERROR`),
     correlation ID por header `X-Correlation-ID`, inyección de dependencias, `main.py`, logging de `app.*`
     en consola y pruebas de API con proveedor falso.
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
