@@ -30,8 +30,11 @@ class ApiColombiaAirportAdapter(AirportProvider):
         """Devuelve los aeropuertos válidos de la lista (patrón Tolerant Reader).
 
         Un aeropuerto inválido se omite con un warning, para que un solo dato roto
-        no deje sin catálogo a todo el sistema. Si la respuesta completa no es una
-        lista, el proveedor respondió algo inesperado (502).
+        no deje sin catálogo a todo el sistema. Es una respuesta inesperada (502) si:
+        - la respuesta completa no es una lista, o
+        - la lista trae aeropuertos pero ninguno es válido: eso indica que cambió
+          el contrato del proveedor, no un registro defectuoso suelto.
+        Una lista vacía ([]) es legítima y se devuelve vacía.
         """
         payload = await self._client.fetch_airports()
         if not isinstance(payload, list):
@@ -43,6 +46,11 @@ class ApiColombiaAirportAdapter(AirportProvider):
                 airports.append(self._to_airport(item))
             except AirportProviderResponseError as error:
                 logger.warning("Se omite el aeropuerto %s de API Colombia: %s", self._describe(item, position), error)
+
+        if payload and not airports:
+            raise AirportProviderResponseError(
+                f"Ninguno de los {len(payload)} aeropuertos de API Colombia es válido: posible cambio de contrato"
+            )
         return airports
 
     async def get_airport_by_id(self, airport_id: int) -> Airport:
