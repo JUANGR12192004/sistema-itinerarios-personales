@@ -15,7 +15,7 @@ from app.application.ports import AirportProvider
 from app.domain import Airport, AirportNotFoundError, DomainError
 from app.infrastructure.api_colombia.client import ApiColombiaClient
 from app.infrastructure.api_colombia.dto import ApiColombiaAirportDto
-from app.infrastructure.api_colombia.mapper import to_airport
+from app.infrastructure.api_colombia.mapper import has_swapped_coordinates, to_airport
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +41,21 @@ class ApiColombiaAirportAdapter(AirportProvider):
             raise AirportProviderResponseError("API Colombia no respondió una lista de aeropuertos")
 
         airports: list[Airport] = []
+        swapped_count = 0
         for position, item in enumerate(payload):
             try:
-                airports.append(self._to_airport(item))
+                airport, was_swapped = self._to_airport(item)
             except AirportProviderResponseError as error:
                 logger.warning("Se omite el aeropuerto %s de API Colombia: %s", self._describe(item, position), error)
+                continue
+            airports.append(airport)
+            swapped_count += was_swapped
 
         if payload and not airports:
             raise AirportProviderResponseError(
                 f"Ninguno de los {len(payload)} aeropuertos de API Colombia es válido: posible cambio de contrato"
             )
+        self._log_swapped_summary(swapped_count, len(airports))
         return airports
 
     async def get_airport_by_id(self, airport_id: int) -> Airport:
@@ -58,12 +63,15 @@ class ApiColombiaAirportAdapter(AirportProvider):
         payload = await self._client.fetch_airport(airport_id)
         if payload is None:
             raise AirportNotFoundError(airport_id)
-        return self._to_airport(payload)
+        airport, was_swapped = self._to_airport(payload)
+        self._log_swapped_summary(int(was_swapped), 1)
+        return airport
 
     @staticmethod
-    def _to_airport(item: Any) -> Airport:
+    def _to_airport(item: Any) -> tuple[Airport, bool]:
         """Valida el JSON de un aeropuerto contra el DTO y lo traduce al dominio.
 
+        Devuelve el aeropuerto y si sus coordenadas llegaron intercambiadas.
         Tanto un formato inesperado como datos que violan el dominio se reportan
         como AirportProviderResponseError.
         """
@@ -72,9 +80,19 @@ class ApiColombiaAirportAdapter(AirportProvider):
         except ValidationError as error:
             raise AirportProviderResponseError("API Colombia respondió un formato inesperado") from error
         try:
-            return to_airport(dto)
+            return to_airport(dto), has_swapped_coordinates(dto)
         except DomainError as error:
             raise AirportProviderResponseError(f"API Colombia envió datos inválidos: {error}") from error
+
+    @staticmethod
+    def _log_swapped_summary(swapped_count: int, total: int) -> None:
+        """Registra un único WARNING por respuesta con el total de coordenadas corregidas."""
+        if swapped_count:
+            logger.warning(
+                "API Colombia envió coordenadas intercambiadas en %s de %s aeropuertos: se corrigieron",
+                swapped_count,
+                total,
+            )
 
     @staticmethod
     def _describe(item: Any, position: int) -> str:

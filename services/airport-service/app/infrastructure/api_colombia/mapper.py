@@ -30,7 +30,7 @@ def to_airport(dto: ApiColombiaAirportDto) -> Airport:
         type=dto.type,
         city=dto.city.name,
         department=dto.department.name,
-        coordinates=_to_coordinates(dto.id, dto.latitude, dto.longitude),
+        coordinates=_to_coordinates(dto),
     )
 
 
@@ -44,22 +44,41 @@ def _normalize_code(code: str | None) -> str | None:
     return cleaned
 
 
+def has_swapped_coordinates(dto: ApiColombiaAirportDto) -> bool:
+    """Indica si el aeropuerto llegó con las coordenadas intercambiadas.
+
+    Se detecta cuando "latitude" está fuera del rango de latitudes de Colombia
+    y "longitude" sí está dentro. Las coordenadas 0, 0 no cuentan (ubicación desconocida).
+    """
+    if _is_unknown_location(dto.latitude, dto.longitude):
+        return False
+    return not _is_colombian_latitude(dto.latitude) and _is_colombian_latitude(dto.longitude)
+
+
 def _is_colombian_latitude(value: float) -> bool:
     return COLOMBIA_MIN_LATITUDE <= value <= COLOMBIA_MAX_LATITUDE
 
 
-def _to_coordinates(airport_id: int, latitude: float, longitude: float) -> Coordinates | None:
-    """Construye las coordenadas corrigiendo el intercambio solo cuando se detecta."""
-    if latitude == 0 and longitude == 0:
+def _is_unknown_location(latitude: float, longitude: float) -> bool:
+    return latitude == 0 and longitude == 0
+
+
+def _to_coordinates(dto: ApiColombiaAirportDto) -> Coordinates | None:
+    """Construye las coordenadas corrigiendo el intercambio solo cuando se detecta.
+
+    Cada corrección se registra en DEBUG; el Adapter registra un único WARNING
+    con el total de correcciones de cada respuesta.
+    """
+    if _is_unknown_location(dto.latitude, dto.longitude):
         return None
 
-    if not _is_colombian_latitude(latitude) and _is_colombian_latitude(longitude):
-        logger.warning(
+    if has_swapped_coordinates(dto):
+        logger.debug(
             "Coordenadas intercambiadas en el aeropuerto %s (latitude=%s, longitude=%s): se corrigen",
-            airport_id,
-            latitude,
-            longitude,
+            dto.id,
+            dto.latitude,
+            dto.longitude,
         )
-        latitude, longitude = longitude, latitude
+        return Coordinates(latitude=dto.longitude, longitude=dto.latitude)
 
-    return Coordinates(latitude=latitude, longitude=longitude)
+    return Coordinates(latitude=dto.latitude, longitude=dto.longitude)

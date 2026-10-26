@@ -142,12 +142,59 @@ async def test_list_skips_invalid_airports_and_returns_the_valid_ones(
         airports = await adapter.list_airports()
 
     assert [airport.id for airport in airports] == [1, 45]
-    # caplog también captura los warnings del mapper (coordenadas): se cuentan solo los del Adapter
     messages = [record.getMessage() for record in caplog.records if record.name == ADAPTER_LOGGER]
-    assert len(messages) == 3
+    # Un warning por cada aeropuerto omitido + el resumen de coordenadas corregidas
+    assert len(messages) == 4
     assert "con id 7" in messages[0]
     assert "con id 8" in messages[1]
     assert "en la posición 3" in messages[2]
+    assert "2 de 2 aeropuertos" in messages[3]
+
+
+async def test_list_logs_a_single_warning_with_the_swapped_total(
+    adapter: ApiColombiaAirportAdapter, respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx_mock.get(f"{BASE_URL}/Airport").respond(
+        200,
+        json=[
+            airport_payload(),  # intercambiadas
+            military_airport_payload(),  # intercambiadas
+            airport_payload(id=2, latitude=4.45, longitude=-75.76),  # correctas
+            unknown_location_airport_payload(),  # 0, 0: no cuenta
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await adapter.list_airports()
+
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].name == ADAPTER_LOGGER
+    assert "2 de 4 aeropuertos" in warnings[0].getMessage()
+
+
+async def test_list_without_swapped_coordinates_logs_no_warning(
+    adapter: ApiColombiaAirportAdapter, respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx_mock.get(f"{BASE_URL}/Airport").respond(200, json=[airport_payload(latitude=4.45, longitude=-75.76)])
+
+    with caplog.at_level(logging.WARNING):
+        await adapter.list_airports()
+
+    assert caplog.records == []
+
+
+async def test_get_by_id_with_swapped_coordinates_logs_a_single_warning(
+    adapter: ApiColombiaAirportAdapter, respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx_mock.get(f"{BASE_URL}/Airport/1").respond(200, json=airport_payload())
+
+    with caplog.at_level(logging.WARNING):
+        await adapter.get_airport_by_id(1)
+
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "1 de 1 aeropuertos" in warnings[0].getMessage()
 
 
 async def test_list_with_only_invalid_airports_is_response_error(
