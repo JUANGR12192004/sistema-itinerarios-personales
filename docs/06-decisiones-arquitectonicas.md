@@ -220,6 +220,93 @@ Estas herramientas permitirán investigar fallos y analizar trazas, métricas y 
 
 Se deberá configurar la instrumentación de los componentes y la propagación de identificadores de correlación.
 
+## ADR-011 — Idioma del código y de la documentación
+
+**Estado:** Aceptada (Fase 1).
+
+### Contexto
+
+El equipo escribe y sustenta en español, pero las librerías, frameworks y convenciones de programación usan el inglés. Mezclar idiomas dentro del código dificulta su lectura.
+
+### Decisión
+
+- El código (clases, funciones, variables, rutas, códigos de error) se escribe en inglés.
+- La documentación, los comentarios y los mensajes de error para el usuario se escriben en español.
+- Los términos del código siguen el lenguaje ubicuo definido en `03-dominio.md` (por ejemplo `Itinerary`, `traveler_name`, `departure_airport_id`).
+
+### Justificación
+
+El código queda coherente con el ecosistema (FastAPI, Pydantic, SQLAlchemy) y la documentación sigue siendo accesible para el equipo y para la evaluación del curso.
+
+### Consecuencias
+
+Cada término del negocio debe tener una única traducción en el código, registrada en el lenguaje ubicuo, para evitar sinónimos.
+
+## ADR-012 — Contrato HTTP y formato único de errores
+
+**Estado:** Aceptada (Fase 1) para Airport Service. Los endpoints de Itinerary Service se confirmarán en la Fase 3.
+
+### Contexto
+
+Los clientes (Itinerary Service, Gateway, Frontend) necesitan saber qué endpoints existen y cómo interpretar un error sin importar qué servicio lo generó.
+
+### Decisión
+
+Airport Service expone:
+
+| Método y ruta | Éxito | Errores |
+|---|---|---|
+| `GET /airports` | 200 | 502, 503 |
+| `GET /airports/{id}` | 200 | 404, 422, 502, 503 |
+| `GET /airports/map-data` | 200 | 502, 503 |
+| `GET /health` | 200 | — |
+
+Todos los servicios responden los errores con el mismo formato:
+
+```json
+{
+  "error": {
+    "code": "AIRPORT_NOT_FOUND",
+    "message": "El aeropuerto con id 999 no existe",
+    "details": {"field": "arrival_airport_id"}
+  },
+  "correlation_id": "3f2a..."
+}
+```
+
+Códigos HTTP: 404 recurso no encontrado, 422 validación, 502 respuesta inesperada del proveedor externo, 503 dependencia no disponible, 504 timeout (Fase 2). Los valores de `code` van en inglés y en MAYÚSCULAS_CON_GUIONES_BAJOS.
+
+### Justificación
+
+Un único formato permite que los clientes manejen los errores de forma uniforme, y distinguir 404, 502 y 503 permite saber si el problema es del dato solicitado, del proveedor o de la disponibilidad.
+
+### Consecuencias
+
+- Cada servicio necesita un manejador centralizado que traduzca las excepciones del dominio y de la aplicación a este formato.
+- Cambiar un endpoint o un código de error es un cambio de contrato y debe registrarse.
+
+## ADR-013 — Puertos para las dependencias externas de Itinerary Service
+
+**Estado:** Aceptada (Fase 1). Corrige el diagrama de componentes de `05-diagramas.md`.
+
+### Contexto
+
+La primera versión del diagrama de componentes mostraba los casos de uso de Itinerary Service llamando directamente a la capa de aplicación de Airport Service y publicando directamente en RabbitMQ. Eso contradice la arquitectura hexagonal (ADR-002): un servicio no accede a las capas internas de otro, y los casos de uso no dependen de infraestructura concreta.
+
+### Decisión
+
+- La validación de aeropuertos se hace mediante el puerto `AirportCatalog`, implementado por `HttpAirportCatalogAdapter`, que llama al endpoint REST `GET /airports/{id}` de Airport Service.
+- La publicación de eventos se hace mediante el puerto `EventPublisher`. En la Fase 4 lo implementa un publicador de RabbitMQ y en la Fase 5 un adaptador Outbox, sin cambiar el caso de uso.
+
+### Justificación
+
+Los casos de uso quedan independientes del protocolo HTTP y del broker de mensajería, y se pueden probar con implementaciones falsas de los puertos.
+
+### Consecuencias
+
+- Itinerary Service solo conoce el contrato REST publicado por Airport Service (ADR-012).
+- El paso de publicación directa (Fase 4) a Outbox (Fase 5) se limita a cambiar el adaptador inyectado.
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.
