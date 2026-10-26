@@ -1,0 +1,16 @@
+# Dependencias de Airport Service (Fase 1)
+
+# Framework web y servidor ASGI para ejecutarlo
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+
+# Validación de datos y configuración por variables de entorno
+pydantic==2.14.1
+pydantic-settings==2.16.1
+
+# Cliente HTTP para consultar API Colombia
+httpx==0.28.1
+
+# Pruebas (respx simula las respuestas HTTP de API Colombia)
+pytest==9.1.1
+respx==0.23.1
