@@ -150,9 +150,17 @@ async def test_list_skips_invalid_airports_and_returns_the_valid_ones(
     assert "en la posición 3" in messages[2]
 
 
-async def test_list_with_only_invalid_airports_returns_empty_list(
+async def test_list_with_only_invalid_airports_is_response_error(
     adapter: ApiColombiaAirportAdapter, respx_mock: respx.MockRouter
 ) -> None:
-    respx_mock.get(f"{BASE_URL}/Airport").respond(200, json=[airport_payload(name="")])
+    # Si ningún aeropuerto es válido, probablemente cambió el contrato del proveedor
+    respx_mock.get(f"{BASE_URL}/Airport").respond(200, json=[airport_payload(name=""), {"inesperado": True}])
+
+    with pytest.raises(AirportProviderResponseError):
+        await adapter.list_airports()
+
+
+async def test_empty_list_is_returned_as_empty(adapter: ApiColombiaAirportAdapter, respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(f"{BASE_URL}/Airport").respond(200, json=[])
 
     assert await adapter.list_airports() == []
