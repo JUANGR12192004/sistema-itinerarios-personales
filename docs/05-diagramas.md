@@ -57,22 +57,32 @@ flowchart LR
         IC[REST Controller]
         UC[Use Cases]
         DOMAIN[Itinerary Domain]
-        REPO[Repository Port]
+        REPO[ItineraryRepository Port]
         PERSIST[PostgreSQL Adapter]
+        CATALOG[AirportCatalog Port]
+        HTTPADAPTER[HttpAirportCatalogAdapter]
+        PUBPORT[EventPublisher Port]
+        MSGADAPTER[Messaging Adapter]
 
         IC --> UC
         UC --> DOMAIN
         UC --> REPO
+        UC --> CATALOG
+        UC --> PUBPORT
         PERSIST -.->|implements| REPO
+        HTTPADAPTER -.->|implements| CATALOG
+        MSGADAPTER -.->|implements| PUBPORT
     end
 
     DB[(PostgreSQL)] <--> PERSIST
-    UC -->|HTTP| APP
-    UC -->|publicación de evento| MQ[RabbitMQ]
+    HTTPADAPTER -->|"HTTP GET /airports/{id}"| AC
+    MSGADAPTER -->|publicación de evento| MQ[RabbitMQ]
     MQ --> NF[SendNotificationFunction]
 ```
 
 Las flechas punteadas representan una relación de implementación conceptual de los puertos, no una llamada en tiempo de ejecución.
+
+Itinerary Service no accede a las capas internas de Airport Service: el adaptador `HttpAirportCatalogAdapter` llama a su API REST. Los casos de uso tampoco hablan directamente con RabbitMQ: usan el puerto `EventPublisher`, implementado en la Fase 4 por un publicador de RabbitMQ y en la Fase 5 por un adaptador Outbox (ADR-013).
 
 ## 3. Secuencia de creación de un itinerario
 
