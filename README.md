@@ -72,9 +72,16 @@ Se aplicarán arquitectura hexagonal, el patrón Adapter y conceptos de DDD para
 
 ## Estado del proyecto
 
-**Fase actual:** Fase 0 — Planificación y arquitectura.
+| Fase | Nombre | Estado |
+|---|---|---|
+| 0 | Planificación y arquitectura | Completada |
+| 1 | Airport Service | Completada |
+| 2 | Resiliencia y caché | Siguiente |
+| 3 a 12 | Itinerary Service, eventos, Outbox, serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
 
-La implementación de los microservicios comenzará únicamente después de validar la planificación y aprobar esta fase.
+**Fase actual:** Fase 2 — Resiliencia y caché (Redis, timeout, retry, circuit breaker y fallback en Airport Service).
+
+La documentación de Airport Service (instalación, ejecución, pruebas y endpoints) está en [`services/airport-service/README.md`](services/airport-service/README.md).
 
 ## Desarrollo
 
