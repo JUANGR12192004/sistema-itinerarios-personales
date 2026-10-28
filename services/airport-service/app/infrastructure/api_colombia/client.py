@@ -10,7 +10,11 @@ from typing import Any
 
 import httpx
 
-from app.application.exceptions import AirportProviderResponseError, AirportProviderUnavailableError
+from app.application.exceptions import (
+    AirportProviderResponseError,
+    AirportProviderTimeoutError,
+    AirportProviderUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +42,12 @@ class ApiColombiaClient:
         url = f"{self._base_url}{path}"
         try:
             return await self._http_client.get(url)
+        except httpx.TimeoutException as error:
+            # El tiempo máximo lo define el httpx.AsyncClient creado en main.py (API_COLOMBIA_TIMEOUT_SECONDS)
+            logger.warning("API Colombia no respondió a tiempo en %s: %s", url, type(error).__name__)
+            raise AirportProviderTimeoutError("API Colombia no respondió a tiempo") from error
         except httpx.RequestError as error:
-            # Sin conexión, DNS fallido, timeout, etc.
+            # Sin conexión, DNS fallido, conexión cortada, etc.
             logger.warning("No se pudo conectar con API Colombia en %s: %s", url, error)
             raise AirportProviderUnavailableError("API Colombia no está disponible") from error
 

@@ -1,7 +1,7 @@
 """Excepciones de la capa de aplicación.
 
 Describen fallos del proveedor de aeropuertos sin mencionar HTTP ni API Colombia.
-El manejador de errores de la capa api (entrega 1C) las traduce a 502 y 503.
+El manejador de errores de la capa api las traduce a 502, 503 y 504.
 """
 
 
@@ -15,3 +15,12 @@ class AirportProviderUnavailableError(ApplicationError):
 
 class AirportProviderResponseError(ApplicationError):
     """El proveedor de aeropuertos respondió algo inesperado o con un formato inválido."""
+
+
+class AirportProviderTimeoutError(AirportProviderUnavailableError):
+    """El proveedor de aeropuertos no respondió dentro del tiempo máximo (timeout).
+
+    Hereda de AirportProviderUnavailableError porque también es una falta de disponibilidad:
+    se reintenta, cuenta como fallo para el circuit breaker y activa el fallback igual que
+    un 503. Solo cambia la respuesta HTTP final (504).
+    """
