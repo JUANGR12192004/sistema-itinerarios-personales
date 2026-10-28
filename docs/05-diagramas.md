@@ -132,22 +132,22 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[Solicitud de aeropuerto] --> B{¿Existe en caché?}
-    B -->|Sí| C[Devolver resultado]
-    B -->|No| D[Consultar proveedor mediante Adapter]
-    D --> E{¿Respuesta válida?}
-    E -->|Sí| F[Guardar en caché cuando corresponda]
-    F --> C
-    E -->|No| G[Aplicar timeout y política de retry]
-    G --> H{¿Circuit Breaker permite la llamada?}
-    H -->|No| I[Aplicar fallback si es válido]
-    H -->|Sí| J[Ejecutar llamada controlada]
-    J --> K{¿Resultado satisfactorio?}
-    K -->|Sí| F
-    K -->|No| I
+    A[Solicitud de aeropuerto] --> B{"¿Dato fresco en caché (Redis)?"}
+    B -->|Sí| HIT["Devolver resultado (X-Cache: HIT)"]
+    B -->|No| C{"¿Circuit breaker permite la llamada?"}
+    C -->|"No (OPEN)"| F{"¿Hay copia de respaldo?"}
+    C -->|Sí| D["Consultar API Colombia mediante el Adapter, con timeout"]
+    D -->|Respuesta válida| G["Guardar copia fresca (10 min) y de respaldo (24 h)"]
+    G --> MISS["Devolver resultado (X-Cache: MISS)"]
+    D -->|"404 / respuesta inválida"| NR["404 / 502 sin reintentar, sin caché y sin fallback"]
+    D -->|"Sin conexión, 5xx o timeout"| R{"¿Quedan intentos?"}
+    R -->|Sí| W["Esperar con exponential backoff"] --> D
+    R -->|No| CB["Registrar un fallo en el circuit breaker"] --> F
+    F -->|Sí| STALE["Fallback: devolver la copia (X-Cache: STALE)"]
+    F -->|No| ERR["503, o 504 si fue timeout"]
 ```
 
-Este diagrama representa mecanismos previstos para la Fase 2; no significa que ya estén implementados ni establece por sí solo el orden exacto de los componentes de resiliencia.
+Orden aceptado en la Fase 2 (ADR-014): caché → circuit breaker → retry con backoff → llamada con timeout → fallback. El circuit breaker envuelve al retry, así que una consulta cuenta como un solo fallo cuando se agotaron sus reintentos. Un 404 no se reintenta, no se guarda en caché, no abre el circuito ni activa el fallback.
 
 ## 5. Despliegue previsto
 

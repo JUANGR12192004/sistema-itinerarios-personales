@@ -136,7 +136,7 @@ Se requiere un worker o publisher, seguimiento de eventos pendientes y manejo de
 
 ## ADR-007 — Redis para caché
 
-**Estado:** Aceptada para la fase de resiliencia.
+**Estado:** Aceptada. Implementada en la Fase 2.
 
 ### Contexto
 
@@ -153,6 +153,16 @@ Puede reducir llamadas externas y mejorar el tiempo de respuesta.
 ### Consecuencias
 
 Se deberán definir expiración, invalidación y comportamiento ante resultados obsoletos o fallos de caché.
+
+### Definición en la Fase 2
+
+- **Forma:** Decorator `CachedAirportProvider` que implementa el puerto `AirportProvider` y envuelve al proveedor resiliente. El Adapter no se modifica. Depende de una interfaz `CacheStore`, implementada con Redis (`RedisCacheStore`) y con un almacén en memoria en las pruebas.
+- **Expiración:** cada respuesta se guarda dos veces: copia fresca de 10 minutos (`CACHE_TTL_SECONDS`) y copia de respaldo de 24 horas (`CACHE_STALE_TTL_SECONDS`).
+- **Resultados obsoletos:** la copia de respaldo solo se usa como fallback cuando API Colombia no está disponible (sin conexión, 5xx, timeout o circuito abierto). La respuesta lleva `X-Cache: STALE`.
+- **Qué no se guarda:** los 404 y las respuestas inválidas (502).
+- **Invalidación:** solo por TTL; API Colombia cambia muy poco. Las claves llevan una versión (`airport-service:v1:...`) para descartar la caché si cambia el formato guardado.
+- **Fallos de caché:** si Redis no responde, el servicio sigue funcionando sin caché, registra un warning y no vuelve a intentar con Redis durante 30 s. Un dato corrupto en la caché se ignora.
+- **Cliente:** `redis` (redis-py) 8.1.0, con su versión asíncrona `redis.asyncio`.
 
 ## ADR-008 — Tecnología serverless local
 
@@ -306,6 +316,37 @@ Los casos de uso quedan independientes del protocolo HTTP y del broker de mensaj
 
 - Itinerary Service solo conoce el contrato REST publicado por Airport Service (ADR-012).
 - El paso de publicación directa (Fase 4) a Outbox (Fase 5) se limita a cambiar el adaptador inyectado.
+
+## ADR-014 — Resiliencia de Airport Service frente a API Colombia
+
+**Estado:** Aceptada (Fase 2).
+
+### Contexto
+
+API Colombia es una dependencia externa que puede fallar, tardar o dejar de responder. Sin protección, cada fallo se convierte en un error para el usuario y cada demora bloquea la solicitud.
+
+### Decisión
+
+- **Timeout** configurable en el cliente HTTP (`API_COLOMBIA_TIMEOUT_SECONDS`, 3 s). Un timeout se reporta como `AirportProviderTimeoutError` y responde **504** `AIRPORT_PROVIDER_TIMEOUT`.
+- **Retry con exponential backoff** (3 intentos; esperas de 0.5 s y 1 s, con un máximo de 4 s). Solo se reintentan los errores de disponibilidad (sin conexión, 5xx, timeout).
+- **Circuit breaker** con estados CLOSED, OPEN y HALF_OPEN: se abre tras 3 consultas fallidas seguidas, rechaza las llamadas durante 30 s con **503** y luego permite una llamada de prueba.
+- **Fallback:** copia de respaldo de la caché (ADR-007).
+- **Orden:** caché → circuit breaker → retry con backoff → llamada con timeout → fallback. El circuit breaker envuelve al retry.
+- Un 404 no se reintenta, no se guarda en caché, no abre el circuito ni activa el fallback. Un 502 tampoco se reintenta ni activa el fallback, porque el proveedor sí respondió.
+- Los mecanismos se implementan en el propio código (`infrastructure/resilience`), sin librerías adicionales, y se agregan como un Decorator (`ResilientAirportProvider`) del puerto `AirportProvider`.
+
+### Justificación
+
+- El circuit breaker por fuera del retry evita que cada reintento cuente como un fallo distinto, y con el circuito abierto se responde al instante sin esperar timeouts ni reintentos.
+- Reintentar un 404 o un 502 daría el mismo resultado: solo agregaría carga y espera.
+- Implementar los mecanismos en pocas líneas propias los hace fáciles de explicar y de probar con un reloj y una espera simulados.
+- Al usar Decorators, ni los casos de uso ni el Adapter cambian.
+
+### Consecuencias
+
+- En el peor caso (API caída y sin caché), una consulta tarda hasta 3 timeouts más las esperas del backoff antes de responder; el circuit breaker limita ese costo a las primeras consultas.
+- El estado del circuit breaker vive en la memoria de cada proceso: con varias réplicas, cada una tiene el suyo.
+- El backoff no usa *jitter*; si en el futuro muchos clientes reintentan a la vez, conviene agregarlo.
 
 ## 2. Revisión de decisiones
 
