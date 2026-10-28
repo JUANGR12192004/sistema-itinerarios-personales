@@ -453,6 +453,10 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Pruebas asíncronas (1B) | Plugin de pytest de `anyio` (`@pytest.mark.anyio`), ya instalado como dependencia de httpx/FastAPI; no se agrega `pytest-asyncio` |
 | Nombres externos (1B) | El campo `deparmentId` (con error ortográfico) solo existe en el DTO externo; el dominio usa nombres correctos |
 | Validación del id (1C) | `GET /airports/{id}` valida que el id sea un entero mayor que 0 (422) antes de llamar a API Colombia. Un 404 de API Colombia se convierte en `AirportNotFoundError` (404) |
+| Orden del flujo de resiliencia (Fase 2, ADR-014) | Caché → circuit breaker → retry con exponential backoff → llamada con timeout → fallback. El circuit breaker envuelve al retry (una consulta = un fallo para el circuito). Un 404 no se reintenta, no se cachea, no abre el circuito ni activa el fallback. Un 502 tampoco se reintenta ni activa el fallback |
+| Mecanismos de resiliencia (Fase 2, ADR-014) | Implementados a mano en `infrastructure/resilience` (sin `tenacity` ni `pybreaker`), como el Decorator `ResilientAirportProvider`. Valores por defecto: timeout 3 s, 3 intentos, backoff 0.5 s → 1 s (máx. 4 s), circuito abierto tras 3 fallos seguidos durante 30 s. Timeout agotado → 504 `AIRPORT_PROVIDER_TIMEOUT` (`AirportProviderTimeoutError`, subclase de `AirportProviderUnavailableError`); circuito abierto → 503 |
+| Caché y fallback (Fase 2, ADR-007) | Librería `redis==8.1.0` (`redis.asyncio`). Decorator `CachedAirportProvider` sobre la interfaz `CacheStore` (`RedisCacheStore`; almacén en memoria en las pruebas, sin `fakeredis`). Copia fresca 10 min y de respaldo 24 h, que se usa como fallback solo si el proveedor no está disponible. Header `X-Cache`: `HIT`, `MISS` o `STALE`. Si Redis falla, el servicio sigue sin caché y no lo reintenta durante 30 s |
+| Redis local (Fase 2) | Hasta la Fase 10 se ejecuta con `docker run -d --name airport-redis -p 6379:6379 redis:7.4-alpine` |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -463,7 +467,6 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Topología RabbitMQ | Ver sección 11.2 | Fase 4 |
 | Mejora del lenguaje ubicuo en `docs/03-dominio.md` | Separar términos del negocio de términos técnicos; agregar viajero, fecha de viaje, duración | Antes de la Fase 3 |
 | Rama "Airport Service no disponible" en el diagrama de secuencia | Agregar respuesta 503 | Antes de la Fase 3 |
-| Orden del flujo de resiliencia en `docs/05-diagramas.md` | Circuit breaker → llamada con timeout → retry con backoff → fallback. Un 404 no se reintenta ni activa fallback | Fase 2 |
 
 ### 9.3. Pendientes (no implementar sin decisión del usuario)
 
@@ -604,6 +607,17 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 API Colombia: base `https://api-colombia.com/api/v1`, recursos `/Airport` y `/Airport/{id}`.
 En la Fase 1 se usa el timeout por defecto de httpx; el timeout configurable se agrega en la Fase 2.
 
+### 12.2. Plan de la Fase 2 (entregas)
+
+Por decisión del usuario, las tres entregas se hicieron seguidas en la rama `fase-2-resiliencia`,
+con una sola pausa al final de la fase.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **2A** | Timeout configurable, `AirportProviderTimeoutError` (504), `RetryPolicy` con exponential backoff | Pruebas de cliente y retry |
+| **2B** | `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN), `ResilientAirportProvider`, fallback con la copia de respaldo | Pruebas del circuit breaker y del proveedor resiliente |
+| **2C** | Redis: `CacheStore`, `RedisCacheStore`, `CachedAirportProvider`, header `X-Cache`, ensamblaje en `main.py`, escenarios (funciona, tarda, no responde, consultas repetidas) | `pytest -v tests\integration` y demostración del README del servicio |
+
 ---
 
 ## 13. Estándares de código
@@ -659,4 +673,10 @@ pytest -v
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
 - Buenas prácticas del repositorio (rama `chore/github-practices`): plantillas de PR e issue,
   integración continua con GitHub Actions y `CONTRIBUTING.md`.
-- **Siguiente:** Fase 2 (Resiliencia y caché), cuando el usuario escriba `CONTINUAR A LA SIGUIENTE FASE`.
+- **Fase 2:** **completada** en la rama `fase-2-resiliencia` (185 pruebas); falta commit, PR, merge en
+  `main` y etiqueta `fase-2`. Timeout configurable (504), retry con exponential backoff, circuit breaker, caché en Redis
+  como Decorator con fallback de datos de respaldo y header `X-Cache` (ADR-007 y ADR-014). Diagrama de
+  resiliencia de `docs/05-diagramas.md` actualizado. Verificado en vivo sin Redis (funciona sin caché,
+  503 con circuito abierto al instante, 504 con timeout); la caché con Redis real queda por verificar
+  en un equipo con Docker.
+- **Siguiente:** Fase 3 (Itinerary Service), cuando el usuario escriba `CONTINUAR A LA SIGUIENTE FASE`.

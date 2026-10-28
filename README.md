@@ -76,12 +76,27 @@ Se aplicarán arquitectura hexagonal, el patrón Adapter y conceptos de DDD para
 |---|---|---|
 | 0 | Planificación y arquitectura | Completada |
 | 1 | Airport Service | Completada |
-| 2 | Resiliencia y caché | Siguiente |
-| 3 a 12 | Itinerary Service, eventos, Outbox, serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
+| 2 | Resiliencia y caché | Completada |
+| 3 | Itinerary Service | Siguiente |
+| 4 a 12 | Eventos, Outbox, serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
 
-**Fase actual:** Fase 2 — Resiliencia y caché (Redis, timeout, retry, circuit breaker y fallback en Airport Service).
+**Fase actual:** Fase 3 — Itinerary Service (CRUD de itinerarios con PostgreSQL y validación de aeropuertos contra Airport Service).
 
-La documentación de Airport Service (instalación, ejecución, pruebas y endpoints) está en [`services/airport-service/README.md`](services/airport-service/README.md).
+### Fase 2 — Resiliencia y caché (completada)
+
+Airport Service tolera los fallos de API Colombia sin cambiar sus casos de uso ni el Adapter: la caché y la resiliencia se agregan como Decorators del puerto `AirportProvider`.
+
+| Mecanismo | Comportamiento |
+|---|---|
+| Caché en Redis | Respuestas guardadas 10 minutos; header `X-Cache: HIT` o `MISS` |
+| Timeout | 3 s por llamada; si se agota en todos los intentos → 504 `AIRPORT_PROVIDER_TIMEOUT` |
+| Retry con exponential backoff | 3 intentos con esperas de 0.5 s y 1 s; no se reintentan 404 ni 502 |
+| Circuit breaker | Tras 3 consultas fallidas seguidas responde 503 al instante durante 30 s |
+| Fallback | Si API Colombia no está disponible, responde la copia de respaldo (24 h) con `X-Cache: STALE` |
+
+Orden: caché → circuit breaker → retry con backoff → llamada con timeout → fallback. Si Redis no está disponible, el servicio sigue funcionando sin caché. Decisiones en ADR-007 y ADR-014 (`docs/06-decisiones-arquitectonicas.md`).
+
+La documentación de Airport Service (instalación, Redis, ejecución, pruebas, endpoints y demostración de los escenarios de resiliencia) está en [`services/airport-service/README.md`](services/airport-service/README.md).
 
 ## Desarrollo
 
