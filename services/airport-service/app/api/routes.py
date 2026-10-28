@@ -15,7 +15,8 @@ from app.config import get_settings
 
 PROVIDER_ERRORS: dict[int | str, dict[str, Any]] = {
     502: {"model": ErrorResponse, "description": "API Colombia respondió algo inesperado"},
-    503: {"model": ErrorResponse, "description": "API Colombia no está disponible"},
+    503: {"model": ErrorResponse, "description": "API Colombia no está disponible o el circuito está abierto"},
+    504: {"model": ErrorResponse, "description": "API Colombia no respondió a tiempo"},
 }
 
 airports_router = APIRouter(prefix="/airports", tags=["airports"])

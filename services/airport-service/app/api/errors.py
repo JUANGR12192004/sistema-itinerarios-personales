@@ -6,6 +6,7 @@
 | RequestValidationError (FastAPI) | 422  | VALIDATION_ERROR             |
 | AirportProviderResponseError     | 502  | AIRPORT_PROVIDER_BAD_RESPONSE|
 | AirportProviderUnavailableError  | 503  | AIRPORT_PROVIDER_UNAVAILABLE |
+| AirportProviderTimeoutError      | 504  | AIRPORT_PROVIDER_TIMEOUT     |
 | Ruta inexistente u otro error HTTP | 404/405/... | ROUTE_NOT_FOUND, METHOD_NOT_ALLOWED, HTTP_ERROR |
 | Cualquier otra excepción         | 500  | INTERNAL_ERROR               |
 """
@@ -20,7 +21,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.correlation import CORRELATION_ID_HEADER, get_correlation_id
 from app.api.schemas import ErrorBody, ErrorResponse
-from app.application.exceptions import AirportProviderResponseError, AirportProviderUnavailableError
+from app.application.exceptions import (
+    AirportProviderResponseError,
+    AirportProviderTimeoutError,
+    AirportProviderUnavailableError,
+)
 from app.domain import AirportNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -89,6 +94,16 @@ async def _provider_unavailable(request: Request, error: Exception) -> JSONRespo
     )
 
 
+async def _provider_timeout(request: Request, error: Exception) -> JSONResponse:
+    logger.warning("El proveedor de aeropuertos no respondió a tiempo: %s", error)
+    return error_response(
+        request,
+        status.HTTP_504_GATEWAY_TIMEOUT,
+        "AIRPORT_PROVIDER_TIMEOUT",
+        "El proveedor de aeropuertos no respondió a tiempo, intente más tarde",
+    )
+
+
 async def _http_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, StarletteHTTPException)
     code = _HTTP_ERROR_CODES.get(error.status_code, "HTTP_ERROR")
@@ -108,5 +123,8 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(AirportProviderResponseError, _provider_bad_response)
     app.add_exception_handler(AirportProviderUnavailableError, _provider_unavailable)
+    # AirportProviderTimeoutError hereda de AirportProviderUnavailableError, pero FastAPI usa el
+    # manejador de la clase más específica: un timeout responde 504, no 503.
+    app.add_exception_handler(AirportProviderTimeoutError, _provider_timeout)
     app.add_exception_handler(StarletteHTTPException, _http_error)
     app.add_exception_handler(Exception, _unexpected_error)

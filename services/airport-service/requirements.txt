@@ -1,4 +1,4 @@
-# Dependencias de Airport Service (Fase 1)
+# Dependencias de Airport Service (Fases 1 y 2)
 
 # Framework web y servidor ASGI para ejecutarlo
 fastapi==0.162.0
@@ -10,6 +10,9 @@ pydantic-settings==2.16.1
 
 # Cliente HTTP para consultar API Colombia
 httpx==0.28.1
+
+# Cliente de Redis (incluye la versión asíncrona redis.asyncio) para la caché de la Fase 2
+redis==8.1.0
 
 # Pruebas (respx simula las respuestas HTTP de API Colombia)
 pytest==9.1.1

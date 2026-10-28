@@ -7,11 +7,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.cache_header import CACHE_HEADER
 from app.api.correlation import CORRELATION_ID_HEADER
 from app.api.dependencies import get_airport_provider
-from app.application.exceptions import AirportProviderResponseError, AirportProviderUnavailableError
+from app.application.exceptions import (
+    AirportProviderResponseError,
+    AirportProviderTimeoutError,
+    AirportProviderUnavailableError,
+)
+from app.infrastructure.cache.cached_provider import CachedAirportProvider
+from app.infrastructure.resilience.circuit_breaker import CircuitOpenError
 from app.main import create_app
-from tests.fakes import FakeAirportProvider
+from tests.fakes import FakeAirportProvider, InMemoryCacheStore
 
 
 @pytest.fixture
@@ -141,7 +148,7 @@ def test_map_data_is_not_confused_with_an_airport_id(client: TestClient, provide
     assert provider.calls == ["list_airports"]
 
 
-# ---------- Errores del proveedor (502 / 503) ----------
+# ---------- Errores del proveedor (502 / 503 / 504) ----------
 
 
 @pytest.mark.parametrize("path", ["/airports", "/airports/1", "/airports/map-data"])
@@ -150,6 +157,8 @@ def test_map_data_is_not_confused_with_an_airport_id(client: TestClient, provide
     [
         (AirportProviderResponseError("formato inesperado"), 502, "AIRPORT_PROVIDER_BAD_RESPONSE"),
         (AirportProviderUnavailableError("sin conexión"), 503, "AIRPORT_PROVIDER_UNAVAILABLE"),
+        (CircuitOpenError("circuito abierto"), 503, "AIRPORT_PROVIDER_UNAVAILABLE"),
+        (AirportProviderTimeoutError("no respondió a tiempo"), 504, "AIRPORT_PROVIDER_TIMEOUT"),
     ],
 )
 def test_provider_errors_are_translated(
@@ -190,3 +199,41 @@ def test_correlation_id_is_generated_when_missing(client: TestClient) -> None:
 
 def test_successful_responses_also_include_correlation_id(client: TestClient) -> None:
     assert CORRELATION_ID_HEADER in client.get("/airports").headers
+
+
+# ---------- Header X-Cache (Fase 2) ----------
+
+
+@pytest.fixture
+def cached_client(app: FastAPI, provider: FakeAirportProvider) -> TestClient:
+    """Cliente cuyo proveedor es el Decorator de caché real, con un almacén en memoria."""
+    cached = CachedAirportProvider(
+        inner=provider, store=InMemoryCacheStore(), ttl_seconds=600, stale_ttl_seconds=86400
+    )
+    app.dependency_overrides[get_airport_provider] = lambda: cached
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("path", ["/airports", "/airports/1", "/airports/map-data"])
+def test_cache_header_shows_miss_then_hit(
+    cached_client: TestClient, provider: FakeAirportProvider, path: str
+) -> None:
+    first = cached_client.get(path)
+    second = cached_client.get(path)
+
+    assert first.headers[CACHE_HEADER] == "MISS"
+    assert second.headers[CACHE_HEADER] == "HIT"
+    assert second.json() == first.json()
+    assert len(provider.calls) == 1
+
+
+def test_list_and_map_data_share_the_cache(cached_client: TestClient, provider: FakeAirportProvider) -> None:
+    cached_client.get("/airports")
+
+    assert cached_client.get("/airports/map-data").headers[CACHE_HEADER] == "HIT"
+    assert provider.calls == ["list_airports"]
+
+
+def test_requests_without_airport_queries_have_no_cache_header(cached_client: TestClient) -> None:
+    assert CACHE_HEADER not in cached_client.get("/health").headers
+    assert CACHE_HEADER not in cached_client.get("/airports/0").headers  # 422: no se consultó el proveedor

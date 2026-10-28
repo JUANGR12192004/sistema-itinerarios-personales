@@ -6,7 +6,11 @@ import httpx
 import pytest
 import respx
 
-from app.application.exceptions import AirportProviderResponseError, AirportProviderUnavailableError
+from app.application.exceptions import (
+    AirportProviderResponseError,
+    AirportProviderTimeoutError,
+    AirportProviderUnavailableError,
+)
 from app.infrastructure.api_colombia.client import ApiColombiaClient
 from tests.infrastructure.api_colombia.samples import BASE_URL, airport_payload
 
@@ -65,6 +69,27 @@ async def test_connection_problem_means_unavailable(
 
     with pytest.raises(AirportProviderUnavailableError):
         await client.fetch_airport(1)
+
+
+@pytest.mark.parametrize(
+    "error", [httpx.ConnectTimeout("no conectó a tiempo"), httpx.ReadTimeout("tardó demasiado"), httpx.PoolTimeout("pool")]
+)
+async def test_timeout_is_reported_as_timeout(
+    client: ApiColombiaClient, respx_mock: respx.MockRouter, error: httpx.TimeoutException
+) -> None:
+    # Fase 2: el timeout se distingue para responder 504 en lugar de 503
+    respx_mock.get(f"{BASE_URL}/Airport").mock(side_effect=error)
+
+    with pytest.raises(AirportProviderTimeoutError):
+        await client.fetch_airports()
+
+
+async def test_connection_error_is_not_a_timeout(client: ApiColombiaClient, respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(f"{BASE_URL}/Airport").mock(side_effect=httpx.ConnectError("conexión rechazada"))
+
+    with pytest.raises(AirportProviderUnavailableError) as raised:
+        await client.fetch_airports()
+    assert not isinstance(raised.value, AirportProviderTimeoutError)
 
 
 async def test_unexpected_status_is_response_error(client: ApiColombiaClient, respx_mock: respx.MockRouter) -> None:
