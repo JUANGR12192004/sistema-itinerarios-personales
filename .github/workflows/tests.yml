@@ -50,12 +50,29 @@ jobs:
       - name: Ejecutar pruebas
         run: pytest -v
 
-  # Fase 3: copiar el job anterior para Itinerary Service, por ejemplo:
-  # itinerary-service:
-  #   name: Itinerary Service
-  #   ...
-  #   defaults:
-  #     run:
-  #       working-directory: services/itinerary-service
-  #   ...
-  #       cache-dependency-path: services/itinerary-service/requirements.txt
+  itinerary-service:
+    name: Itinerary Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/itinerary-service
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/itinerary-service/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ejecutar pruebas
+        run: pytest -v
