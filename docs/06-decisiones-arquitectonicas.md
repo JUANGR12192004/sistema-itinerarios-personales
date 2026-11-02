@@ -348,6 +348,115 @@ API Colombia es una dependencia externa que puede fallar, tardar o dejar de resp
 - El estado del circuit breaker vive en la memoria de cada proceso: con varias réplicas, cada una tiene el suyo.
 - El backoff no usa *jitter*; si en el futuro muchos clientes reintentan a la vez, conviene agregarlo.
 
+## ADR-015 — Reglas de negocio de Itinerary Service
+
+**Estado:** Aceptada (Fase 3).
+
+### Contexto
+
+Las reglas del dominio dejaban pendientes cuatro restricciones sobre los datos de un itinerario.
+
+### Decisión
+
+Se confirman las siguientes reglas para la creación de un itinerario:
+
+- El nombre del viajero no puede estar vacío ni contener solo espacios.
+- El aeropuerto de salida y el de llegada deben ser diferentes.
+- La duración debe ser mayor que cero minutos.
+- La fecha de viaje no puede estar en el pasado al momento de crear el itinerario. La regla no aplica al actualizar.
+
+### Justificación
+
+Son invariantes de negocio simples que el dominio puede verificar sin depender de la infraestructura. Implementarlas en la capa de dominio evita que lleguen datos incoherentes a la base de datos.
+
+### Consecuencias
+
+Las excepciones del dominio (`InvalidItineraryError`) se traducen a HTTP 422 en el manejador centralizado de errores.
+
+## ADR-016 — Un contenedor PostgreSQL por servicio
+
+**Estado:** Aceptada (Fase 3).
+
+### Contexto
+
+La decisión de la base de datos dejaba abierta la opción de un servidor con bases lógicas separadas o un contenedor por servicio.
+
+### Decisión
+
+Un contenedor por servicio. El contenedor de Itinerary Service (`itinerary-postgres`, postgres:16-alpine) corre en el puerto 5433, con usuario y contraseña `itinerary` y base `itinerary_db`.
+
+### Justificación
+
+Mantener contenedores independientes refuerza la propiedad exclusiva de los datos por servicio y simplifica la configuración local. Cada servicio posee su esquema y sus migraciones sin riesgo de interferir con otros.
+
+### Consecuencias
+
+Hasta la Fase 10 cada servicio levanta su propio contenedor manualmente. El `docker-compose.yml` de la Fase 10 los declarará todos juntos.
+
+## ADR-017 — travel_date con zona horaria
+
+**Estado:** Aceptada (Fase 3).
+
+### Contexto
+
+El tipo de `travel_date` estaba pendiente: solo fecha, o fecha y hora con zona horaria.
+
+### Decisión
+
+`travel_date` es un `datetime` de Python con `tzinfo` (zona horaria explícita). La API recibe y devuelve el valor en formato ISO 8601 con offset (por ejemplo `2026-12-15T08:00:00-05:00`). El ORM almacena el valor como `TIMESTAMP WITH TIME ZONE` en PostgreSQL.
+
+### Justificación
+
+Es coherente con el contrato del evento `ItineraryCreatedEvent` (sección 11), que ya incluye zona horaria. Permite distinguir itinerarios en diferentes zonas y evita ambigüedades de conversión.
+
+### Consecuencias
+
+Las pruebas deben construir fechas con zona horaria explícita. Los esquemas Pydantic utilizan `datetime` con `AwareDatetime` para rechazar fechas sin zona en la validación de entrada.
+
+## ADR-018 — traveler_email como campo opcional
+
+**Estado:** Aceptada (Fase 3).
+
+### Contexto
+
+El campo `traveler_email` estaba pendiente de decisión.
+
+### Decisión
+
+`traveler_email` es un campo opcional (puede ser `None`) en la entidad `Itinerary`.
+
+### Justificación
+
+La notificación simulada de la Fase 6 lo necesita como destinatario, pero no todos los flujos lo requieren. Hacerlo opcional permite crear itinerarios sin correo sin romper el contrato.
+
+### Consecuencias
+
+El campo se incluye en el modelo ORM, las migraciones, los esquemas Pydantic y el contrato del evento. No se valida el formato del correo en el dominio; la validación de formato queda en el esquema Pydantic de entrada.
+
+## ADR-019 — Endpoints de Itinerary Service y tratamiento de errores de Airport Service
+
+**Estado:** Aceptada (Fase 3). Extiende ADR-012.
+
+### Contexto
+
+Los endpoints de Itinerary Service seguían como propuesta. Faltaba definir cómo propagar los errores de Airport Service.
+
+### Decisión
+
+Se confirman los endpoints de la sección 10.1. Adicionalmente, el manejador de errores de Itinerary Service distingue:
+
+- `AirportNotFoundError` (404 de Airport Service) → HTTP 422 con código `AIRPORT_NOT_FOUND`.
+- `AirportServiceUnavailableError` (503 de Airport Service o error de conexión) → HTTP 503 con código `AIRPORT_SERVICE_UNAVAILABLE`.
+- `AirportServiceTimeoutError` (timeout de Airport Service, subclase de `AirportServiceUnavailableError`) → HTTP 504 con código `AIRPORT_SERVICE_TIMEOUT`.
+
+### Justificación
+
+Coherente con el tratamiento que Airport Service ya aplica a los timeouts de API Colombia (ADR-014): un timeout de una dependencia se propaga como 504, no como 503. Distinguir 404 de 503/504 permite que el cliente sepa si el problema es del dato solicitado o de la disponibilidad del servicio.
+
+### Consecuencias
+
+El adaptador `HttpAirportCatalogAdapter` debe inspeccionar el código de estado HTTP de la respuesta de Airport Service y lanzar la excepción de aplicación correspondiente.
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.
