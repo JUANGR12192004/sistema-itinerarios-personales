@@ -1,0 +1,21 @@
+# Dependencias de Itinerary Service (Fase 3)
+
+# Framework web y servidor ASGI
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+
+# Validación de datos y configuración por variables de entorno
+pydantic==2.14.1
+pydantic-settings==2.16.1
+
+# Cliente HTTP para comunicarse con Airport Service
+httpx==0.28.1
+
+# ORM, migraciones y driver de PostgreSQL (psycopg 3, modo síncrono)
+sqlalchemy==2.0.41
+alembic==1.16.1
+psycopg[binary]==3.2.9
+
+# Pruebas (respx simula las respuestas HTTP de Airport Service)
+pytest==9.1.1
+respx==0.23.1
