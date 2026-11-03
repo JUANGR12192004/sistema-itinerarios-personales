@@ -372,9 +372,10 @@ El **código se escribe en inglés** y la **documentación en español**.
 | Coordenadas | `Coordinates` | Latitud y longitud ya validadas y corregidas |
 | Itinerario | `Itinerary` | Plan de viaje entre dos aeropuertos |
 | Viajero | `traveler_name` | Persona que viaja (el requisito dice "nombre del usuario") |
+| Correo del viajero | `traveler_email` | Correo electrónico opcional; lo usa la notificación simulada de la Fase 6 |
 | Aeropuerto de salida | `departure_airport_id` | Referencia por ID al catálogo |
 | Aeropuerto de llegada | `arrival_airport_id` | Referencia por ID al catálogo |
-| Fecha de viaje | `travel_date` | Fecha (y hora, ver pendiente) de salida |
+| Fecha de viaje | `travel_date` | Fecha y hora de salida con zona horaria (ADR-017) |
 | Duración | `duration_minutes` | Duración estimada en minutos |
 | Itinerario creado | `ItineraryCreatedEvent` | Hecho: se registró un nuevo itinerario |
 | Mensaje pendiente | `OutboxMessage` | Evento guardado pendiente de publicar |
@@ -401,8 +402,8 @@ Hallazgos de la verificación real de API Colombia (entrega 1A, 2026-10-26):
 
 **Coordinates** (objeto de valor): latitud entre −90 y 90, longitud entre −180 y 180.
 
-**Itinerary** (raíz de agregado): `id` (UUID), `traveler_name`, `departure_airport_id`,
-`arrival_airport_id`, `travel_date`, `duration_minutes`, `created_at`, `updated_at`.
+**Itinerary** (raíz de agregado): `id` (UUID), `traveler_name`, `traveler_email` (opcional), `departure_airport_id`,
+`arrival_airport_id`, `travel_date` (con zona horaria), `duration_minutes`, `created_at`, `updated_at`.
 
 **NotificationRecord**: `id`, `event_id` (único, para idempotencia), `itinerary_id`, `recipient`,
 `channel` (`simulated-email`), `message`, `status` (`SENT` / `FAILED`), `processed_at`.
@@ -417,12 +418,12 @@ Confirmadas por los requisitos:
 - La creación de un itinerario origina el evento correspondiente.
 - "Aeropuerto no existe" (404) y "Airport Service no disponible" (503) se tratan de forma distinta.
 
-Propuestas, **pendientes de confirmación** antes de la Fase 3:
+Confirmadas en la Fase 3 (ADR-015):
 
+- El nombre del viajero no puede estar vacío.
 - Salida distinta de llegada.
 - Duración mayor que 0.
-- La fecha de viaje no puede estar en el pasado al crear.
-- El nombre del viajero no puede estar vacío.
+- La fecha de viaje no puede estar en el pasado al crear; debe incluir zona horaria (ADR-017).
 
 ---
 
@@ -457,24 +458,23 @@ Propuestas, **pendientes de confirmación** antes de la Fase 3:
 | Mecanismos de resiliencia (Fase 2, ADR-014) | Implementados a mano en `infrastructure/resilience` (sin `tenacity` ni `pybreaker`), como el Decorator `ResilientAirportProvider`. Valores por defecto: timeout 3 s, 3 intentos, backoff 0.5 s → 1 s (máx. 4 s), circuito abierto tras 3 fallos seguidos durante 30 s. Timeout agotado → 504 `AIRPORT_PROVIDER_TIMEOUT` (`AirportProviderTimeoutError`, subclase de `AirportProviderUnavailableError`); circuito abierto → 503 |
 | Caché y fallback (Fase 2, ADR-007) | Librería `redis==8.1.0` (`redis.asyncio`). Decorator `CachedAirportProvider` sobre la interfaz `CacheStore` (`RedisCacheStore`; almacén en memoria en las pruebas, sin `fakeredis`). Copia fresca 10 min y de respaldo 24 h, que se usa como fallback solo si el proveedor no está disponible. Header `X-Cache`: `HIT`, `MISS` o `STALE`. Si Redis falla, el servicio sigue sin caché y no lo reintenta durante 30 s |
 | Redis local (Fase 2) | Hasta la Fase 10 se ejecuta con `docker run -d --name airport-redis -p 6379:6379 redis:7.4-alpine` |
+| Reglas de negocio de Itinerary Service (Fase 3, ADR-015) | Nombre no vacío, salida distinta de llegada, duración mayor que 0, fecha de viaje no puede estar en el pasado al crear |
+| PostgreSQL por contenedor (Fase 3, ADR-016) | Un contenedor por servicio; `itinerary-postgres` (postgres:16-alpine) en el puerto 5433, usuario/clave `itinerary`, base `itinerary_db` |
+| `travel_date` con zona horaria (Fase 3, ADR-017) | Fecha y hora con zona horaria (`datetime` con `tzinfo`), coherente con el contrato del evento |
+| `traveler_email` opcional (Fase 3, ADR-018) | Campo opcional en `Itinerary`; lo usa la notificación simulada de la Fase 6 |
+| Endpoints de Itinerary Service (Fase 3, ADR-019) | Los de la sección 10.1; un timeout de Airport Service → 504 en Itinerary Service (extiende ADR-012) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
 | Decisión | Propuesta | Se necesita en |
 |---|---|---|
-| Endpoints de Itinerary Service | Ver sección 10.1 | Fase 3 |
 | Contrato del evento | Ver sección 11 | Fase 4 |
 | Topología RabbitMQ | Ver sección 11.2 | Fase 4 |
-| Mejora del lenguaje ubicuo en `docs/03-dominio.md` | Separar términos del negocio de términos técnicos; agregar viajero, fecha de viaje, duración | Antes de la Fase 3 |
-| Rama "Airport Service no disponible" en el diagrama de secuencia | Agregar respuesta 503 | Antes de la Fase 3 |
 
 ### 9.3. Pendientes (no implementar sin decisión del usuario)
 
 | Decisión | Opciones | Se necesita en |
 |---|---|---|
-| Base de datos: un servidor PostgreSQL con bases lógicas separadas, o un contenedor por servicio | Ambas cumplen "una base por servicio". `docs/` habla de "base de datos lógica" | Fase 3 |
-| Tipo de `travel_date` | Solo fecha, o fecha y hora de salida (propuesta: fecha y hora con zona horaria) | Fase 3 |
-| Campo opcional `traveler_email` | Para que la notificación simulada tenga destinatario | Fase 3 |
 | Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
 | Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
@@ -489,8 +489,7 @@ Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-
 
 ### 10.1. Endpoints previstos
 
-Los endpoints de Airport Service están **aceptados**; los de Itinerary Service siguen como
-propuesta hasta la Fase 3.
+Los endpoints de Airport Service y de Itinerary Service están **aceptados** (ADR-012, ADR-019).
 
 | Servicio | Método y ruta | Éxito | Errores |
 |---|---|---|---|
@@ -618,6 +617,15 @@ con una sola pausa al final de la fase.
 | **2B** | `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN), `ResilientAirportProvider`, fallback con la copia de respaldo | Pruebas del circuit breaker y del proveedor resiliente |
 | **2C** | Redis: `CacheStore`, `RedisCacheStore`, `CachedAirportProvider`, header `X-Cache`, ensamblaje en `main.py`, escenarios (funciona, tarda, no responde, consultas repetidas) | `pytest -v tests\integration` y demostración del README del servicio |
 
+### 12.3. Plan de la Fase 3 (entregas)
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **3A** | Carpeta `services/itinerary-service`, `requirements.txt`, `.env.example`, `config.py`, capa de dominio (`Itinerary`, reglas de negocio, excepciones) con pruebas | Pruebas del dominio pasan (`pytest -v tests/domain`) |
+| **3B** | Puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher` solo definido), `SqlAlchemyItineraryRepository`, modelo ORM, Alembic con la primera migración aplicada a PostgreSQL | Migración aplicada; `alembic current` muestra la revisión activa |
+| **3C** | `HttpAirportCatalogAdapter` (llama a `GET /airports/{id}` de Airport Service con timeout; 404 → 422, 503/504 → propaga el código) con pruebas respx | Pruebas del adaptador pasan sin internet |
+| **3D** | Casos de uso CRUD, rutas, esquemas Pydantic, manejador único de errores, correlation ID, `main.py` en el puerto 8002, Swagger, pruebas de API, job de CI en `tests.yml`, README, demostración real Itinerary → Airport → API Colombia | El servicio responde en `http://localhost:8002/docs` |
+
 ---
 
 ## 13. Estándares de código
@@ -673,10 +681,9 @@ pytest -v
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
 - Buenas prácticas del repositorio (rama `chore/github-practices`): plantillas de PR e issue,
   integración continua con GitHub Actions y `CONTRIBUTING.md`.
-- **Fase 2:** **completada** en la rama `fase-2-resiliencia` (185 pruebas); falta commit, PR, merge en
-  `main` y etiqueta `fase-2`. Timeout configurable (504), retry con exponential backoff, circuit breaker, caché en Redis
-  como Decorator con fallback de datos de respaldo y header `X-Cache` (ADR-007 y ADR-014). Diagrama de
-  resiliencia de `docs/05-diagramas.md` actualizado. Verificado en vivo sin Redis (funciona sin caché,
-  503 con circuito abierto al instante, 504 con timeout); la caché con Redis real queda por verificar
-  en un equipo con Docker.
-- **Siguiente:** Fase 3 (Itinerary Service), cuando el usuario escriba `CONTINUAR A LA SIGUIENTE FASE`.
+- **Fase 2:** completada y **fusionada en `main`** (PR #4, merge `d02b2ff`). **La etiqueta `fase-2` aún no existe (pendiente).** Timeout configurable (504), retry con exponential backoff, circuit breaker, caché en Redis como Decorator con fallback de datos de respaldo y header `X-Cache` (ADR-007 y ADR-014).
+- **Fase 3:** completada en la rama `fase-3-itinerary-service` (pendiente de PR y merge).
+  - Entrega **3A** completada: carpeta `services/itinerary-service`, `requirements.txt`, `.env.example`, `pytest.ini`, `config.py`, capa de dominio (`Itinerary`, `InvalidItineraryError`, `DomainError`) con 16 pruebas.
+  - Entrega **3B** completada: puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher`), `SqlAlchemyItineraryRepository`, modelo ORM `ItineraryORM`, `database.py`, Alembic (migración `a3f1e2b4c5d0` aplicada), `FakeItineraryRepository` con 13 pruebas, pruebas de integración contra PostgreSQL real en `tests/integration/` (8 pruebas, SKIPPED en CI).
+  - Entrega **3C** completada: `HttpAirportCatalogAdapter` (404→`AirportNotFoundInCatalogError`, 504/timeout→`AirportServiceTimeoutError`, 503/502/red→`AirportServiceUnavailableError`) con 7 pruebas respx.
+  - Entrega **3D** completada: casos de uso CRUD (`CreateItineraryUseCase`, `GetItineraryUseCase`, `ListItinerariesUseCase`, `UpdateItineraryUseCase`, `DeleteItineraryUseCase`), `NoopEventPublisher`, esquemas Pydantic, manejador único de errores (7 tipos), `dependencies.py` (Unit of Work con SQLAlchemy), rutas FastAPI en `/itineraries`, `main.py` en el puerto 8002, `README.md`, job de CI en `tests.yml`. 16 pruebas de API con fakes. Total del servicio: **52 pruebas pasan, 8 omitidas** (integración sin PostgreSQL en CI).

@@ -15,22 +15,34 @@ El sistema necesita identificar aeropuertos válidos, asociarlos a un itinerario
 
 ## 3. Lenguaje ubicuo
 
-Se utilizarán los siguientes términos de manera consistente:
+Se utilizarán los siguientes términos de manera consistente. El código se escribe en inglés; la documentación, en español.
+
+### 3.1. Términos del negocio
+
+| Término del negocio | Código | Significado |
+|---|---|---|
+| Aeropuerto | `Airport` | Instalación de transporte aéreo identificada por un identificador y sus atributos disponibles. |
+| Itinerario | `Itinerary` | Registro que representa un viaje planificado entre dos aeropuertos. |
+| Viajero | `traveler_name` | Nombre de la persona que realiza el viaje; no puede estar vacío. |
+| Correo del viajero | `traveler_email` | Correo electrónico opcional del viajero; lo usa la notificación simulada de la Fase 6. |
+| Aeropuerto de salida | `departure_airport_id` | Referencia por ID al aeropuerto desde el que comienza el viaje. |
+| Aeropuerto de llegada | `arrival_airport_id` | Referencia por ID al aeropuerto al que se dirige el viaje; distinto del de salida. |
+| Fecha de viaje | `travel_date` | Fecha y hora de salida con zona horaria; no puede estar en el pasado al crear. |
+| Duración | `duration_minutes` | Duración estimada del vuelo en minutos; mayor que cero. |
+| Itinerario creado | `ItineraryCreatedEvent` | Hecho de negocio: se registró un nuevo itinerario. |
+| Notificación | `NotificationRecord` | Registro de un aviso simulado asociado a un evento de creación. |
+| Mensaje pendiente | `OutboxMessage` | Evento de integración guardado y pendiente de publicar. |
+
+### 3.2. Términos técnicos y arquitectónicos
 
 | Término | Definición |
 |---|---|
-| Aeropuerto | Instalación de transporte aéreo identificada por un identificador y sus atributos disponibles. |
 | Airport Service | Servicio responsable de consultar y normalizar información de aeropuertos. |
-| Itinerario | Registro que representa un viaje planificado. |
-| Aeropuerto de salida | Aeropuerto desde el cual comienza el viaje. |
-| Aeropuerto de llegada | Aeropuerto al cual se dirige el viaje. |
-| Itinerary Service | Servicio responsable de gestionar itinerarios. |
-| Evento de integración | Mensaje que comunica un hecho relevante a otros componentes. |
-| ItineraryCreatedEvent | Evento que informa que se ha creado un itinerario. |
-| Notificación | Resultado de una acción de comunicación simulada asociada a un evento. |
-| Adapter | Componente que traduce una interfaz interna a una dependencia externa. |
-| Puerto | Contrato que define cómo interactúa una capa con una dependencia. |
-| Outbox | Registro persistente de eventos pendientes de publicar. |
+| Itinerary Service | Servicio responsable de gestionar el ciclo de vida de los itinerarios. |
+| Adapter | Componente que traduce una interfaz interna a la de una dependencia externa. |
+| Puerto | Contrato (interfaz) que define cómo interactúa una capa con una dependencia. |
+| Evento de integración | Mensaje que comunica un hecho relevante a otros contextos o servicios. |
+| Outbox | Tabla de mensajes pendientes que garantiza la publicación del evento junto con la transacción de base de datos. |
 
 ## 4. Contextos delimitados
 
@@ -78,18 +90,21 @@ No es propietario de los itinerarios ni debe modificar directamente su base de d
 
 ### 5.1. Itinerary
 
-Representa un itinerario de viaje.
+Raíz de agregado del contexto de planificación de itinerarios.
 
-Atributos mínimos establecidos por los requisitos:
+Atributos confirmados (Fase 3, ADR-015 al ADR-018):
 
-- Identificador del itinerario.
-- Nombre del usuario.
-- Identificador del aeropuerto de salida.
-- Identificador del aeropuerto de llegada.
-- Fecha del viaje.
-- Duración en minutos.
-
-El tipo exacto del identificador, las restricciones de fechas y las reglas de validación se concretarán antes de implementar el dominio.
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | UUID | Identificador único generado en la creación. |
+| `traveler_name` | str | Nombre del viajero; no puede estar vacío ni solo espacios. |
+| `traveler_email` | str \| None | Correo electrónico opcional del viajero. |
+| `departure_airport_id` | int | ID del aeropuerto de salida; debe existir en el catálogo. |
+| `arrival_airport_id` | int | ID del aeropuerto de llegada; debe existir en el catálogo; distinto del de salida. |
+| `travel_date` | datetime (con tz) | Fecha y hora de salida con zona horaria; no puede estar en el pasado al crear. |
+| `duration_minutes` | int | Duración estimada en minutos; mayor que cero. |
+| `created_at` | datetime | Marca de tiempo de creación en UTC. |
+| `updated_at` | datetime | Marca de tiempo de la última modificación en UTC. |
 
 ### 5.2. Airport
 
@@ -111,16 +126,19 @@ Concepto que representa el historial de una notificación procesada.
 
 Sus campos definitivos se establecerán al diseñar el procesamiento, la persistencia y el manejo de errores.
 
-## 6. Reglas iniciales del dominio
+## 6. Reglas del dominio
 
-- Un itinerario debe incluir los datos obligatorios definidos en los requisitos.
-- Los aeropuertos de salida y llegada deben existir según Airport Service antes de guardar el itinerario.
-- La duración debe expresarse en minutos.
-- La creación de un itinerario debe originar el evento correspondiente.
-- Los fallos al consultar aeropuertos deben tratarse explícitamente.
-- El historial de notificaciones debe mantenerse separado de los datos de itinerarios.
+Todas las reglas siguientes están confirmadas (ADR-015):
 
-Las reglas adicionales, como la prohibición de que salida y llegada sean el mismo aeropuerto o las restricciones sobre fechas pasadas, quedan pendientes de decisión.
+- El nombre del viajero no puede estar vacío ni contener solo espacios.
+- El aeropuerto de salida y el de llegada deben ser diferentes.
+- La duración debe ser mayor que cero minutos.
+- La fecha de viaje debe incluir zona horaria.
+- La fecha de viaje no puede estar en el pasado al momento de crear el itinerario (la regla no aplica al actualizar).
+- Los aeropuertos de salida y llegada deben existir en el catálogo según Airport Service antes de guardar el itinerario.
+- "Aeropuerto no existe" (404 de Airport Service) y "Airport Service no disponible" (503 o 504) se tratan de forma distinta en la capa de aplicación.
+- La creación de un itinerario origina el evento `ItineraryCreatedEvent`.
+- El historial de notificaciones se mantiene separado de los datos de itinerarios.
 
 ## 7. Relación entre DDD y arquitectura hexagonal
 

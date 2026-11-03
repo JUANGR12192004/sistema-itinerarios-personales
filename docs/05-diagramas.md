@@ -102,16 +102,13 @@ sequenceDiagram
     GW->>IS: Reenviar solicitud
 
     IS->>AS: Validar aeropuerto de salida
-    AS-->>IS: Resultado de validación
-
     IS->>AS: Validar aeropuerto de llegada
-    AS-->>IS: Resultado de validación
 
-    alt Aeropuertos válidos
+    alt Aeropuertos válidos (200)
         IS->>DB: Guardar itinerario
         Note over IS,DB: En la fase Outbox se guardarán<br/>itinerario y evento en una transacción
         DB-->>IS: Confirmación
-        IS-->>GW: Itinerario creado
+        IS-->>GW: 201 Itinerario creado
         GW-->>FE: Respuesta HTTP
         FE-->>Usuario: Mostrar resultado
 
@@ -119,9 +116,17 @@ sequenceDiagram
         MQ-->>NF: Entregar evento
         NF->>NF: Simular notificación
         NF->>NF: Registrar historial
-    else Aeropuerto inválido
-        IS-->>GW: Error de validación
-        GW-->>FE: Respuesta HTTP de error
+    else Aeropuerto no encontrado (404 de Airport Service)
+        IS-->>GW: 422 AIRPORT_NOT_FOUND
+        GW-->>FE: Respuesta de error
+        FE-->>Usuario: Mostrar error
+    else Airport Service no disponible (503)
+        IS-->>GW: 503 AIRPORT_SERVICE_UNAVAILABLE
+        GW-->>FE: Respuesta de error
+        FE-->>Usuario: Mostrar error
+    else Airport Service timeout (504)
+        IS-->>GW: 504 AIRPORT_SERVICE_TIMEOUT
+        GW-->>FE: Respuesta de error
         FE-->>Usuario: Mostrar error
     end
 ```
