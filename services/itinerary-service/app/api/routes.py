@@ -44,7 +44,7 @@ def create_itinerary(
     return ItineraryResponse.model_validate(result)
 
 
-@router.get("", response_model=list[ItineraryResponse])
+@router.get("")
 def list_itineraries(
     repo: ItineraryRepository = Depends(get_itinerary_repository),
 ) -> list[ItineraryResponse]:
@@ -54,7 +54,7 @@ def list_itineraries(
     ]
 
 
-@router.get("/{itinerary_id}", response_model=ItineraryResponse)
+@router.get("/{itinerary_id}")
 def get_itinerary(
     itinerary_id: UUID,
     repo: ItineraryRepository = Depends(get_itinerary_repository),

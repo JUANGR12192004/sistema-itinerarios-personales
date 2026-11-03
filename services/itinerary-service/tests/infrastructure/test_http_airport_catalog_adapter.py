@@ -34,8 +34,9 @@ def test_aeropuerto_existe_no_lanza():
 def test_aeropuerto_no_encontrado_lanza_error_con_id():
     """404 de Airport Service → AirportNotFoundInCatalogError con el id del aeropuerto."""
     respx.get(f"{BASE_URL}/airports/999").mock(return_value=httpx.Response(404))
+    adapter = _adapter()
     with pytest.raises(AirportNotFoundInCatalogError) as exc_info:
-        _adapter().verify_exists(999)
+        adapter.verify_exists(999)
     assert exc_info.value.airport_id == 999
 
 
@@ -43,8 +44,9 @@ def test_aeropuerto_no_encontrado_lanza_error_con_id():
 def test_servicio_no_disponible_503():
     """503 de Airport Service → AirportServiceUnavailableError (no es timeout)."""
     respx.get(f"{BASE_URL}/airports/1").mock(return_value=httpx.Response(503))
+    adapter = _adapter()
     with pytest.raises(AirportServiceUnavailableError) as exc_info:
-        _adapter().verify_exists(1)
+        adapter.verify_exists(1)
     assert not isinstance(exc_info.value, AirportServiceTimeoutError)
 
 
@@ -52,8 +54,9 @@ def test_servicio_no_disponible_503():
 def test_timeout_reportado_por_airport_service_504():
     """504 de Airport Service → AirportServiceTimeoutError."""
     respx.get(f"{BASE_URL}/airports/1").mock(return_value=httpx.Response(504))
+    adapter = _adapter()
     with pytest.raises(AirportServiceTimeoutError):
-        _adapter().verify_exists(1)
+        adapter.verify_exists(1)
 
 
 @respx.mock
@@ -62,8 +65,9 @@ def test_timeout_de_red():
     respx.get(f"{BASE_URL}/airports/1").mock(
         side_effect=httpx.TimeoutException("network timeout")
     )
+    adapter = _adapter()
     with pytest.raises(AirportServiceTimeoutError):
-        _adapter().verify_exists(1)
+        adapter.verify_exists(1)
 
 
 @respx.mock
@@ -72,8 +76,9 @@ def test_error_de_conexion():
     respx.get(f"{BASE_URL}/airports/1").mock(
         side_effect=httpx.ConnectError("connection refused")
     )
+    adapter = _adapter()
     with pytest.raises(AirportServiceUnavailableError) as exc_info:
-        _adapter().verify_exists(1)
+        adapter.verify_exists(1)
     assert not isinstance(exc_info.value, AirportServiceTimeoutError)
 
 
@@ -81,6 +86,7 @@ def test_error_de_conexion():
 def test_respuesta_inesperada_502():
     """Código inesperado (502) → AirportServiceUnavailableError (no timeout)."""
     respx.get(f"{BASE_URL}/airports/1").mock(return_value=httpx.Response(502))
+    adapter = _adapter()
     with pytest.raises(AirportServiceUnavailableError) as exc_info:
-        _adapter().verify_exists(1)
+        adapter.verify_exists(1)
     assert not isinstance(exc_info.value, AirportServiceTimeoutError)
