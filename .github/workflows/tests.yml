@@ -75,4 +75,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Ejecutar pruebas
+        env:
+          DATABASE_URL: postgresql+psycopg://localhost:5433/itinerary_db
         run: pytest -v

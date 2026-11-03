@@ -14,14 +14,17 @@ class Settings(BaseSettings):
     service_name: str = "itinerary-service"
     log_level: str = "INFO"
 
-    # Cadena de conexión a PostgreSQL (psycopg 3, modo síncrono)
-    database_url: str = Field(
-        default="postgresql+psycopg://itinerary:itinerary@localhost:5433/itinerary_db"
-    )
+    # Cadena de conexión a PostgreSQL (psycopg 3, modo síncrono).
+    # Configurar con la variable de entorno DATABASE_URL o en el archivo .env (ver .env.example).
+    database_url: str
 
     # URL de Airport Service y timeout de sus llamadas HTTP
     airport_service_url: str = Field(default="http://localhost:8001")
     airport_service_timeout_seconds: float = Field(default=5.0, gt=0)
+
+    # Host y puerto de uvicorn. En Docker (Fase 10) usar HOST=0.0.0.0.
+    host: str = Field(default="127.0.0.1")
+    port: int = Field(default=8002, gt=0)
 
 
 @lru_cache
