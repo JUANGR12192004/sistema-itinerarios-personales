@@ -16,6 +16,7 @@ from app.api.dependencies import (
     get_event_publisher,
     get_itinerary_repository,
 )
+from app.application.ports import ItineraryRepository
 from app.main import app
 from tests.fakes import FakeAirportCatalog, FakeEventPublisher, FakeItineraryRepository
 
@@ -85,7 +86,9 @@ def test_crear_mismos_aeropuertos_devuelve_422():
     response = client.post("/itineraries", json=body)
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "INVALID_ITINERARY"
+    error = response.json()["error"]
+    assert error["code"] == "INVALID_ITINERARY"
+    assert error["details"] == {}
 
 
 def test_crear_aeropuerto_salida_inexistente_devuelve_422():
@@ -113,7 +116,9 @@ def test_crear_airport_service_no_disponible_devuelve_503():
     response = client.post("/itineraries", json=BODY_VALIDO)
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "AIRPORT_SERVICE_UNAVAILABLE"
+    error = response.json()["error"]
+    assert error["code"] == "AIRPORT_SERVICE_UNAVAILABLE"
+    assert error["details"] == {}
 
 
 def test_crear_airport_service_timeout_devuelve_504():
@@ -121,7 +126,9 @@ def test_crear_airport_service_timeout_devuelve_504():
     response = client.post("/itineraries", json=BODY_VALIDO)
 
     assert response.status_code == 504
-    assert response.json()["error"]["code"] == "AIRPORT_SERVICE_TIMEOUT"
+    error = response.json()["error"]
+    assert error["code"] == "AIRPORT_SERVICE_TIMEOUT"
+    assert error["details"] == {}
 
 
 # ── GET /itineraries ───────────────────────────────────────────────────────────
@@ -224,3 +231,73 @@ def test_health_devuelve_ok():
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ── Manejo de errores HTTP (formato único ADR-012) ─────────────────────────────
+
+def test_ruta_inexistente_devuelve_404_formato_unico():
+    """GET a una ruta que no existe → 404 con ROUTE_NOT_FOUND en formato único."""
+    client, _, _ = _make_client()
+    response = client.get("/ruta-que-no-existe")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"]["code"] == "ROUTE_NOT_FOUND"
+    assert body["error"]["details"] == {}
+    assert "correlation_id" in body
+
+
+def test_metodo_no_permitido_devuelve_405_formato_unico():
+    """DELETE /health no está definido → 405 con METHOD_NOT_ALLOWED en formato único."""
+    client, _, _ = _make_client()
+    response = client.delete("/health")
+
+    assert response.status_code == 405
+    body = response.json()
+    assert body["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert body["error"]["details"] == {}
+    assert "correlation_id" in body
+
+
+def test_campo_faltante_devuelve_422_formato_unico():
+    """POST sin traveler_name (campo obligatorio) → 422 con VALIDATION_ERROR en formato único."""
+    client, _, _ = _make_client(existing_ids={1, 5})
+    body_sin_nombre = {k: v for k, v in BODY_VALIDO.items() if k != "traveler_name"}
+    response = client.post("/itineraries", json=body_sin_nombre)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "correlation_id" in body
+
+
+def test_error_inesperado_devuelve_500_formato_unico():
+    """Excepción no esperada en el repositorio → 500 con INTERNAL_ERROR en formato único."""
+
+    class RepositorioRoto(ItineraryRepository):
+        def save(self, it: object) -> None:
+            raise RuntimeError("Error simulado")
+
+        def get_by_id(self, itinerary_id: object) -> None:
+            raise RuntimeError("Error simulado")
+
+        def list_all(self) -> list:
+            raise RuntimeError("Error simulado")
+
+        def delete(self, itinerary_id: object) -> None:
+            raise RuntimeError("Error simulado")
+
+    app.dependency_overrides[get_itinerary_repository] = lambda: RepositorioRoto()
+    app.dependency_overrides[get_airport_catalog] = lambda: FakeAirportCatalog()
+    app.dependency_overrides[get_event_publisher] = lambda: FakeEventPublisher()
+
+    # raise_server_exceptions=False para que TestClient devuelva la respuesta 500
+    # en lugar de relanzar la excepción en el lado del test.
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/itineraries")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"]["code"] == "INTERNAL_ERROR"
+    assert body["error"]["details"] == {}
+    assert "correlation_id" in body

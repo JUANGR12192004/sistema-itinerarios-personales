@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.application.exceptions import (
     AirportServiceTimeoutError,
@@ -25,6 +26,11 @@ from app.domain.exceptions import InvalidItineraryError
 
 logger = logging.getLogger(__name__)
 
+_HTTP_ERROR_CODES = {
+    404: "ROUTE_NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+}
+
 
 def _cid(request: Request) -> str:
     return request.headers.get("X-Correlation-ID", str(uuid4()))
@@ -32,7 +38,7 @@ def _cid(request: Request) -> str:
 
 def _body(code: str, message: str, details: dict | None, correlation_id: str) -> dict:
     return {
-        "error": {"code": code, "message": message, "details": details},
+        "error": {"code": code, "message": message, "details": details or {}},
         "correlation_id": correlation_id,
     }
 
@@ -110,5 +116,27 @@ def add_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=503,
             content=_body("AIRPORT_SERVICE_UNAVAILABLE", "Airport Service no está disponible.", None, cid),
+            headers={"X-Correlation-ID": cid},
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_error(request: Request, exc: StarletteHTTPException):
+        # Captura rutas inexistentes (404) y métodos no permitidos (405) que lanza Starlette
+        # antes de que lleguen a nuestras rutas. Sin este manejador responde {"detail":"..."}.
+        cid = _cid(request)
+        code = _HTTP_ERROR_CODES.get(exc.status_code, "HTTP_ERROR")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_body(code, str(exc.detail), None, cid),
+            headers={"X-Correlation-ID": cid},
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected(request: Request, exc: Exception):
+        cid = _cid(request)
+        logger.exception("Error inesperado procesando %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content=_body("INTERNAL_ERROR", "Ocurrió un error interno inesperado.", None, cid),
             headers={"X-Correlation-ID": cid},
         )
