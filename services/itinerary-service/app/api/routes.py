@@ -2,15 +2,21 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app.api.dependencies import (
     get_airport_catalog,
     get_event_publisher,
     get_itinerary_repository,
+    get_unit_of_work,
 )
 from app.api.schemas import CreateItineraryRequest, ItineraryResponse, UpdateItineraryRequest
-from app.application.ports import AirportCatalog, EventPublisher, ItineraryRepository
+from app.application.ports import (
+    AirportCatalog,
+    EventPublisher,
+    ItineraryRepository,
+    UnitOfWork,
+)
 from app.application.use_cases import (
     CreateItineraryCommand,
     CreateItineraryUseCase,
@@ -29,9 +35,11 @@ def create_itinerary(
     body: CreateItineraryRequest,
     repo: ItineraryRepository = Depends(get_itinerary_repository),
     catalog: AirportCatalog = Depends(get_airport_catalog),
+    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
     publisher: EventPublisher = Depends(get_event_publisher),
+    correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
 ) -> ItineraryResponse:
-    result = CreateItineraryUseCase(repo, catalog, publisher).execute(
+    result = CreateItineraryUseCase(repo, catalog, unit_of_work, publisher).execute(
         CreateItineraryCommand(
             traveler_name=body.traveler_name,
             traveler_email=body.traveler_email,
@@ -39,6 +47,7 @@ def create_itinerary(
             arrival_airport_id=body.arrival_airport_id,
             travel_date=body.travel_date,
             duration_minutes=body.duration_minutes,
+            correlation_id=correlation_id,
         )
     )
     return ItineraryResponse.model_validate(result)

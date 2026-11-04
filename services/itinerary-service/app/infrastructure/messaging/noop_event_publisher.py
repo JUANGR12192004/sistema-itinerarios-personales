@@ -1,20 +1,22 @@
 """Publisher vacío que implementa el puerto EventPublisher sin publicar nada.
 
-En la Fase 4 se reemplaza por RabbitMQEventPublisher. Los casos de uso no cambian
-porque dependen del puerto, no de esta implementación.
+En la entrega 4B se reemplaza por RabbitMQEventPublisher en `dependencies.py`.
+Los casos de uso no cambian porque dependen del puerto, no de esta implementación.
 """
 
 import logging
 
+from app.application.events import ItineraryCreatedEvent
 from app.application.ports import EventPublisher
-from app.domain.itinerary import Itinerary
 
 logger = logging.getLogger(__name__)
 
 
 class NoopEventPublisher(EventPublisher):
-    def publish_itinerary_created(self, itinerary: Itinerary) -> None:
+    def publish(self, event: ItineraryCreatedEvent) -> None:
         logger.debug(
-            "NoopEventPublisher: ItineraryCreatedEvent no publicado (Fase 4) id=%s",
-            itinerary.id,
+            "NoopEventPublisher: %s no publicado event_id=%s itinerary_id=%s",
+            event.EVENT_TYPE,
+            event.event_id,
+            event.itinerary_id,
         )

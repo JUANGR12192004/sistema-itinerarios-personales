@@ -205,7 +205,7 @@ Estas son las reglas que debes seguir tú:
 | Base de datos | PostgreSQL (una base de datos independiente por servicio) |
 | ORM y migraciones | SQLAlchemy 2 y Alembic |
 | Comunicación síncrona | HTTP / REST |
-| Mensajería | RabbitMQ |
+| Mensajería | RabbitMQ (cliente `pika`, ADR-021) |
 | Caché | Redis |
 | Frontend | HTML, CSS, JavaScript, Plotly JS |
 | Contenedores | Docker y Docker Compose |
@@ -463,13 +463,14 @@ Confirmadas en la Fase 3 (ADR-015):
 | `travel_date` con zona horaria (Fase 3, ADR-017) | Fecha y hora con zona horaria (`datetime` con `tzinfo`), coherente con el contrato del evento |
 | `traveler_email` opcional (Fase 3, ADR-018) | Campo opcional en `Itinerary`; lo usa la notificación simulada de la Fase 6 |
 | Endpoints de Itinerary Service (Fase 3, ADR-019) | Los de la sección 10.1; un timeout de Airport Service → 504 en Itinerary Service (extiende ADR-012) |
+| Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
+| Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
+| Publicación directa tras el commit (Fase 4, ADR-022) | Puerto `UnitOfWork`; el caso de uso hace guardar → commit → publicar. Si RabbitMQ falla tras el commit: 201 + log `ERROR` "Evento perdido" (double write, lo resuelve la Fase 5) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
-| Decisión | Propuesta | Se necesita en |
-|---|---|---|
-| Contrato del evento | Ver sección 11 | Fase 4 |
-| Topología RabbitMQ | Ver sección 11.2 | Fase 4 |
+Ninguna por ahora (el contrato del evento y la topología de RabbitMQ se aceptaron en la Fase 4:
+ADR-020 y ADR-021).
 
 ### 9.3. Pendientes (no implementar sin decisión del usuario)
 
@@ -537,7 +538,7 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 
 ## 11. Eventos
 
-### 11.1. Contrato de `ItineraryCreatedEvent` (versión 1, propuesta)
+### 11.1. Contrato de `ItineraryCreatedEvent` (versión 1, aceptado, ADR-020)
 
 ```json
 {
@@ -550,6 +551,7 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
   "data": {
     "itinerary_id": "uuid",
     "traveler_name": "Ana Pérez",
+    "traveler_email": "ana@example.com",
     "departure_airport_id": 1,
     "arrival_airport_id": 5,
     "travel_date": "2026-12-15T08:00:00-05:00",
@@ -562,15 +564,15 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 - Cambios incompatibles requieren una nueva `event_version`.
 - El contexto de trazas (`traceparent`) viaja en los headers AMQP (Fase 9).
 
-### 11.2. Topología RabbitMQ (propuesta)
+### 11.2. Topología RabbitMQ (aceptada, ADR-021)
 
 | Elemento | Nombre |
 |---|---|
 | Exchange | `itinerary.events` (topic, durable) |
 | Routing key | `itinerary.created` |
 | Cola | `notification.itinerary-created` (durable) |
-| Dead letter exchange | `itinerary.events.dlx` |
-| Cola de mensajes fallidos | `notification.itinerary-created.dlq` |
+| Dead letter exchange | `itinerary.events.dlx` (direct, durable) |
+| Cola de mensajes fallidos | `notification.itinerary-created.dlq` (durable) |
 
 - Entrega **al menos una vez**: los consumidores deben ser **idempotentes** (clave: `event_id`).
 - El consumidor confirma (ACK) solo después de completar el procesamiento.
@@ -625,6 +627,16 @@ con una sola pausa al final de la fase.
 | **3B** | Puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher` solo definido), `SqlAlchemyItineraryRepository`, modelo ORM, Alembic con la primera migración aplicada a PostgreSQL | Migración aplicada; `alembic current` muestra la revisión activa |
 | **3C** | `HttpAirportCatalogAdapter` (llama a `GET /airports/{id}` de Airport Service con timeout; 404 → 422, 503/504 → propaga el código) con pruebas respx | Pruebas del adaptador pasan sin internet |
 | **3D** | Casos de uso CRUD, rutas, esquemas Pydantic, manejador único de errores, correlation ID, `main.py` en el puerto 8002, Swagger, pruebas de API, job de CI en `tests.yml`, README, demostración real Itinerary → Airport → API Colombia | El servicio responde en `http://localhost:8002/docs` |
+
+### 12.4. Plan de la Fase 4 (entregas)
+
+Rama `fase-4-eventos-rabbitmq`. Una pausa al final de cada entrega (decisión del usuario).
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **4A** | ADR-020 a ADR-022, evento de integración `ItineraryCreatedEvent`, `EventPublishError`, puerto `UnitOfWork` y `SqlAlchemyUnitOfWork`, puerto `EventPublisher.publish(event)`, caso de uso guardar → commit → publicar, correlation ID en el evento, fakes y pruebas | `pytest -v testspplication testspi` pasa |
+| **4B** | `pika`, configuración de RabbitMQ, declaración de la topología, `RabbitMQEventPublisher` (persistente, confirms, `mandatory`), ensamblaje en `dependencies.py`, pruebas unitarias con canal falso e integración con RabbitMQ real (SKIPPED sin RabbitMQ) | Pruebas del publicador pasan sin RabbitMQ |
+| **4C** | `docs/asyncapi/asyncapi.yaml`, explicación HTTP vs evento vs evento de dominio vs evento de integración, diagramas, README del servicio con la demostración (RabbitMQ en Docker, panel 15672, double write), estado de CLAUDE.md, PR | Mensaje visible en la cola `notification.itinerary-created` |
 
 ---
 
@@ -681,9 +693,14 @@ pytest -v
 - Diagrama de componentes de `docs/05-diagramas.md` corregido (ADR-013).
 - Buenas prácticas del repositorio (rama `chore/github-practices`): plantillas de PR e issue,
   integración continua con GitHub Actions y `CONTRIBUTING.md`.
-- **Fase 2:** completada y **fusionada en `main`** (PR #4, merge `d02b2ff`). **La etiqueta `fase-2` aún no existe (pendiente).** Timeout configurable (504), retry con exponential backoff, circuit breaker, caché en Redis como Decorator con fallback de datos de respaldo y header `X-Cache` (ADR-007 y ADR-014).
-- **Fase 3:** completada en la rama `fase-3-itinerary-service` (pendiente de PR y merge).
+- **Fase 2:** completada y **fusionada en `main`** (PR #4, merge `d02b2ff`). Etiqueta `fase-2` creada. Timeout configurable (504), retry con exponential backoff, circuit breaker, caché en Redis como Decorator con fallback de datos de respaldo y header `X-Cache` (ADR-007 y ADR-014).
+- **Fase 3:** completada y **fusionada en `main`** (PR #6, merge `b145360`) con la **etiqueta `fase-3`**.
   - Entrega **3A** completada: carpeta `services/itinerary-service`, `requirements.txt`, `.env.example`, `pytest.ini`, `config.py`, capa de dominio (`Itinerary`, `InvalidItineraryError`, `DomainError`) con 16 pruebas.
   - Entrega **3B** completada: puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher`), `SqlAlchemyItineraryRepository`, modelo ORM `ItineraryORM`, `database.py`, Alembic (migración `a3f1e2b4c5d0` aplicada), `FakeItineraryRepository` con 13 pruebas, pruebas de integración contra PostgreSQL real en `tests/integration/` (8 pruebas, SKIPPED en CI).
   - Entrega **3C** completada: `HttpAirportCatalogAdapter` (404→`AirportNotFoundInCatalogError`, 504/timeout→`AirportServiceTimeoutError`, 503/502/red→`AirportServiceUnavailableError`) con 7 pruebas respx.
   - Entrega **3D** completada: casos de uso CRUD (`CreateItineraryUseCase`, `GetItineraryUseCase`, `ListItinerariesUseCase`, `UpdateItineraryUseCase`, `DeleteItineraryUseCase`), `NoopEventPublisher`, esquemas Pydantic, manejador único de errores (7 tipos), `dependencies.py` (Unit of Work con SQLAlchemy), rutas FastAPI en `/itineraries`, `main.py` en el puerto 8002, `README.md`, job de CI en `tests.yml`. 16 pruebas de API con fakes. Total del servicio: **52 pruebas pasan, 8 omitidas** (integración sin PostgreSQL en CI).
+- **Fase 4:** en curso en la rama `fase-4-eventos-rabbitmq`.
+  - Entrega **4A** completada: decisiones ADR-020 a ADR-022, `ItineraryCreatedEvent` (capa de aplicación),
+    `EventPublishError`, puerto `UnitOfWork` con `SqlAlchemyUnitOfWork`, `EventPublisher.publish(event)`,
+    `CreateItineraryUseCase` con guardar → commit → publicar (201 + log `ERROR` si falla la publicación),
+    correlation ID de `X-Correlation-ID` en el evento. Total del servicio: **75 pruebas pasan, 9 omitidas**.

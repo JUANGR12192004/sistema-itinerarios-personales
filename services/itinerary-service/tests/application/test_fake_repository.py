@@ -11,13 +11,20 @@ from uuid import uuid4
 
 import pytest
 
+from app.application.events import ItineraryCreatedEvent
 from app.application.exceptions import (
     AirportNotFoundInCatalogError,
     AirportServiceTimeoutError,
     AirportServiceUnavailableError,
+    EventPublishError,
 )
 from app.domain.itinerary import Itinerary
-from tests.fakes import FakeAirportCatalog, FakeEventPublisher, FakeItineraryRepository
+from tests.fakes import (
+    FakeAirportCatalog,
+    FakeEventPublisher,
+    FakeItineraryRepository,
+    FakeUnitOfWork,
+)
 
 FUTURE = datetime.now(timezone.utc) + timedelta(days=30)
 
@@ -132,13 +139,30 @@ def test_catalog_timeout_es_subclase_de_unavailable():
 def test_publisher_registra_eventos_publicados():
     publisher = FakeEventPublisher()
     it = _crear_itinerario()
-    publisher.publish_itinerary_created(it)
+    publisher.publish(ItineraryCreatedEvent.from_itinerary(it))
     assert len(publisher.published) == 1
-    assert publisher.published[0].id == it.id
+    assert publisher.published[0].itinerary_id == it.id
 
 
 def test_publisher_acumula_multiples_eventos():
     publisher = FakeEventPublisher()
-    publisher.publish_itinerary_created(_crear_itinerario(traveler_name="Viajero 1"))
-    publisher.publish_itinerary_created(_crear_itinerario(traveler_name="Viajero 2", departure_airport_id=2, arrival_airport_id=6))
+    publisher.publish(ItineraryCreatedEvent.from_itinerary(_crear_itinerario(traveler_name="Viajero 1")))
+    publisher.publish(ItineraryCreatedEvent.from_itinerary(_crear_itinerario(traveler_name="Viajero 2", departure_airport_id=2, arrival_airport_id=6)))
     assert len(publisher.published) == 2
+
+
+def test_publisher_con_fallo_lanza_event_publish_error():
+    publisher = FakeEventPublisher(fail=True)
+    event = ItineraryCreatedEvent.from_itinerary(_crear_itinerario())
+    with pytest.raises(EventPublishError):
+        publisher.publish(event)
+    assert publisher.published == []
+
+
+# ——— FakeUnitOfWork ———
+
+def test_unit_of_work_cuenta_los_commits():
+    uow = FakeUnitOfWork()
+    uow.commit()
+    uow.commit()
+    assert uow.commits == 2

@@ -54,3 +54,11 @@ class AirportServiceTimeoutError(AirportServiceUnavailableError):
     Subclase de AirportServiceUnavailableError porque un timeout es
     una forma de no disponibilidad, pero se reporta con un código HTTP distinto.
     """
+
+
+class EventPublishError(Exception):
+    """No se pudo publicar un evento de integración (por ejemplo, RabbitMQ caído).
+
+    Los adaptadores de EventPublisher envuelven sus errores técnicos en esta
+    excepción para que el caso de uso no conozca la librería de mensajería.
+    """
