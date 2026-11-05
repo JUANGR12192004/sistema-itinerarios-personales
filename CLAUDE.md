@@ -213,6 +213,7 @@ Estas son las reglas que debes seguir tú:
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
+| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente y las carpetas `tests` como código de pruebas |
 
 No agregues librerías fuera de esta lista sin explicar por qué y pedir aprobación.
 
@@ -283,6 +284,7 @@ sistema-itinerarios-personales/
 │   └── workflows/tests.yml         ← integración continua (un job por servicio)
 ├── .gitignore
 ├── .gitattributes
+├── .sonarcloud.properties          ← configuración de SonarCloud (Automatic Analysis)
 ├── docker-compose.yml              ← Fase 10
 ├── .env.example
 ├── docs/
