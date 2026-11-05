@@ -706,3 +706,8 @@ pytest -v
     `EventPublishError`, puerto `UnitOfWork` con `SqlAlchemyUnitOfWork`, `EventPublisher.publish(event)`,
     `CreateItineraryUseCase` con guardar → commit → publicar (201 + log `ERROR` si falla la publicación),
     correlation ID de `X-Correlation-ID` en el evento. Total del servicio: **75 pruebas pasan, 9 omitidas**.
+  - Entrega **4B** completada: `pika==1.3.2`, variables `RABBITMQ_URL` y `RABBITMQ_TIMEOUT_SECONDS`,
+    `topology.py` (exchange, cola, DLX y DLQ durables), `RabbitMQEventPublisher` (una conexión por publicación,
+    confirms, `mandatory=True`, mensajes persistentes, `message_id = event_id`, errores → `EventPublishError`),
+    ensamblado en `dependencies.py`. Se elimina `NoopEventPublisher` (ya sin uso). 13 pruebas con canal falso y
+    1 de integración con RabbitMQ real (SKIPPED sin RabbitMQ). Total: **88 pruebas pasan, 10 omitidas**.

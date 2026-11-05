@@ -103,7 +103,7 @@ app/
   infrastructure/
     persistence/    → SqlAlchemyItineraryRepository, modelos ORM, session factory
     airport_client/ → HttpAirportCatalogAdapter (llama a Airport Service)
-    messaging/      → NoopEventPublisher (Fase 3); reemplazado en Fase 4
+    messaging/      → RabbitMQEventPublisher y topología de RabbitMQ (Fase 4)
   api/              → Rutas, esquemas Pydantic, manejador de errores, dependencias
   main.py           → Creación de la app FastAPI
 alembic/            → Migraciones de base de datos

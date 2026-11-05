@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     airport_service_url: str = Field(default="http://localhost:8001")
     airport_service_timeout_seconds: float = Field(default=5.0, gt=0)
 
+    # Conexión a RabbitMQ (Fase 4). Sin usuario en la URL, pika usa guest/guest,
+    # el usuario por defecto de la imagen local de RabbitMQ. Ver .env.example.
+    rabbitmq_url: str = Field(default="amqp://localhost:5672/%2F")
+    # Tiempo máximo para conectar y para cada operación con RabbitMQ (segundos)
+    rabbitmq_timeout_seconds: float = Field(default=3.0, gt=0)
+
     # Host y puerto de uvicorn. En Docker (Fase 10) usar HOST=0.0.0.0.
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8002, gt=0)
