@@ -9,6 +9,7 @@ Esto permite sustituir cualquier implementación sin modificar la lógica de neg
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+from app.application.events import ItineraryCreatedEvent
 from app.domain.itinerary import Itinerary
 
 
@@ -53,13 +54,32 @@ class AirportCatalog(ABC):
         """Verifica que el aeropuerto exista en el catálogo."""
 
 
-class EventPublisher(ABC):
-    """Puerto de publicación de eventos de integración.
+class UnitOfWork(ABC):
+    """Puerto que confirma (commit) los cambios de la transacción actual.
 
-    Se implementará en la Fase 4 con RabbitMQ y en la Fase 5 con el Outbox.
-    El caso de uso llama a este puerto; nunca habla directamente con RabbitMQ.
+    Unit of Work ("unidad de trabajo") agrupa los cambios de una solicitud y los
+    confirma juntos. El caso de uso lo usa para decidir CUÁNDO quedan guardados
+    los datos: en la Fase 4 publica el evento solo después del commit (ADR-022).
+
+    Implementado por SqlAlchemyUnitOfWork (Fase 4) y por FakeUnitOfWork en las pruebas.
     """
 
     @abstractmethod
-    def publish_itinerary_created(self, itinerary: Itinerary) -> None:
-        """Publica el evento ItineraryCreatedEvent."""
+    def commit(self) -> None:
+        """Confirma en la base de datos los cambios pendientes."""
+
+
+class EventPublisher(ABC):
+    """Puerto de publicación de eventos de integración.
+
+    Fase 4: RabbitMQEventPublisher (publicación directa tras el commit).
+    Fase 5: adaptador Outbox (mismo puerto; el caso de uso no cambia).
+    El caso de uso llama a este puerto; nunca habla directamente con RabbitMQ.
+
+    Raises:
+        EventPublishError: no se pudo publicar el evento.
+    """
+
+    @abstractmethod
+    def publish(self, event: ItineraryCreatedEvent) -> None:
+        """Publica el evento de integración."""

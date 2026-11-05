@@ -457,6 +457,98 @@ Coherente con el tratamiento que Airport Service ya aplica a los timeouts de API
 
 El adaptador `HttpAirportCatalogAdapter` debe inspeccionar el código de estado HTTP de la respuesta de Airport Service y lanzar la excepción de aplicación correspondiente.
 
+## ADR-020 — Contrato de ItineraryCreatedEvent (versión 1)
+
+**Estado:** Aceptada (Fase 4).
+
+### Contexto
+
+El contrato del evento estaba como propuesta (sección 11.1 de `CLAUDE.md`). ADR-018 indica que la notificación simulada de la Fase 6 usará `traveler_email`, pero la propuesta no lo incluía.
+
+### Decisión
+
+Se acepta el contrato propuesto **agregando `data.traveler_email`** (texto o `null`):
+
+```json
+{
+  "event_id": "uuid",
+  "event_type": "itinerary.created",
+  "event_version": 1,
+  "occurred_at": "2026-10-20T15:30:00Z",
+  "producer": "itinerary-service",
+  "correlation_id": "uuid",
+  "data": {
+    "itinerary_id": "uuid",
+    "traveler_name": "Ana Pérez",
+    "traveler_email": "ana@example.com",
+    "departure_airport_id": 1,
+    "arrival_airport_id": 5,
+    "travel_date": "2026-12-15T08:00:00-05:00",
+    "duration_minutes": 75
+  }
+}
+```
+
+- `occurred_at` va en UTC con sufijo `Z`; `travel_date` conserva la zona horaria del viajero (ADR-017).
+- `correlation_id` es el header `X-Correlation-ID` de la solicitud HTTP; si no llega, se genera un UUID.
+- El evento se modela como `ItineraryCreatedEvent` en la capa de **aplicación** (no en el dominio), porque es un contrato público entre contextos.
+
+### Justificación
+
+Incluir `traveler_email` desde la versión 1 evita publicar una versión 2 en la Fase 6 solo para agregar el destinatario. Al ser opcional, los itinerarios sin correo siguen siendo válidos.
+
+### Consecuencias
+
+El contrato se documenta en `docs/asyncapi/asyncapi.yaml`. Las pruebas de `tests/application/test_events.py` fallan si la forma del evento cambia. Un cambio incompatible exige una nueva `event_version`.
+
+## ADR-021 — Topología de RabbitMQ y librería pika
+
+**Estado:** Aceptada (Fase 4).
+
+### Contexto
+
+La topología estaba como propuesta (sección 11.2 de `CLAUDE.md`) y faltaba elegir la librería cliente. Itinerary Service es completamente síncrono (rutas `def`, SQLAlchemy y httpx síncronos).
+
+### Decisión
+
+- Exchange `itinerary.events` (tipo `topic`, durable), routing key `itinerary.created`.
+- Cola `notification.itinerary-created` (durable), con dead letter exchange `itinerary.events.dlx` (tipo `direct`, durable) y cola de mensajes fallidos `notification.itinerary-created.dlq` (durable).
+- Mensajes persistentes (`delivery_mode=2`), `content_type=application/json`, `message_id = event_id`, `type = event_type` y `correlation_id` en las propiedades AMQP.
+- Publisher confirms y `mandatory=True`: la publicación solo se considera exitosa si RabbitMQ confirma que el mensaje llegó a una cola.
+- Librería **pika 1.3.2** (cliente síncrono oficial de RabbitMQ). Se abre una conexión por publicación, porque `BlockingConnection` no es segura entre hilos y FastAPI ejecuta las rutas `def` en varios hilos.
+- Mientras no exista el consumidor (Fase 6), el publicador declara toda la topología (las declaraciones son idempotentes), para que ningún mensaje se pierda por falta de cola.
+
+### Justificación
+
+pika encaja con el código síncrono sin puentes entre hilos y *event loop* (se descartó aio-pika por esa razón). Una conexión por publicación es simple de explicar y suficiente para el volumen del proyecto.
+
+### Consecuencias
+
+El consumidor de la Fase 6 debe declarar la cola con los mismos argumentos (si no, RabbitMQ responde `PRECONDITION_FAILED`). Abrir una conexión por publicación añade algunos milisegundos por solicitud; si fuera un problema, se reemplazaría por una conexión compartida protegida.
+
+## ADR-022 — Publicación directa tras el commit (Fase 4)
+
+**Estado:** Aceptada (Fase 4). Se reemplaza por el Transactional Outbox en la Fase 5 (ADR-006).
+
+### Contexto
+
+En la Fase 3 el commit ocurría en la dependencia `get_db_session`, **después** de que el caso de uso llamaba al publicador. La Fase 4 pide publicar directamente **tras el commit**, para mostrar después el problema de *double write*.
+
+### Decisión
+
+- Nuevo puerto `UnitOfWork` (`commit()`), implementado por `SqlAlchemyUnitOfWork` sobre la misma sesión del repositorio.
+- El puerto `EventPublisher` pasa a `publish(event: ItineraryCreatedEvent)` y sus adaptadores envuelven los errores técnicos en `EventPublishError`.
+- `CreateItineraryUseCase` sigue el orden: guardar → `commit()` → construir el evento → `publish()`.
+- Si la publicación falla después del commit, `POST /itineraries` responde **201** y se registra un `ERROR` "Evento perdido" con el id del itinerario y el `event_id`.
+
+### Justificación
+
+Publicar antes del commit podría anunciar un itinerario que luego no se guarda. Responder 503 cuando el itinerario sí quedó guardado engañaría al cliente y lo llevaría a reintentar y duplicarlo. El 201 con log de error describe lo que realmente pasó.
+
+### Consecuencias
+
+Si RabbitMQ falla tras el commit, el evento se pierde: es el problema de *double write* (dos escrituras en sistemas distintos sin una transacción común). La Fase 5 lo resuelve guardando el evento en `outbox_events` en la misma transacción, cambiando solo el adaptador inyectado de `EventPublisher`.
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.

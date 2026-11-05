@@ -15,10 +15,16 @@ from app.api.dependencies import (
     get_airport_catalog,
     get_event_publisher,
     get_itinerary_repository,
+    get_unit_of_work,
 )
 from app.application.ports import ItineraryRepository
 from app.main import app
-from tests.fakes import FakeAirportCatalog, FakeEventPublisher, FakeItineraryRepository
+from tests.fakes import (
+    FakeAirportCatalog,
+    FakeEventPublisher,
+    FakeItineraryRepository,
+    FakeUnitOfWork,
+)
 
 FUTURE = datetime.now(timezone.utc) + timedelta(days=30)
 
@@ -35,14 +41,16 @@ def _make_client(
     existing_ids: set[int] | None = None,
     unavailable: bool = False,
     timeout: bool = False,
+    publisher_fails: bool = False,
 ) -> tuple[TestClient, FakeItineraryRepository, FakeEventPublisher]:
     """Crea un cliente con fakes inyectados y devuelve también el repo y el publisher."""
     repo = FakeItineraryRepository()
     catalog = FakeAirportCatalog(existing_ids=existing_ids, unavailable=unavailable, timeout=timeout)
-    publisher = FakeEventPublisher()
+    publisher = FakeEventPublisher(fail=publisher_fails)
 
     app.dependency_overrides[get_itinerary_repository] = lambda: repo
     app.dependency_overrides[get_airport_catalog] = lambda: catalog
+    app.dependency_overrides[get_unit_of_work] = lambda: FakeUnitOfWork()
     app.dependency_overrides[get_event_publisher] = lambda: publisher
 
     return TestClient(app), repo, publisher
@@ -68,6 +76,31 @@ def test_crear_itinerario_devuelve_201():
     assert data["duration_minutes"] == 75
     assert "id" in data
     assert len(publisher.published) == 1
+    assert str(publisher.published[0].itinerary_id) == data["id"]
+
+
+def test_crear_propaga_el_correlation_id_al_evento():
+    """El header X-Correlation-ID de la solicitud viaja dentro del evento."""
+    client, _, publisher = _make_client(existing_ids={1, 5})
+    response = client.post(
+        "/itineraries", json=BODY_VALIDO, headers={"X-Correlation-ID": "demo-123"}
+    )
+
+    assert response.status_code == 201
+    assert publisher.published[0].correlation_id == "demo-123"
+
+
+def test_crear_con_rabbitmq_caido_devuelve_201_y_no_publica(caplog):
+    """Si la publicación falla tras el commit, el itinerario existe: 201 + log ERROR."""
+    client, repo, publisher = _make_client(existing_ids={1, 5}, publisher_fails=True)
+
+    with caplog.at_level("ERROR"):
+        response = client.post("/itineraries", json=BODY_VALIDO)
+
+    assert response.status_code == 201
+    assert len(repo.list_all()) == 1
+    assert publisher.published == []
+    assert "Evento perdido" in caplog.text
 
 
 def test_crear_con_email_devuelve_201():
@@ -289,6 +322,7 @@ def test_error_inesperado_devuelve_500_formato_unico():
 
     app.dependency_overrides[get_itinerary_repository] = lambda: RepositorioRoto()
     app.dependency_overrides[get_airport_catalog] = lambda: FakeAirportCatalog()
+    app.dependency_overrides[get_unit_of_work] = lambda: FakeUnitOfWork()
     app.dependency_overrides[get_event_publisher] = lambda: FakeEventPublisher()
 
     # raise_server_exceptions=False para que TestClient devuelva la respuesta 500

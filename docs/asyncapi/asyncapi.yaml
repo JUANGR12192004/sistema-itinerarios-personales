@@ -1,0 +1,212 @@
+# Contrato de eventos del Sistema de Itinerarios Personales (Fase 4).
+#
+# Describe el evento de integración ItineraryCreatedEvent tal como lo publica
+# RabbitMQEventPublisher (services/itinerary-service/app/infrastructure/messaging).
+# Decisiones: ADR-020 (contrato v1) y ADR-021 (topología de RabbitMQ).
+# Se puede visualizar pegando este archivo en https://studio.asyncapi.com
+asyncapi: 3.0.0
+
+info:
+  title: Eventos de Itinerary Service
+  version: 1.0.0
+  description: |
+    Eventos de integración que Itinerary Service publica en RabbitMQ.
+
+    - Entrega **al menos una vez**: un mismo evento puede llegar más de una vez.
+      Los consumidores deben ser **idempotentes** usando `event_id` (también en la
+      propiedad AMQP `message_id`).
+    - El consumidor confirma (ACK) solo después de procesar el mensaje. Si lo
+      rechaza sin reencolar, RabbitMQ lo envía a la cola de mensajes fallidos (DLQ).
+    - Un cambio incompatible del contrato exige una nueva `event_version`.
+
+defaultContentType: application/json
+
+servers:
+  local:
+    host: localhost:5672
+    protocol: amqp
+    protocolVersion: 0.9.1
+    description: RabbitMQ local (Docker, imagen rabbitmq:3.13-management). Panel en http://localhost:15672
+
+channels:
+  itineraryCreated:
+    address: itinerary.created
+    title: Itinerario creado
+    description: |
+      Routing key `itinerary.created` en el exchange `itinerary.events` (topic, durable).
+      La cola `notification.itinerary-created` recibe estos mensajes para el sistema de notificaciones.
+    messages:
+      itineraryCreated:
+        $ref: '#/components/messages/ItineraryCreatedEvent'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: itinerary.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+
+  notificationQueue:
+    address: notification.itinerary-created
+    title: Cola de notificaciones
+    description: |
+      Cola durable enlazada al exchange `itinerary.events` con la routing key `itinerary.created`.
+      Argumento `x-dead-letter-exchange: itinerary.events.dlx`: los mensajes rechazados van a la
+      cola `notification.itinerary-created.dlq` (exchange `itinerary.events.dlx`, tipo direct).
+    messages:
+      itineraryCreated:
+        $ref: '#/components/messages/ItineraryCreatedEvent'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: notification.itinerary-created
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+
+operations:
+  publishItineraryCreated:
+    action: send
+    channel:
+      $ref: '#/channels/itineraryCreated'
+    title: Publicar ItineraryCreatedEvent
+    summary: Itinerary Service publica el evento después de confirmar (commit) el itinerario en PostgreSQL.
+    description: |
+      Productor: `itinerary-service`. Fase 4: publicación directa tras el commit (ADR-022).
+      Se usan publisher confirms y `mandatory=true`. Si RabbitMQ falla, el itinerario ya está
+      guardado y el evento se pierde (double write), problema que resuelve la Fase 5 (Outbox).
+    bindings:
+      amqp:
+        deliveryMode: 2
+        mandatory: true
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/itineraryCreated/messages/itineraryCreated'
+
+  receiveItineraryCreated:
+    action: receive
+    channel:
+      $ref: '#/channels/notificationQueue'
+    title: Consumir ItineraryCreatedEvent
+    summary: El Event Trigger consume la cola e invoca SendNotificationFunction (Fase 6).
+    bindings:
+      amqp:
+        ack: true
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/notificationQueue/messages/itineraryCreated'
+
+components:
+  messages:
+    ItineraryCreatedEvent:
+      name: ItineraryCreatedEvent
+      title: Itinerario creado (versión 1)
+      summary: Se registró un nuevo itinerario de viaje.
+      contentType: application/json
+      correlationId:
+        description: Correlation ID de la solicitud HTTP original (header X-Correlation-ID).
+        location: $message.payload#/correlation_id
+      bindings:
+        amqp:
+          contentEncoding: utf-8
+          messageType: itinerary.created
+          bindingVersion: 0.3.0
+      headers:
+        type: object
+        description: Headers AMQP del mensaje.
+        properties:
+          event_version:
+            type: integer
+            const: 1
+      payload:
+        $ref: '#/components/schemas/ItineraryCreatedEventPayload'
+      examples:
+        - name: conCorreo
+          summary: Itinerario con correo del viajero
+          payload:
+            event_id: 7d9f1c2e-4b5a-4e8f-9a1b-2c3d4e5f6a7b
+            event_type: itinerary.created
+            event_version: 1
+            occurred_at: '2026-11-04T15:30:00Z'
+            producer: itinerary-service
+            correlation_id: 3f2a8c1d-0b9e-4d7f-a6c5-1e2d3c4b5a69
+            data:
+              itinerary_id: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+              traveler_name: Ana Pérez
+              traveler_email: ana@example.com
+              departure_airport_id: 1
+              arrival_airport_id: 5
+              travel_date: '2026-12-15T08:00:00-05:00'
+              duration_minutes: 75
+
+  schemas:
+    ItineraryCreatedEventPayload:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, event_version, occurred_at, producer, correlation_id, data]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          description: Identificador único del evento. Clave de idempotencia del consumidor.
+        event_type:
+          type: string
+          const: itinerary.created
+        event_version:
+          type: integer
+          const: 1
+        occurred_at:
+          type: string
+          format: date-time
+          description: Momento en que ocurrió el evento, en UTC con sufijo Z.
+        producer:
+          type: string
+          const: itinerary-service
+        correlation_id:
+          type: string
+          description: Correlation ID de la solicitud HTTP; si no llegó, un UUID generado.
+        data:
+          $ref: '#/components/schemas/ItineraryCreatedData'
+
+    ItineraryCreatedData:
+      type: object
+      additionalProperties: false
+      required:
+        - itinerary_id
+        - traveler_name
+        - traveler_email
+        - departure_airport_id
+        - arrival_airport_id
+        - travel_date
+        - duration_minutes
+      properties:
+        itinerary_id:
+          type: string
+          format: uuid
+        traveler_name:
+          type: string
+          minLength: 1
+        traveler_email:
+          type: [string, 'null']
+          description: Correo del viajero (opcional, ADR-018). Destinatario de la notificación simulada.
+        departure_airport_id:
+          type: integer
+          minimum: 1
+          description: ID del aeropuerto de salida en el catálogo de Airport Service.
+        arrival_airport_id:
+          type: integer
+          minimum: 1
+          description: ID del aeropuerto de llegada en el catálogo de Airport Service.
+        travel_date:
+          type: string
+          format: date-time
+          description: Fecha y hora de salida con la zona horaria del viajero (ADR-017).
+        duration_minutes:
+          type: integer
+          minimum: 1
