@@ -701,7 +701,7 @@ pytest -v
   - Entrega **3B** completada: puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher`), `SqlAlchemyItineraryRepository`, modelo ORM `ItineraryORM`, `database.py`, Alembic (migración `a3f1e2b4c5d0` aplicada), `FakeItineraryRepository` con 13 pruebas, pruebas de integración contra PostgreSQL real en `tests/integration/` (8 pruebas, SKIPPED en CI).
   - Entrega **3C** completada: `HttpAirportCatalogAdapter` (404→`AirportNotFoundInCatalogError`, 504/timeout→`AirportServiceTimeoutError`, 503/502/red→`AirportServiceUnavailableError`) con 7 pruebas respx.
   - Entrega **3D** completada: casos de uso CRUD (`CreateItineraryUseCase`, `GetItineraryUseCase`, `ListItinerariesUseCase`, `UpdateItineraryUseCase`, `DeleteItineraryUseCase`), `NoopEventPublisher`, esquemas Pydantic, manejador único de errores (7 tipos), `dependencies.py` (Unit of Work con SQLAlchemy), rutas FastAPI en `/itineraries`, `main.py` en el puerto 8002, `README.md`, job de CI en `tests.yml`. 16 pruebas de API con fakes. Total del servicio: **52 pruebas pasan, 8 omitidas** (integración sin PostgreSQL en CI).
-- **Fase 4:** en curso en la rama `fase-4-eventos-rabbitmq`.
+- **Fase 4:** completada en la rama `fase-4-eventos-rabbitmq` (pendiente de PR y merge).
   - Entrega **4A** completada: decisiones ADR-020 a ADR-022, `ItineraryCreatedEvent` (capa de aplicación),
     `EventPublishError`, puerto `UnitOfWork` con `SqlAlchemyUnitOfWork`, `EventPublisher.publish(event)`,
     `CreateItineraryUseCase` con guardar → commit → publicar (201 + log `ERROR` si falla la publicación),
@@ -711,3 +711,8 @@ pytest -v
     confirms, `mandatory=True`, mensajes persistentes, `message_id = event_id`, errores → `EventPublishError`),
     ensamblado en `dependencies.py`. Se elimina `NoopEventPublisher` (ya sin uso). 13 pruebas con canal falso y
     1 de integración con RabbitMQ real (SKIPPED sin RabbitMQ). Total: **88 pruebas pasan, 10 omitidas**.
+  - Entrega **4C** completada: `docs/asyncapi/asyncapi.yaml` (AsyncAPI 3.0) con 5 pruebas que lo comparan
+    con el evento del código, `docs/04-comunicacion-y-eventos.md` (contrato, topología, HTTP vs evento vs evento de
+    dominio vs evento de integración, double write), diagrama de secuencia de `docs/05-diagramas.md` y README del
+    servicio con la demostración (RabbitMQ en Docker, mensaje en la cola, double write).
+    Total del servicio: **93 pruebas pasan, 10 omitidas**.

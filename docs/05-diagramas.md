@@ -62,7 +62,7 @@ flowchart LR
         CATALOG[AirportCatalog Port]
         HTTPADAPTER[HttpAirportCatalogAdapter]
         PUBPORT[EventPublisher Port]
-        MSGADAPTER[Messaging Adapter]
+        MSGADAPTER[RabbitMQEventPublisher]
 
         IC --> UC
         UC --> DOMAIN
@@ -105,15 +105,20 @@ sequenceDiagram
     IS->>AS: Validar aeropuerto de llegada
 
     alt Aeropuertos válidos (200)
-        IS->>DB: Guardar itinerario
+        IS->>DB: Guardar itinerario y COMMIT
         Note over IS,DB: En la fase Outbox se guardarán<br/>itinerario y evento en una transacción
         DB-->>IS: Confirmación
+        IS->>MQ: Publicar ItineraryCreatedEvent (Fase 4: tras el commit)
+        alt RabbitMQ confirma
+            MQ-->>IS: Confirm (ack)
+        else RabbitMQ no disponible
+            Note over IS,MQ: Log ERROR "Evento perdido" (double write).<br/>El itinerario ya existe: igual se responde 201
+        end
         IS-->>GW: 201 Itinerario creado
         GW-->>FE: Respuesta HTTP
         FE-->>Usuario: Mostrar resultado
 
-        IS->>MQ: Publicar evento
-        MQ-->>NF: Entregar evento
+        MQ-->>NF: Entregar evento (asíncrono, Fase 6)
         NF->>NF: Simular notificación
         NF->>NF: Registrar historial
     else Aeropuerto no encontrado (404 de Airport Service)
@@ -131,7 +136,7 @@ sequenceDiagram
     end
 ```
 
-**Nota:** el diagrama muestra el flujo lógico objetivo. La confirmación de la solicitud HTTP y el procesamiento de la notificación son independientes. La publicación directa ilustrada se sustituirá por el mecanismo Outbox cuando se implemente la Fase 5.
+**Nota:** en la Fase 4 la publicación es directa y ocurre dentro de la solicitud, después del commit y antes de responder (ADR-022). El procesamiento de la notificación sí es independiente de la respuesta HTTP. La publicación directa se sustituirá por el mecanismo Outbox en la Fase 5. La topología de RabbitMQ está en `docs/04-comunicacion-y-eventos.md` (sección 3.3) y el contrato en `docs/asyncapi/asyncapi.yaml`.
 
 ## 4. Flujo de resiliencia de Airport Service
 
