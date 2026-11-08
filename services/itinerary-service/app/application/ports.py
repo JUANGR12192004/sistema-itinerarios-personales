@@ -7,9 +7,11 @@ Esto permite sustituir cualquier implementación sin modificar la lógica de neg
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from app.application.events import ItineraryCreatedEvent
+from app.application.outbox import OutboxMessage
 from app.domain.itinerary import Itinerary
 
 
@@ -87,3 +89,27 @@ class EventPublisher(ABC):
     @abstractmethod
     def publish(self, event: ItineraryCreatedEvent) -> None:
         """Publica el evento de integración (o lo registra para publicarlo)."""
+
+
+class OutboxRepository(ABC):
+    """Puerto de lectura y marcado de los mensajes de la outbox (ADR-025).
+
+    Lo usa el Outbox Relay. Implementado por SqlAlchemyOutboxRepository y por
+    FakeOutboxRepository en las pruebas. Los cambios se confirman con UnitOfWork.
+    """
+
+    @abstractmethod
+    def get_pending(self, limit: int) -> list[OutboxMessage]:
+        """Devuelve hasta `limit` mensajes pendientes, los más antiguos primero.
+
+        Los mensajes quedan bloqueados para este relay hasta el commit; los que
+        otro relay ya bloqueó se saltan (no se espera por ellos).
+        """
+
+    @abstractmethod
+    def mark_published(self, message_id: UUID, published_at: datetime) -> None:
+        """Marca el mensaje como publicado: deja de estar pendiente."""
+
+    @abstractmethod
+    def mark_failed(self, message_id: UUID, error: str) -> None:
+        """Suma un intento fallido y guarda el error; el mensaje sigue pendiente."""

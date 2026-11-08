@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Tiempo máximo para conectar y para cada operación con RabbitMQ (segundos)
     rabbitmq_timeout_seconds: float = Field(default=3.0, gt=0)
 
+    # Outbox Relay (Fase 5, ADR-025): cada cuántos segundos revisa la outbox
+    # y cuántos eventos pendientes toma como máximo en cada ciclo.
+    outbox_relay_poll_interval_seconds: float = Field(default=2.0, gt=0)
+    outbox_relay_batch_size: int = Field(default=10, ge=1)
+
     # Host y puerto de uvicorn. En Docker (Fase 10) usar HOST=0.0.0.0.
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8002, gt=0)

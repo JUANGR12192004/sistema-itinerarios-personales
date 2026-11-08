@@ -756,10 +756,17 @@ pytest -v
   PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
   Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
 - **Fase 5:** en curso en la rama `fase-5-transactional-outbox`.
-  - Entrega **5A** completada (pendiente de commit): ADR-024 a ADR-026, tabla `outbox_events`
+  - Entrega **5A** completada (commit `599f4e0`): ADR-024 a ADR-026, tabla `outbox_events`
     (migración `b7c2d9e1f4a6`), `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`
     y `CreateItineraryUseCase` con guardar → registrar el evento → commit (desaparece "Evento perdido").
     La API ya no publica en RabbitMQ: los eventos quedan pendientes hasta el relay de la 5B.
     Total del servicio: **114 pruebas pasan, 13 omitidas** sin PostgreSQL ni RabbitMQ; con PostgreSQL
     (migración aplicada): **126 pasan, 1 omitida** (la de RabbitMQ).
-- **Siguiente:** entrega 5B — Outbox Relay.
+  - Entrega **5B** completada (pendiente de commit): puerto `OutboxRepository` y `SqlAlchemyOutboxRepository`
+    (`FOR UPDATE SKIP LOCKED`, marcas con `UPDATE`), `OutboxRelay` en `app/application/outbox_relay.py`
+    (un commit por lote, fallo de publicación detiene el lote, mensaje ilegible se marca y se continúa),
+    proceso `python -m app.outbox_relay` (`app/outbox_relay.py`: un ciclo fallido no detiene el proceso,
+    sin pausa tras un lote completo, logs de pika en `CRITICAL`), variables `OUTBOX_RELAY_POLL_INTERVAL_SECONDS`
+    y `OUTBOX_RELAY_BATCH_SIZE`. El fixture `rabbitmq_channel` pasa a `tests/integration/conftest.py`.
+    Total del servicio: **138 pasan, 21 omitidas** sin PostgreSQL ni RabbitMQ; **159 pasan** con ambos.
+- **Siguiente:** entrega 5C — documentación y demostración.
