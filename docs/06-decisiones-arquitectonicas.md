@@ -549,6 +549,41 @@ Publicar antes del commit podría anunciar un itinerario que luego no se guarda.
 
 Si RabbitMQ falla tras el commit, el evento se pierde: es el problema de *double write* (dos escrituras en sistemas distintos sin una transacción común). La Fase 5 lo resuelve guardando el evento en `outbox_events` en la misma transacción, cambiando solo el adaptador inyectado de `EventPublisher`.
 
+## ADR-023 — SonarCloud para el análisis de calidad del código
+
+**Estado:** Aceptada (agregada en el PR #7, rama `chore/sonarcloud-config`).
+
+### Contexto
+
+Las pruebas (pytest y la integración continua de `.github/workflows/tests.yml`) comprueban que el código **funciona**, pero no revisan su **calidad**: código duplicado, funciones demasiado complejas, malas prácticas o posibles problemas de seguridad. El equipo quería esa revisión automática en cada pull request.
+
+### Decisión
+
+- Usar **SonarCloud** (servicio en la nube de SonarSource para análisis estático) con **Automatic Analysis**: el equipo conectó el repositorio desde SonarCloud con su GitHub App, y SonarCloud analiza por su cuenta cada push a `main` y cada pull request. **No hay ningún paso en GitHub Actions** ni token en el repositorio.
+- Con Automatic Analysis la configuración no va en `sonar-project.properties` sino en `.sonarcloud.properties`, en la raíz del repositorio:
+
+| Propiedad | Valor | Efecto |
+|---|---|---|
+| `sonar.python.version` | `3.12` | Aplica las reglas de Python 3.12 (sin ella, SonarCloud asume compatibilidad con varias versiones de 3.x) |
+| `sonar.sources` | `services` | Código de producción: todo lo que está dentro de `services/` |
+| `sonar.exclusions` | `**/tests/**,**/alembic/versions/**` | Las pruebas y las migraciones generadas por Alembic no cuentan como código de producción |
+| `sonar.tests` | `services` | Las pruebas se buscan dentro de `services/` |
+| `sonar.test.inclusions` | `**/tests/**` | Solo las carpetas `tests/` se tratan como código de pruebas |
+
+### Qué analiza
+
+El código Python de producción de Airport Service e Itinerary Service: *bugs*, vulnerabilidades, *security hotspots* (puntos que una persona debe revisar, por ejemplo credenciales en el código o escuchar en `0.0.0.0`), *code smells* (problemas de mantenibilidad, como complejidad alta) y código duplicado. Las pruebas se reconocen como pruebas y se revisan con las reglas propias de código de pruebas.
+
+### Justificación
+
+Automatic Analysis no necesita configurar un *workflow* ni guardar un token como secreto, y es gratuito para repositorios públicos. Separar fuentes y pruebas evita falsos positivos (por ejemplo, credenciales de ejemplo en las pruebas marcadas como vulnerabilidad del servicio) y que las migraciones generadas automáticamente cuenten como duplicación.
+
+### Consecuencias
+
+- Automatic Analysis **no importa reportes de cobertura**: SonarCloud no muestra el porcentaje de cobertura de pytest. Si se quisiera, habría que cambiar a análisis desde GitHub Actions (con token).
+- Solo se analiza `services/`. Cuando existan `serverless/`, `gateway/` y `frontend/` (Fases 6 a 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
+- El acuerdo del equipo para fusionar exige el check "Pruebas" y una aprobación; el resultado de SonarCloud (su *Quality Gate*) no forma parte de ese acuerdo por ahora.
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.

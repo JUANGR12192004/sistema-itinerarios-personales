@@ -167,6 +167,17 @@ Estas son las reglas que debes seguir tú:
 - Ramas desde `main` actualizado:
   - una rama por fase: `fase-1-airport-service`, `fase-2-resiliencia`, `fase-3-itinerary-service`, etc.;
   - una rama por tarea fuera de una fase: `tipo/descripcion-corta` (por ejemplo `chore/github-practices`).
+- **Nunca hagas push forzado a `main` ni reescribas su historial** (`rebase`, `commit --amend`,
+  `filter-branch` o similares sobre commits que ya están en `main`).
+- **Ramas por fase de solo lectura:** la rama `fase-N-...` se **conserva** después del merge como
+  archivo de la fase. No se trabaja en ella después de fusionarla: las correcciones salen siempre de
+  una rama nueva desde `main` (por ejemplo `fix/...`). La versión integrada y vigente está en `main`.
+- Las ramas auxiliares (`chore/`, `fix/`, `docs/`) **sí se borran** después del merge.
+- **Coautoría:** ningún commit ni descripción de pull request lleva la línea
+  `Co-Authored-By` de Claude (ni el pie "Generated with Claude Code"). Está desactivada en
+  `.claude/settings.json` (`attribution.commit` y `attribution.pr` vacíos). Si aparece en un commit
+  propio que todavía no se ha subido, quítala antes del push. Los commits de la Fase 3 la conservan
+  porque son anteriores a esta regla y `main` no se vuelve a reescribir.
 - Un commit por entrega (o varios separados por tipo), con mensajes en formato Conventional Commits:
   el prefijo en inglés y la descripción en español (por ejemplo `feat: agrega capa de dominio de Airport Service`):
   - `feat: ...` nueva funcionalidad
@@ -183,11 +194,13 @@ Estas son las reglas que debes seguir tú:
 - Antes del merge: la integración continua (`.github/workflows/tests.yml`, check "Pruebas") debe
   pasar y debe haber **1 aprobación de otro integrante** (acuerdo del equipo; `main` aún no tiene
   protección en GitHub). Quien revisa aprueba y quien hizo el PR fusiona, con
-  **"Create a merge commit"**, y después se borra la rama.
+  **"Create a merge commit"**. Después se borra la rama solo si es auxiliar (`chore/`, `fix/`,
+  `docs/`); la rama `fase-N-...` se conserva como archivo de solo lectura.
 - **Nunca intentes aprobar ni fusionar pull requests**, aunque tengas acceso para hacerlo.
 - La integración a `main` se hace cuando la lista de verificación de la fase está completa.
-- **Al terminar cada fase, después del merge, propone crear la etiqueta anotada `fase-N`** sobre el
-  commit de merge (`git tag -a fase-N -m "..."` y `git push origin fase-N`), y espera confirmación.
+- **Al terminar cada fase, después del merge, se crea la etiqueta anotada `fase-N`** sobre el
+  commit del merge (`git tag -a fase-N -m "..."` y `git push origin fase-N`). Tú la propones y
+  esperas confirmación antes de crearla y subirla.
 - Las fases rotan entre los tres integrantes; el responsable de cada fase figura en su milestone.
 - El correo de los commits se configura solo para este repositorio (`git config user.email`, sin
   `--global`). No cambies la configuración de Git del equipo.
@@ -213,7 +226,7 @@ Estas son las reglas que debes seguir tú:
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
-| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente y las carpetas `tests` como código de pruebas |
+| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023) |
 
 No agregues librerías fuera de esta lista sin explicar por qué y pedir aprobación.
 
@@ -468,6 +481,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
 | Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
 | Publicación directa tras el commit (Fase 4, ADR-022) | Puerto `UnitOfWork`; el caso de uso hace guardar → commit → publicar. Si RabbitMQ falla tras el commit: 201 + log `ERROR` "Evento perdido" (double write, lo resuelve la Fase 5) |
+| SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -481,6 +495,7 @@ ADR-020 y ADR-021).
 | Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
 | Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
+| Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
@@ -636,7 +651,7 @@ Rama `fase-4-eventos-rabbitmq`. Una pausa al final de cada entrega (decisión de
 
 | Entrega | Contenido | Verificación |
 |---|---|---|
-| **4A** | ADR-020 a ADR-022, evento de integración `ItineraryCreatedEvent`, `EventPublishError`, puerto `UnitOfWork` y `SqlAlchemyUnitOfWork`, puerto `EventPublisher.publish(event)`, caso de uso guardar → commit → publicar, correlation ID en el evento, fakes y pruebas | `pytest -v testspplication testspi` pasa |
+| **4A** | ADR-020 a ADR-022, evento de integración `ItineraryCreatedEvent`, `EventPublishError`, puerto `UnitOfWork` y `SqlAlchemyUnitOfWork`, puerto `EventPublisher.publish(event)`, caso de uso guardar → commit → publicar, correlation ID en el evento, fakes y pruebas | `pytest -v tests\application tests\api` pasa |
 | **4B** | `pika`, configuración de RabbitMQ, declaración de la topología, `RabbitMQEventPublisher` (persistente, confirms, `mandatory`), ensamblaje en `dependencies.py`, pruebas unitarias con canal falso e integración con RabbitMQ real (SKIPPED sin RabbitMQ) | Pruebas del publicador pasan sin RabbitMQ |
 | **4C** | `docs/asyncapi/asyncapi.yaml`, explicación HTTP vs evento vs evento de dominio vs evento de integración, diagramas, README del servicio con la demostración (RabbitMQ en Docker, panel 15672, double write), estado de CLAUDE.md, PR | Mensaje visible en la cola `notification.itinerary-created` |
 
@@ -679,7 +694,10 @@ pytest -v
 > Actualiza esta sección al terminar cada entrega o fase (explicando el cambio).
 
 - **Fase 0:** completada (documentación en `docs/`).
-- **Fase 1:** completada y **fusionada en `main`** (PR #2, merge `ee183bc`) con la **etiqueta `fase-1`**
+- **Historial de `main`:** se reescribió una vez con un push forzado (intento de quitar la línea de
+  coautoría de Claude de los commits de la Fase 3, que todavía la tienen). Los identificadores de esta
+  sección son los actuales de `main`. No se vuelve a reescribir `main` (sección 5).
+- **Fase 1:** completada y **fusionada en `main`** (PR #2, merge `fad95fe`) con la **etiqueta `fase-1`**
   (97 pruebas). Documentación del servicio en `services/airport-service/README.md`.
   - Entrega **1A** completada: `.gitignore`, `.gitattributes`, entorno y `requirements.txt` de
     Airport Service, capa de dominio (`Airport`, `Coordinates`, excepciones) con pruebas.
@@ -701,7 +719,9 @@ pytest -v
   - Entrega **3B** completada: puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher`), `SqlAlchemyItineraryRepository`, modelo ORM `ItineraryORM`, `database.py`, Alembic (migración `a3f1e2b4c5d0` aplicada), `FakeItineraryRepository` con 13 pruebas, pruebas de integración contra PostgreSQL real en `tests/integration/` (8 pruebas, SKIPPED en CI).
   - Entrega **3C** completada: `HttpAirportCatalogAdapter` (404→`AirportNotFoundInCatalogError`, 504/timeout→`AirportServiceTimeoutError`, 503/502/red→`AirportServiceUnavailableError`) con 7 pruebas respx.
   - Entrega **3D** completada: casos de uso CRUD (`CreateItineraryUseCase`, `GetItineraryUseCase`, `ListItinerariesUseCase`, `UpdateItineraryUseCase`, `DeleteItineraryUseCase`), `NoopEventPublisher`, esquemas Pydantic, manejador único de errores (7 tipos), `dependencies.py` (Unit of Work con SQLAlchemy), rutas FastAPI en `/itineraries`, `main.py` en el puerto 8002, `README.md`, job de CI en `tests.yml`. 16 pruebas de API con fakes. Total del servicio: **52 pruebas pasan, 8 omitidas** (integración sin PostgreSQL en CI).
-- **Fase 4:** completada en la rama `fase-4-eventos-rabbitmq` (pendiente de PR y merge).
+- SonarCloud agregado (PR #7, merge `dac1acc`, ADR-023).
+- **Fase 4:** completada y **fusionada en `main`** (PR #8, merge `bbeebd3`) con la **etiqueta `fase-4`**.
+  La rama `fase-4-eventos-rabbitmq` se conserva como archivo de solo lectura.
   - Entrega **4A** completada: decisiones ADR-020 a ADR-022, `ItineraryCreatedEvent` (capa de aplicación),
     `EventPublishError`, puerto `UnitOfWork` con `SqlAlchemyUnitOfWork`, `EventPublisher.publish(event)`,
     `CreateItineraryUseCase` con guardar → commit → publicar (201 + log `ERROR` si falla la publicación),
@@ -716,3 +736,10 @@ pytest -v
     dominio vs evento de integración, double write), diagrama de secuencia de `docs/05-diagramas.md` y README del
     servicio con la demostración (RabbitMQ en Docker, mensaje en la cola, double write).
     Total del servicio: **93 pruebas pasan, 10 omitidas**.
+- **Cierre de la Fase 4** (rama `chore/cierre-fase-4`): `.claude/settings.json` sin coautoría de Claude,
+  reglas de coautoría, de no reescribir `main` y de ramas por fase de solo lectura (sección 5,
+  `CONTRIBUTING.md` y `README.md`), ADR-023 de SonarCloud, y en Itinerary Service: pruebas sin `.env`
+  (`tests/conftest.py`), `connect_timeout` de 2 s en el fixture `pg_engine` (de 4,5 min a ~12 s sin
+  PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
+  Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
+- **Siguiente:** Fase 5 — Transactional Outbox (no iniciada).

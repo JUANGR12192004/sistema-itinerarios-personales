@@ -77,10 +77,14 @@ Se aplicarán arquitectura hexagonal, el patrón Adapter y conceptos de DDD para
 | 0 | Planificación y arquitectura | Completada |
 | 1 | Airport Service | Completada |
 | 2 | Resiliencia y caché | Completada |
-| 3 | Itinerary Service | Siguiente |
-| 4 a 12 | Eventos, Outbox, serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
+| 3 | Itinerary Service | Completada |
+| 4 | Eventos y RabbitMQ | Completada |
+| 5 | Transactional Outbox | Siguiente |
+| 6 a 12 | Serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
 
-**Fase actual:** Fase 3 — Itinerary Service (CRUD de itinerarios con PostgreSQL y validación de aeropuertos contra Airport Service).
+**Fase actual:** Fase 5 — Transactional Outbox (guardar el itinerario y su evento en la misma transacción y publicarlo con un relay). Aún no iniciada.
+
+La documentación de Itinerary Service (PostgreSQL, Alembic, RabbitMQ, ejecución, pruebas, endpoints y demostración) está en [`services/itinerary-service/README.md`](services/itinerary-service/README.md). El contrato del evento `ItineraryCreatedEvent` está en [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml).
 
 ### Fase 2 — Resiliencia y caché (completada)
 
@@ -101,6 +105,30 @@ La documentación de Airport Service (instalación, Redis, ejecución, pruebas, 
 ## Desarrollo
 
 El desarrollo seguirá un enfoque incremental. Cada fase incluirá explicación, estructura de archivos, implementación cuando corresponda, instrucciones de ejecución, pruebas y una lista de verificación.
+
+El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisión) está en [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Ramas del repositorio
+
+**La versión integrada y vigente del sistema está siempre en `main`.** Las demás ramas son de consulta.
+
+| Rama | Contenido | Etiqueta |
+|---|---|---|
+| `main` | Todas las fases fusionadas: versión vigente | — |
+| `fase-1-airport-service` | Fase 1 — Airport Service. La rama se borró con la regla anterior; su estado se conserva en la etiqueta | `fase-1` |
+| `fase-2-resiliencia` | Fase 2 — Resiliencia y caché. La rama se borró con la regla anterior; su estado se conserva en la etiqueta | `fase-2` |
+| `fase-3-itinerary-service` | Fase 3 — Itinerary Service (CRUD, PostgreSQL, Alembic, validación de aeropuertos) | `fase-3` |
+| `fase-4-eventos-rabbitmq` | Fase 4 — `ItineraryCreatedEvent`, RabbitMQ y AsyncAPI | `fase-4` |
+
+- Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
+- Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.
+- Cada etiqueta `fase-N` apunta al commit del merge de esa fase en `main`. Para ver el sistema tal como quedó al cerrar una fase: `git switch --detach fase-3`.
+
+## Uso de Claude Code
+
+El equipo usa [Claude Code](https://claude.com/claude-code) como herramienta de desarrollo (asistente de programación). Las reglas que sigue en este repositorio están en [`CLAUDE.md`](CLAUDE.md), y cada cambio que propone lo revisa, confirma y sube un integrante del equipo, que es el autor del commit.
+
+Los commits y las descripciones de pull request **no llevan la línea de coautoría** de Claude (`Co-Authored-By`); está desactivada en `.claude/settings.json`. Los commits de la Fase 3 sí la conservan porque son anteriores a esta regla, y el equipo decidió no volver a reescribir el historial de `main`.
 
 ## Contexto académico
 
