@@ -43,18 +43,24 @@ def db_session(pg_engine):
     Si pg_engine es None (PostgreSQL no disponible) la prueba se marca como
     SKIPPED, no como FAILED, para que el CI siga en verde sin base de datos.
 
-    Limpieza: elimina todos los registros de itineraries antes y después de
-    cada prueba para garantizar aislamiento entre tests.
+    Limpieza: elimina todos los registros de itineraries y outbox_events antes y
+    después de cada prueba para garantizar aislamiento entre tests. Requiere las
+    migraciones aplicadas (`alembic upgrade head`).
     """
     if pg_engine is None:
         pytest.skip("PostgreSQL no disponible — omitiendo prueba de integración")
 
     session = Session(pg_engine)
-    session.execute(text("DELETE FROM itineraries"))
-    session.commit()
+    _clean_tables(session)
 
     yield session
 
+    session.rollback()  # por si la prueba dejó una transacción a medias
+    _clean_tables(session)
+    session.close()
+
+
+def _clean_tables(session: Session) -> None:
+    session.execute(text("DELETE FROM outbox_events"))
     session.execute(text("DELETE FROM itineraries"))
     session.commit()
-    session.close()

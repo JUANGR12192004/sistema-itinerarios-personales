@@ -116,7 +116,7 @@ Se deberán configurar exchanges, colas, routing keys, confirmaciones, recuperac
 
 ## ADR-006 — Transactional Outbox
 
-**Estado:** Aceptada como objetivo de implementación.
+**Estado:** Aceptada. Se implementa en la Fase 5; los detalles están en ADR-024 (tabla `outbox_events`), ADR-025 (Outbox Relay) y ADR-026 (registro del evento en la misma transacción).
 
 ### Contexto
 
@@ -306,7 +306,7 @@ La primera versión del diagrama de componentes mostraba los casos de uso de Iti
 ### Decisión
 
 - La validación de aeropuertos se hace mediante el puerto `AirportCatalog`, implementado por `HttpAirportCatalogAdapter`, que llama al endpoint REST `GET /airports/{id}` de Airport Service.
-- La publicación de eventos se hace mediante el puerto `EventPublisher`. En la Fase 4 lo implementa un publicador de RabbitMQ y en la Fase 5 un adaptador Outbox, sin cambiar el caso de uso.
+- La publicación de eventos se hace mediante el puerto `EventPublisher`. En la Fase 4 lo implementa un publicador de RabbitMQ y en la Fase 5 un adaptador Outbox. El caso de uso sigue dependiendo solo del puerto, pero en la Fase 5 cambia el **orden** de sus pasos: registra el evento antes del commit (ADR-026).
 
 ### Justificación
 
@@ -315,7 +315,8 @@ Los casos de uso quedan independientes del protocolo HTTP y del broker de mensaj
 ### Consecuencias
 
 - Itinerary Service solo conoce el contrato REST publicado por Airport Service (ADR-012).
-- El paso de publicación directa (Fase 4) a Outbox (Fase 5) se limita a cambiar el adaptador inyectado.
+- El paso de publicación directa (Fase 4) a Outbox (Fase 5) cambia el adaptador inyectado y el orden del caso de uso (registrar el evento → commit), sin que el caso de uso conozca RabbitMQ ni la tabla de la outbox.
+- *Corrección (Fase 5):* la versión anterior de esta decisión decía que bastaba con cambiar el adaptador "sin cambiar el caso de uso". No es así: si el caso de uso hiciera el commit antes de llamar al puerto, la fila de la outbox quedaría fuera de la transacción del itinerario y volvería el problema de *double write*. Ver ADR-026.
 
 ## ADR-014 — Resiliencia de Airport Service frente a API Colombia
 
@@ -528,7 +529,7 @@ El consumidor de la Fase 6 debe declarar la cola con los mismos argumentos (si n
 
 ## ADR-022 — Publicación directa tras el commit (Fase 4)
 
-**Estado:** Aceptada (Fase 4). Se reemplaza por el Transactional Outbox en la Fase 5 (ADR-006).
+**Estado:** Reemplazada en la Fase 5 por el Transactional Outbox (ADR-006 y ADR-024 a ADR-026). Se conserva como registro histórico.
 
 ### Contexto
 
@@ -547,7 +548,7 @@ Publicar antes del commit podría anunciar un itinerario que luego no se guarda.
 
 ### Consecuencias
 
-Si RabbitMQ falla tras el commit, el evento se pierde: es el problema de *double write* (dos escrituras en sistemas distintos sin una transacción común). La Fase 5 lo resuelve guardando el evento en `outbox_events` en la misma transacción, cambiando solo el adaptador inyectado de `EventPublisher`.
+Si RabbitMQ falla tras el commit, el evento se pierde: es el problema de *double write* (dos escrituras en sistemas distintos sin una transacción común). La Fase 5 lo resuelve guardando el evento en `outbox_events` en la misma transacción: cambia el adaptador inyectado de `EventPublisher` **y** el orden del caso de uso, que registra el evento antes del commit (ADR-026).
 
 ## ADR-023 — SonarCloud para el análisis de calidad del código
 
@@ -583,6 +584,105 @@ Automatic Analysis no necesita configurar un *workflow* ni guardar un token como
 - Automatic Analysis **no importa reportes de cobertura**: SonarCloud no muestra el porcentaje de cobertura de pytest. Si se quisiera, habría que cambiar a análisis desde GitHub Actions (con token).
 - Solo se analiza `services/`. Cuando existan `serverless/`, `gateway/` y `frontend/` (Fases 6 a 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
 - El acuerdo del equipo para fusionar exige el check "Pruebas" y una aprobación; el resultado de SonarCloud (su *Quality Gate*) no forma parte de ese acuerdo por ahora.
+
+## ADR-024 — Tabla `outbox_events` y `OutboxMessage` (Fase 5)
+
+**Estado:** Aceptada (Fase 5, entrega 5A).
+
+### Contexto
+
+El Transactional Outbox (ADR-006) necesita guardar cada evento pendiente en la **misma base de datos** que el itinerario, para que ambos entren en una sola transacción de PostgreSQL. Hace falta definir la tabla, cómo se buscan rápido los pendientes y qué pasa con los ya publicados.
+
+### Decisión
+
+- Nueva tabla `outbox_events`, creada con una migración de Alembic:
+
+| Columna | Tipo | Significado |
+|---|---|---|
+| `id` | UUID, clave primaria | Igual al `event_id` del evento: una fila por evento |
+| `aggregate_type` | VARCHAR(100) | Tipo del agregado que originó el evento (`itinerary`) |
+| `aggregate_id` | UUID | Id del agregado (el `itinerary_id`) |
+| `event_type` | VARCHAR(100) | `itinerary.created` |
+| `event_version` | INTEGER | Versión del contrato (`1`) |
+| `payload` | JSONB | El evento completo, con la forma exacta del contrato (ADR-020) |
+| `occurred_at` | TIMESTAMPTZ | Cuándo ocurrió el hecho |
+| `published_at` | TIMESTAMPTZ, nulo | `NULL` mientras está pendiente; la fecha de publicación después |
+| `attempts` | INTEGER, por defecto 0 | Intentos de publicación fallidos |
+| `last_error` | TEXT, nulo | Último error de publicación |
+
+- **Índice parcial** `ix_outbox_events_pending` sobre `occurred_at` con la condición `WHERE published_at IS NULL`. Un índice parcial solo incluye las filas que cumplen la condición: contiene únicamente los pendientes, así que sigue siendo pequeño aunque la tabla crezca, y sirve para la consulta del relay (`WHERE published_at IS NULL ORDER BY occurred_at`).
+- En el código, cada fila es un **`OutboxMessage`** ("mensaje pendiente" en el lenguaje ubicuo), un `dataclass` de la capa de **aplicación**. No va en el dominio porque es un concepto técnico de entrega de mensajes, no una regla del negocio de itinerarios. El modelo ORM `OutboxEventORM` vive en `infrastructure/persistence`.
+- Los eventos publicados **se conservan** en la tabla. La limpieza periódica queda como mejora futura.
+
+### Justificación
+
+`payload` en JSONB guarda el contrato tal cual se publicará: el relay no necesita leer la tabla `itineraries` ni reconstruir datos. `id = event_id` impide registrar dos veces el mismo evento (la clave primaria lo rechazaría). Las columnas `aggregate_*`, `event_type` y `event_version` permiten consultar y depurar la outbox sin abrir el JSON. Conservar los publicados ayuda a demostrar y auditar el flujo.
+
+### Consecuencias
+
+- La tabla crece con cada itinerario creado; con el índice parcial la búsqueda de pendientes no se vuelve lenta, pero en un sistema real habría que borrar o archivar los publicados antiguos.
+- `outbox_events` pertenece a Itinerary Service, como `itineraries` (ADR-004): ningún otro servicio la lee.
+
+## ADR-025 — Outbox Relay: proceso aparte, `SKIP LOCKED` y entrega al menos una vez (Fase 5)
+
+**Estado:** Aceptada (Fase 5). Se implementa en la entrega 5B.
+
+### Contexto
+
+Alguien debe leer los eventos pendientes de `outbox_events` y publicarlos en RabbitMQ, sin bloquear la API y sin que dos copias del proceso publiquen el mismo evento a la vez.
+
+### Decisión
+
+- El **Outbox Relay** es un proceso aparte de Itinerary Service, con su propio comando (`python -m app.outbox_relay`). Cada ciclo procesa un lote y espera un intervalo. Variables: `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (por defecto 2) y `OUTBOX_RELAY_BATCH_SIZE` (por defecto 10). Se detiene con Ctrl+C. Si PostgreSQL falla en un ciclo, registra el error y sigue con el siguiente, sin terminar el proceso.
+- Toma los pendientes con `SELECT ... WHERE published_at IS NULL ORDER BY occurred_at LIMIT n FOR UPDATE SKIP LOCKED`. `FOR UPDATE` bloquea las filas leídas hasta el fin de la transacción, y `SKIP LOCKED` hace que otro relay **salte** las filas bloqueadas en vez de esperarlas: dos relays nunca toman el mismo evento.
+- **Un commit por lote**: hacer commit evento por evento liberaría los bloqueos del resto del lote, que otro relay podría tomar mientras este todavía los publica.
+- Orden: **publicar y después marcar** `published_at`. Esto da una entrega **al menos una vez**.
+- Si una publicación falla: se incrementa `attempts`, se guarda `last_error`, el evento sigue pendiente y **se detiene el lote**. Los eventos restantes no se tocan ni suman intentos, y todos se reintentan en el siguiente ciclo. Si RabbitMQ está caído, seguir con el resto solo alargaría el ciclo (cada intento espera hasta `RABBITMQ_TIMEOUT_SECONDS`).
+- Si el `payload` no se puede leer o el `event_type` es desconocido, el evento se marca como fallido (`attempts`, `last_error`) y el relay **continúa** con el siguiente, porque ese fallo no depende de RabbitMQ.
+- No hay límite de intentos en esta fase.
+
+### Justificación
+
+Un proceso aparte desacopla la respuesta HTTP de la disponibilidad de RabbitMQ: la API responde 201 aunque el broker esté caído. `SKIP LOCKED` permite correr varios relays sin coordinación extra. Publicar antes de marcar evita el caso grave (marcar como publicado algo que nunca salió); el precio son los duplicados ocasionales, que el consumidor absorbe.
+
+### Consecuencias
+
+- **Puede haber duplicados.** Si el relay publica y se detiene (o PostgreSQL falla) antes del commit que marca `published_at`, la transacción se deshace, el evento sigue pendiente y se publicará otra vez. Como el commit es por lote, puede repetirse hasta un lote completo. Por eso el consumidor de la Fase 6 **debe ser idempotente** con `event_id`, que ya viaja como `message_id` (ADR-021).
+- Un evento que falle siempre (por ejemplo, RabbitMQ lo rechaza de forma permanente) quedaría primero en la cola y detendría cada lote. Un límite de intentos con estado "muerto" queda como mejora futura.
+- El evento llega a RabbitMQ con un pequeño retraso (como máximo, el intervalo de revisión más el tiempo de publicación).
+- `RabbitMQEventPublisher` abre una conexión por publicación (ADR-021); con lotes pequeños es aceptable.
+
+## ADR-026 — Registro del evento en la misma transacción del itinerario (Fase 5)
+
+**Estado:** Aceptada (Fase 5, entrega 5A). Reemplaza a ADR-022.
+
+### Contexto
+
+En la Fase 4 `CreateItineraryUseCase` hacía guardar → commit → publicar (ADR-022). Si RabbitMQ fallaba después del commit, el evento se perdía (*double write*). Para que el Outbox funcione, el evento debe quedar registrado **dentro** de la transacción del itinerario.
+
+### Decisión
+
+- El puerto `EventPublisher.publish(event)` se mantiene, con dos adaptadores:
+
+| Quién lo usa | Adaptador | Qué hace |
+|---|---|---|
+| `CreateItineraryUseCase` (API) | `OutboxEventPublisher` | Agrega la fila a `outbox_events` en la **misma sesión** de SQLAlchemy del repositorio, sin hacer commit |
+| `OutboxRelay` (proceso aparte, 5B) | `RabbitMQEventPublisher` (sin cambios) | Publica en RabbitMQ |
+
+- Nuevo orden del caso de uso: validar aeropuertos → crear `Itinerary` → `save()` → construir el evento → `publish()` (registro en la outbox) → `commit()`.
+- Se elimina el `try/except EventPublishError` con el log "Evento perdido": si el evento no se puede registrar, el error se propaga, la transacción se deshace y no se guarda nada (500 `INTERNAL_ERROR`). Si el commit falla, tampoco se guarda ninguno de los dos.
+- `ItineraryCreatedEvent.from_dict(payload)` reconstruye el evento desde el JSON guardado, para que el relay reutilice `RabbitMQEventPublisher` con las mismas propiedades AMQP.
+- El contrato del evento (ADR-020) y la topología (ADR-021) **no cambian**.
+
+### Justificación
+
+El caso de uso sigue sin conocer RabbitMQ ni la outbox (depende solo de puertos, ADR-002), pero decide el orden: el evento debe registrarse antes del commit para quedar en la misma transacción. Así el itinerario y su evento se guardan juntos o no se guarda ninguno. Reutilizar `RabbitMQEventPublisher` evita duplicar la lógica de publicación.
+
+### Consecuencias
+
+- `POST /itineraries` ya no habla con RabbitMQ: responde 201 aunque RabbitMQ esté caído, y el evento queda pendiente hasta que el relay lo publique.
+- Mientras no exista el relay (entre las entregas 5A y 5B), los eventos se acumulan como pendientes en la tabla.
+- La API depende solo de PostgreSQL para crear itinerarios (además de Airport Service).
 
 ## 2. Revisión de decisiones
 

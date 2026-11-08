@@ -282,7 +282,7 @@ mismo puerto y envuelve al Adapter. No se modifica el Adapter para cachear.
 |---|---|
 | `ItineraryRepository` | `SqlAlchemyItineraryRepository` |
 | `AirportCatalog` | `HttpAirportCatalogAdapter` (llama a `GET /airports/{id}` de Airport Service) |
-| `EventPublisher` | Fase 4: `RabbitMQEventPublisher`. Fase 5: adaptador Outbox (mismo puerto, el caso de uso no cambia) |
+| `EventPublisher` | Fase 4: `RabbitMQEventPublisher`. Fase 5: adaptador Outbox (mismo puerto; el caso de uso sigue sin conocer RabbitMQ ni la outbox, pero **cambia el orden**: registra el evento **antes** del commit, dentro de la misma transacción) |
 
 ### 7.5. Estructura del repositorio
 
@@ -480,7 +480,10 @@ Confirmadas en la Fase 3 (ADR-015):
 | Endpoints de Itinerary Service (Fase 3, ADR-019) | Los de la sección 10.1; un timeout de Airport Service → 504 en Itinerary Service (extiende ADR-012) |
 | Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
 | Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
-| Publicación directa tras el commit (Fase 4, ADR-022) | Puerto `UnitOfWork`; el caso de uso hace guardar → commit → publicar. Si RabbitMQ falla tras el commit: 201 + log `ERROR` "Evento perdido" (double write, lo resuelve la Fase 5) |
+| Publicación directa tras el commit (Fase 4, ADR-022) | **Reemplazada por ADR-026 en la Fase 5.** Puerto `UnitOfWork`; el caso de uso hacía guardar → commit → publicar. Si RabbitMQ fallaba tras el commit: 201 + log `ERROR` "Evento perdido" (double write) |
+| Tabla `outbox_events` (Fase 5, ADR-024) | Columnas `id` (= `event_id`), `aggregate_type`, `aggregate_id`, `event_type`, `event_version`, `payload` (JSONB), `occurred_at`, `published_at` (nulo = pendiente), `attempts`, `last_error`; índice parcial `ix_outbox_events_pending` sobre `occurred_at WHERE published_at IS NULL`. `OutboxMessage` vive en la capa de aplicación (`app/application/outbox.py`). Los eventos publicados se conservan |
+| Outbox Relay (Fase 5, ADR-025) | Proceso aparte (`python -m app.outbox_relay`) con `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2) y `OUTBOX_RELAY_BATCH_SIZE` (10). `SELECT ... FOR UPDATE SKIP LOCKED`, un commit por lote, publicar y después marcar `published_at` (al menos una vez: puede haber duplicados, el consumidor es idempotente con `event_id`). Fallo de publicación → `attempts + 1`, `last_error` y se detiene el lote; payload ilegible o `event_type` desconocido → se marca como fallido y se continúa. Sin límite de intentos |
+| Registro del evento en la misma transacción (Fase 5, ADR-026) | Reemplaza a ADR-022. El caso de uso hace guardar → registrar el evento (`OutboxEventPublisher`, misma sesión) → commit. Si el registro falla, no hay commit (500). El relay reutiliza `RabbitMQEventPublisher` sin cambios y reconstruye el evento con `ItineraryCreatedEvent.from_dict`. Contrato y topología sin cambios |
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
@@ -655,6 +658,16 @@ Rama `fase-4-eventos-rabbitmq`. Una pausa al final de cada entrega (decisión de
 | **4B** | `pika`, configuración de RabbitMQ, declaración de la topología, `RabbitMQEventPublisher` (persistente, confirms, `mandatory`), ensamblaje en `dependencies.py`, pruebas unitarias con canal falso e integración con RabbitMQ real (SKIPPED sin RabbitMQ) | Pruebas del publicador pasan sin RabbitMQ |
 | **4C** | `docs/asyncapi/asyncapi.yaml`, explicación HTTP vs evento vs evento de dominio vs evento de integración, diagramas, README del servicio con la demostración (RabbitMQ en Docker, panel 15672, double write), estado de CLAUDE.md, PR | Mensaje visible en la cola `notification.itinerary-created` |
 
+### 12.5. Plan de la Fase 5 (entregas)
+
+Rama `fase-5-transactional-outbox`. Una pausa al final de cada entrega, antes del commit.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **5A** | ADR-024 a ADR-026 (y ajustes de ADR-006, ADR-013, ADR-022), `OutboxEventORM` y migración `b7c2d9e1f4a6`, `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`, caso de uso guardar → registrar → commit, ensamblaje en `dependencies.py`, pruebas | `pytest -v` pasa; `alembic upgrade head` aplica la migración; pruebas de `tests/integration/test_outbox_integration.py` pasan con PostgreSQL |
+| **5B** | Puerto `OutboxRepository`, `SqlAlchemyOutboxRepository` (`SKIP LOCKED`), `OutboxRelay` en `application`, proceso `app/outbox_relay.py`, variables del relay, pruebas unitarias con fakes e integración (SKIPPED sin PostgreSQL o RabbitMQ) | Pruebas del relay pasan sin PostgreSQL ni RabbitMQ |
+| **5C** | `docs/04` (Outbox, duplicados e idempotencia), diagramas de `docs/05`, descripción en AsyncAPI (sin cambiar el contrato), README del servicio con la demostración del double write resuelto, revisión del job de CI, estado de CLAUDE.md | Con RabbitMQ detenido: 201 y evento pendiente; al levantarlo, el relay lo publica en la cola |
+
 ---
 
 ## 13. Estándares de código
@@ -742,4 +755,11 @@ pytest -v
   (`tests/conftest.py`), `connect_timeout` de 2 s en el fixture `pg_engine` (de 4,5 min a ~12 s sin
   PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
   Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
-- **Siguiente:** Fase 5 — Transactional Outbox (no iniciada).
+- **Fase 5:** en curso en la rama `fase-5-transactional-outbox`.
+  - Entrega **5A** completada (pendiente de commit): ADR-024 a ADR-026, tabla `outbox_events`
+    (migración `b7c2d9e1f4a6`), `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`
+    y `CreateItineraryUseCase` con guardar → registrar el evento → commit (desaparece "Evento perdido").
+    La API ya no publica en RabbitMQ: los eventos quedan pendientes hasta el relay de la 5B.
+    Total del servicio: **114 pruebas pasan, 13 omitidas** sin PostgreSQL ni RabbitMQ; con PostgreSQL
+    (migración aplicada): **126 pasan, 1 omitida** (la de RabbitMQ).
+- **Siguiente:** entrega 5B — Outbox Relay.

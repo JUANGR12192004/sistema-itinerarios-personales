@@ -102,3 +102,41 @@ def test_el_evento_es_inmutable():
 
     with pytest.raises(FrozenInstanceError):
         event.traveler_name = "Otro"  # type: ignore[misc]
+
+
+# ── from_dict (Fase 5): el relay reconstruye el evento guardado en la outbox ──
+
+@pytest.mark.parametrize("traveler_email", ["ana@example.com", None])
+def test_from_dict_es_la_inversa_de_to_dict(traveler_email):
+    """Pasar por la outbox no cambia el contrato: to_dict(from_dict(p)) == p."""
+    original = ItineraryCreatedEvent.from_itinerary(_itinerary(traveler_email), "cid-1")
+    payload = original.to_dict()
+
+    rebuilt = ItineraryCreatedEvent.from_dict(payload)
+
+    assert rebuilt == original
+    assert rebuilt.to_dict() == payload
+
+
+def test_from_dict_rechaza_otro_tipo_de_evento():
+    payload = ItineraryCreatedEvent.from_itinerary(_itinerary()).to_dict()
+    payload["event_type"] = "itinerary.deleted"
+
+    with pytest.raises(ValueError, match="Tipo de evento inesperado"):
+        ItineraryCreatedEvent.from_dict(payload)
+
+
+def test_from_dict_rechaza_otra_version():
+    payload = ItineraryCreatedEvent.from_itinerary(_itinerary()).to_dict()
+    payload["event_version"] = 2
+
+    with pytest.raises(ValueError, match="Versión de evento no soportada"):
+        ItineraryCreatedEvent.from_dict(payload)
+
+
+def test_from_dict_sin_un_campo_lanza_key_error():
+    payload = ItineraryCreatedEvent.from_itinerary(_itinerary()).to_dict()
+    del payload["data"]["itinerary_id"]
+
+    with pytest.raises(KeyError):
+        ItineraryCreatedEvent.from_dict(payload)

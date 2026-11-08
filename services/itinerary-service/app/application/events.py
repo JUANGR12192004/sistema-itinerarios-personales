@@ -67,6 +67,37 @@ class ItineraryCreatedEvent:
             duration_minutes=itinerary.duration_minutes,
         )
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ItineraryCreatedEvent:
+        """Reconstruye el evento desde su forma de contrato (la inversa de `to_dict`).
+
+        Lo usa el Outbox Relay (Fase 5): el evento se guarda como JSON en `outbox_events`
+        y se vuelve a convertir en objeto para publicarlo con RabbitMQEventPublisher.
+
+        Raises:
+            ValueError: el tipo o la versión no corresponden a este evento, o un valor
+                tiene formato inválido.
+            KeyError: falta un campo del contrato.
+        """
+        if payload["event_type"] != cls.EVENT_TYPE:
+            raise ValueError(f"Tipo de evento inesperado: {payload['event_type']!r}")
+        if payload["event_version"] != cls.EVENT_VERSION:
+            raise ValueError(f"Versión de evento no soportada: {payload['event_version']!r}")
+
+        data = payload["data"]
+        return cls(
+            event_id=UUID(payload["event_id"]),
+            occurred_at=datetime.fromisoformat(payload["occurred_at"]),
+            correlation_id=payload["correlation_id"],
+            itinerary_id=UUID(data["itinerary_id"]),
+            traveler_name=data["traveler_name"],
+            traveler_email=data["traveler_email"],
+            departure_airport_id=data["departure_airport_id"],
+            arrival_airport_id=data["arrival_airport_id"],
+            travel_date=datetime.fromisoformat(data["travel_date"]),
+            duration_minutes=data["duration_minutes"],
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Devuelve el evento con la forma exacta del contrato (listo para JSON).
 

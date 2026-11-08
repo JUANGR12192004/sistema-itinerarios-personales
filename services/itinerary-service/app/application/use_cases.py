@@ -10,7 +10,6 @@ from app.application.exceptions import (
     AirportNotFoundInCatalogError,
     ArrivalAirportNotFoundError,
     DepartureAirportNotFoundError,
-    EventPublishError,
     ItineraryNotFoundError,
 )
 from app.application.ports import (
@@ -80,27 +79,24 @@ class CreateItineraryUseCase:
             traveler_email=command.traveler_email,
         )
 
-        # Publicación directa tras el commit (Fase 4, ADR-022):
-        # 1) se guarda el itinerario, 2) se confirma la transacción, 3) se publica el evento.
-        # Publicar antes del commit podría anunciar un itinerario que luego no se guarda.
+        # Transactional Outbox (Fase 5, ADR-026):
+        # 1) se guarda el itinerario, 2) se registra el evento, 3) se confirma la transacción.
+        # El evento se registra ANTES del commit para quedar en la misma transacción:
+        # se guardan los dos o ninguno. Si el registro falla, el error se propaga y no
+        # hay commit. El Outbox Relay publica después el evento en RabbitMQ.
         self._repo.save(itinerary)
-        self._unit_of_work.commit()
 
         event = ItineraryCreatedEvent.from_itinerary(itinerary, command.correlation_id)
-        try:
-            self._event_publisher.publish(event)
-        except EventPublishError:
-            # El itinerario YA está guardado: se responde 201 y el evento se pierde.
-            # Este es el problema de "double write" (dos escrituras sin transacción
-            # común) que la Fase 5 resuelve con el Transactional Outbox.
-            logger.error(
-                "Evento perdido: itinerario %s guardado pero %s (event_id=%s) no se publicó",
-                itinerary.id,
-                event.EVENT_TYPE,
-                event.event_id,
-                exc_info=True,
-            )
+        self._event_publisher.publish(event)
 
+        self._unit_of_work.commit()
+
+        logger.info(
+            "Itinerario creado: id=%s, evento %s registrado (event_id=%s)",
+            itinerary.id,
+            event.EVENT_TYPE,
+            event.event_id,
+        )
         return itinerary
 
 

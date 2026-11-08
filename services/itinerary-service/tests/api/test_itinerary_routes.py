@@ -90,17 +90,22 @@ def test_crear_propaga_el_correlation_id_al_evento():
     assert publisher.published[0].correlation_id == "demo-123"
 
 
-def test_crear_con_rabbitmq_caido_devuelve_201_y_no_publica(caplog):
-    """Si la publicación falla tras el commit, el itinerario existe: 201 + log ERROR."""
-    client, repo, publisher = _make_client(existing_ids={1, 5}, publisher_fails=True)
+def test_crear_si_no_se_registra_el_evento_devuelve_500_sin_commit():
+    """Fase 5 (ADR-026): si el evento no se registra en la outbox, no se confirma nada.
 
-    with caplog.at_level("ERROR"):
-        response = client.post("/itineraries", json=BODY_VALIDO)
+    Responde 500 INTERNAL_ERROR en formato único y nunca llega a hacer commit;
+    con la base real, get_db_session deshace la transacción (rollback).
+    """
+    uow = FakeUnitOfWork()
+    _make_client(existing_ids={1, 5}, publisher_fails=True)
+    app.dependency_overrides[get_unit_of_work] = lambda: uow
+    client = TestClient(app, raise_server_exceptions=False)
 
-    assert response.status_code == 201
-    assert len(repo.list_all()) == 1
-    assert publisher.published == []
-    assert "Evento perdido" in caplog.text
+    response = client.post("/itineraries", json=BODY_VALIDO)
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+    assert uow.commits == 0
 
 
 def test_crear_con_email_devuelve_201():

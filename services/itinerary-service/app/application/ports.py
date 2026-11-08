@@ -59,7 +59,7 @@ class UnitOfWork(ABC):
 
     Unit of Work ("unidad de trabajo") agrupa los cambios de una solicitud y los
     confirma juntos. El caso de uso lo usa para decidir CUÁNDO quedan guardados
-    los datos: en la Fase 4 publica el evento solo después del commit (ADR-022).
+    los datos: en la Fase 5 confirma el itinerario y su evento en el mismo commit (ADR-026).
 
     Implementado por SqlAlchemyUnitOfWork (Fase 4) y por FakeUnitOfWork en las pruebas.
     """
@@ -72,8 +72,12 @@ class UnitOfWork(ABC):
 class EventPublisher(ABC):
     """Puerto de publicación de eventos de integración.
 
-    Fase 4: RabbitMQEventPublisher (publicación directa tras el commit).
-    Fase 5: adaptador Outbox (mismo puerto; el caso de uso no cambia).
+    Adaptadores (ADR-026):
+    - OutboxEventPublisher: lo usa CreateItineraryUseCase. Registra el evento en
+      `outbox_events` dentro de la transacción actual; por eso el caso de uso lo
+      llama ANTES del commit.
+    - RabbitMQEventPublisher: lo usa el Outbox Relay (Fase 5B) para enviar a RabbitMQ
+      los eventos pendientes.
     El caso de uso llama a este puerto; nunca habla directamente con RabbitMQ.
 
     Raises:
@@ -82,4 +86,4 @@ class EventPublisher(ABC):
 
     @abstractmethod
     def publish(self, event: ItineraryCreatedEvent) -> None:
-        """Publica el evento de integración."""
+        """Publica el evento de integración (o lo registra para publicarlo)."""
