@@ -89,14 +89,16 @@ Garantías del lado del productor (`RabbitMQEventPublisher`, librería `pika`):
 - **Durabilidad:** exchanges y colas durables, y mensajes persistentes (`delivery_mode=2`): sobreviven a un reinicio de RabbitMQ.
 - **Publisher confirms:** RabbitMQ confirma cada mensaje; si lo rechaza, la publicación falla.
 - **`mandatory=True`:** si el mensaje no llega a ninguna cola, RabbitMQ lo devuelve y la publicación falla en vez de perderse en silencio.
-- **Timeout** de 3 segundos (`RABBITMQ_TIMEOUT_SECONDS`) para no bloquear la solicitud HTTP si RabbitMQ no responde.
+- **Timeout** de 3 segundos (`RABBITMQ_TIMEOUT_SECONDS`) para no quedarse esperando si RabbitMQ no responde.
+  Desde la Fase 5 quien publica es el Outbox Relay, no la solicitud HTTP (sección 7).
 - Mientras no exista el consumidor, el productor declara toda la topología (las declaraciones son idempotentes).
 
 ### 3.4. Tratamiento de errores
 
-- **Del lado del productor (Fase 4):** si RabbitMQ falla después del commit, `POST /itineraries` responde **201**
-  (el itinerario sí existe) y se registra un `ERROR` "Evento perdido" con el id del itinerario y el `event_id`
-  (ADR-022). Ver la sección 6.
+- **Del lado del productor (Fase 5):** `POST /itineraries` no habla con RabbitMQ. Guarda el itinerario y el evento
+  en la misma transacción (tabla `outbox_events`) y responde **201**. El Outbox Relay publica el evento después: si
+  RabbitMQ falla, el evento sigue pendiente y se reintenta, sin perderse (sección 7). En la Fase 4 un fallo de
+  RabbitMQ perdía el evento (sección 6).
 - **Del lado del consumidor (Fase 6):** confirmará (ACK) solo después de procesar. La entrega es
   **al menos una vez**, así que un mensaje puede repetirse: el consumidor será **idempotente** usando `event_id`.
   Un mensaje que no se pueda procesar se rechazará sin reencolar y RabbitMQ lo moverá a la DLQ.
@@ -133,7 +135,10 @@ puede ocurrir después y su fallo no debe impedir crear el itinerario (asíncron
 
 ## 6. Publicación directa (Fase 4) y el problema de double write
 
-En la Fase 4, `CreateItineraryUseCase` sigue este orden (ADR-022):
+> **Histórico.** Esta sección describe la Fase 4 (ADR-022, reemplazada). La Fase 5 resuelve el problema con el
+> Transactional Outbox (sección 7). Se conserva porque explica **por qué** existe el Outbox.
+
+En la Fase 4, `CreateItineraryUseCase` seguía este orden (ADR-022):
 
 1. Valida los aeropuertos por HTTP.
 2. Guarda el itinerario en PostgreSQL y hace **commit**.
@@ -150,20 +155,144 @@ son **dos escrituras en dos sistemas distintos** (PostgreSQL y RabbitMQ) sin una
 | Commit ✅ y publicación ❌ (RabbitMQ caído) | **El itinerario existe pero nadie se entera: el evento se perdió** |
 | Commit ✅ y el proceso se detiene antes de publicar | **Igual: evento perdido** |
 
-Se puede demostrar deteniendo RabbitMQ y creando un itinerario (ver el README de Itinerary Service):
-la API responde 201 y el log muestra `Evento perdido`.
+En la Fase 4 se demostraba deteniendo RabbitMQ y creando un itinerario: la API respondía 201 y el log
+mostraba `Evento perdido`. Desde la Fase 5 el mismo experimento termina con el evento publicado
+(ver el README de Itinerary Service).
 
 ## 7. Transactional Outbox (Fase 5)
 
-Itinerary Service deberá incorporar posteriormente el patrón Transactional Outbox para reducir el riesgo de que se guarde un itinerario sin que quede registrado el evento que debe publicarse.
+El **Transactional Outbox** ("bandeja de salida transaccional") convierte las dos escrituras del double write
+en **una sola**. El evento no se envía a RabbitMQ durante la solicitud: se guarda como una fila de la tabla
+`outbox_events`, en la **misma base de datos y la misma transacción** que el itinerario. Una transacción se
+confirma completa o no se confirma nada, así que **el itinerario y su evento se guardan juntos o no se guarda
+ninguno**. Después, un proceso aparte, el **Outbox Relay**, publica en RabbitMQ los eventos pendientes.
 
-La idea consiste en guardar, dentro de una misma transacción de base de datos, el itinerario y un registro del evento pendiente.
+Decisiones: ADR-006 (patrón), ADR-024 (tabla), ADR-025 (relay), ADR-026 (registro en la misma transacción)
+y ADR-027 (mensajes venenosos).
 
-Un proceso independiente publicará posteriormente los eventos pendientes en RabbitMQ.
+### 7.1. Flujo
 
-La publicación y el consumo requerirán manejo de duplicados y recuperación ante fallos.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Cliente
+    participant UC as CreateItineraryUseCase
+    participant DB as PostgreSQL (itineraries + outbox_events)
+    participant R as Outbox Relay (proceso aparte)
+    participant MQ as RabbitMQ
 
-### 7.1. Mensajes venenosos: fallo temporal vs. fallo permanente (ADR-027)
+    C->>UC: POST /itineraries
+    UC->>UC: Valida aeropuertos (HTTP) y crea Itinerary
+    rect rgb(230,245,230)
+    Note over UC,DB: Una sola transacción
+    UC->>DB: INSERT itineraries
+    UC->>DB: INSERT outbox_events (pendiente)
+    UC->>DB: COMMIT
+    end
+    UC-->>C: 201 Created
+
+    loop Cada OUTBOX_RELAY_POLL_INTERVAL_SECONDS
+        R->>DB: SELECT pendientes ... FOR UPDATE SKIP LOCKED
+        alt RabbitMQ disponible
+            R->>MQ: Publicar (persistente, confirms, mandatory)
+            MQ-->>R: ack
+            R->>DB: published_at = ahora
+        else RabbitMQ no disponible
+            R->>DB: attempts + 1, last_error (sigue pendiente)
+        end
+        R->>DB: COMMIT
+    end
+```
+
+El caso de uso sigue el orden **guardar → registrar el evento → commit** (ADR-026). El evento se registra
+**antes** del commit porque solo así queda dentro de la misma transacción. El caso de uso sigue sin conocer
+RabbitMQ ni la tabla: llama al puerto `EventPublisher`, que en la API implementa `OutboxEventPublisher`.
+
+Cómo quedan las situaciones de la sección 6:
+
+| Situación | Fase 4 | Fase 5 |
+|---|---|---|
+| Commit ✅ y RabbitMQ disponible | Evento publicado | Evento publicado por el relay (unos segundos después) |
+| Commit ❌ | No se publica nada | No se guarda ni el itinerario ni el evento |
+| Commit ✅ y RabbitMQ caído | **Evento perdido** | El evento **espera** en `outbox_events` y se publica cuando RabbitMQ vuelve |
+| Commit ✅ y el proceso se detiene | **Evento perdido** | El evento ya está guardado; el relay lo publica |
+
+La tabla `outbox_events`:
+
+| Columna | Significado |
+|---|---|
+| `id` | Igual al `event_id`: una fila por evento |
+| `aggregate_type`, `aggregate_id` | Qué originó el evento (`itinerary` y su id) |
+| `event_type`, `event_version` | `itinerary.created`, versión `1` |
+| `payload` (JSONB) | El evento completo con la forma del contrato (sección 3.2) |
+| `occurred_at` | Cuándo ocurrió; el relay publica del más antiguo al más nuevo |
+| `published_at` | `NULL` mientras está pendiente |
+| `attempts`, `last_error` | Intentos fallidos y último error |
+| `failed_at` | Fallo permanente de un mensaje venenoso (sección 7.4) |
+
+Un evento está **pendiente** si `published_at IS NULL AND failed_at IS NULL`. El índice parcial
+`ix_outbox_events_pending` contiene solo esas filas, así que buscar pendientes sigue siendo rápido aunque la
+tabla crezca con los eventos ya publicados, que se conservan (la limpieza queda como mejora futura).
+
+### 7.2. Outbox Relay
+
+Es un proceso aparte de la API, con su propio comando (desde `services/itinerary-service`, con el entorno
+virtual activado; igual en PowerShell y CMD):
+
+```powershell
+python -m app.outbox_relay
+```
+
+| Variable | Por defecto | Significado |
+|---|---|---|
+| `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` | `2.0` | Pausa entre ciclos |
+| `OUTBOX_RELAY_BATCH_SIZE` | `10` | Máximo de eventos por ciclo |
+
+En cada ciclo, dentro de **una** transacción:
+
+1. Toma hasta `OUTBOX_RELAY_BATCH_SIZE` pendientes con `SELECT ... FOR UPDATE SKIP LOCKED`.
+   `FOR UPDATE` bloquea esas filas hasta el commit; `SKIP LOCKED` hace que otro relay las **salte** en vez de
+   esperarlas. Así se pueden correr dos relays a la vez y nunca toman el mismo evento.
+2. Por cada evento: lo reconstruye desde `payload` (`ItineraryCreatedEvent.from_dict`), lo publica con el mismo
+   `RabbitMQEventPublisher` de la Fase 4 y lo marca con `published_at`.
+3. Hace **un solo commit** por lote. Un commit por evento liberaría los bloqueos del resto del lote antes de
+   publicarlos.
+
+Si RabbitMQ falla, el evento suma un intento, sigue pendiente y se detiene el lote: con RabbitMQ caído,
+intentar los demás solo alargaría el ciclo. Si un ciclo falla por completo (por ejemplo, PostgreSQL caído), el
+relay registra el error y sigue con el siguiente ciclo, sin terminar el proceso. Si un ciclo procesa un lote
+completo, el siguiente empieza sin esperar, para vaciar rápido los pendientes acumulados.
+
+### 7.3. Entrega "al menos una vez": duplicados e idempotencia
+
+El relay **primero publica y después marca** `published_at`. Si el relay se detiene (o PostgreSQL falla)
+**entre** la publicación y el commit, la marca se pierde, la transacción se deshace y el evento **se publica
+otra vez** en el siguiente ciclo. Como el commit es por lote, puede repetirse hasta un lote completo.
+
+```mermaid
+sequenceDiagram
+    participant R as Outbox Relay
+    participant MQ as RabbitMQ
+    participant DB as PostgreSQL
+    R->>MQ: Publicar evento E (event_id = 42)
+    MQ-->>R: ack
+    R-xDB: COMMIT (el relay se cae antes)
+    Note over DB: published_at sigue NULL
+    R->>MQ: Siguiente ciclo: publica E otra vez (event_id = 42)
+    Note over MQ: La cola tiene dos copias con el mismo message_id
+```
+
+El orden contrario (marcar y después publicar) evitaría los duplicados, pero podría marcar como publicado un
+evento que nunca salió: es decir, perderlo, que es justo lo que el Outbox evita. Por eso se elige **al menos
+una vez**: ningún evento se pierde, pero alguno puede llegar repetido.
+
+Consecuencia para el consumidor (Fase 6): debe ser **idempotente**. Idempotente significa que procesar el mismo
+mensaje dos veces deja el mismo resultado que procesarlo una. La clave es el `event_id`, que viaja en el cuerpo
+y como `message_id` de AMQP: si `SendNotificationFunction` ya registró una notificación con ese `event_id`, ignora
+la copia y confirma el mensaje (ACK). La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces`
+demuestra el duplicado con PostgreSQL y RabbitMQ reales.
+
+### 7.4. Mensajes venenosos: fallo temporal vs. fallo permanente (ADR-027)
 
 Un **mensaje venenoso** (*poison message*) es un mensaje que **siempre** falla al procesarse, por mucho
 que se reintente. Si se trata igual que un fallo pasajero, se reintenta para siempre: llena el log y,

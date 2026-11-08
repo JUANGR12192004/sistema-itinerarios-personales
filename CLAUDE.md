@@ -770,7 +770,16 @@ pytest -v
     sin pausa tras un lote completo, logs de pika en `CRITICAL`), variables `OUTBOX_RELAY_POLL_INTERVAL_SECONDS`
     y `OUTBOX_RELAY_BATCH_SIZE`. El fixture `rabbitmq_channel` pasa a `tests/integration/conftest.py`.
     Total del servicio: **138 pasan, 21 omitidas** sin PostgreSQL ni RabbitMQ; **159 pasan** con ambos.
-  - Entrega **5C**, primer commit (pendiente de commit): mensajes venenosos (ADR-027). Columna `failed_at`
-    (migración `c4d8e2f6a9b1`, índice parcial `published_at IS NULL AND failed_at IS NULL`), `mark_dead` en
-    `OutboxRepository`, `RelayResult.dead`, sección 7.1 de `docs/04`. Total: **167 pasan** con PostgreSQL y RabbitMQ.
-- **Siguiente:** resto de la entrega 5C — documentación y demostración.
+  - Entrega **5C** completada:
+    - Primer commit (`fd686a1`): mensajes venenosos (ADR-027). Columna `failed_at` (migración `c4d8e2f6a9b1`,
+      índice parcial `published_at IS NULL AND failed_at IS NULL`), `mark_dead` en `OutboxRepository`, `RelayResult.dead`.
+    - Segundo commit (`docs: documenta el Transactional Outbox...`): `docs/04` sección 7 (flujo, Outbox Relay, al menos una vez,
+      duplicados e idempotencia; mensajes venenosos pasa a 7.4) y secciones 3.3, 3.4 y 6 marcadas como históricas
+      o actualizadas; diagramas de componentes, general y de secuencia de `docs/05`; descripción de la operación en
+      `asyncapi.yaml` (contrato sin cambios); README del servicio (dos procesos, migraciones, variables del relay y
+      demostración del double write resuelto) y README raíz. El job de CI no necesita cambios (las pruebas de
+      integración se omiten sin PostgreSQL ni RabbitMQ).
+    - Demostración real hecha el 2026-11-08: con RabbitMQ detenido, `POST /itineraries` → 201 y evento pendiente;
+      el relay falló 9 veces sin perderlo y lo publicó al volver RabbitMQ (`message_id` = `event_id`).
+    - Total del servicio: **167 pasan** con PostgreSQL y RabbitMQ; **143 pasan, 24 omitidas** sin ellos.
+- **Siguiente:** pull request de la Fase 5 hacia `main` (lo crea el equipo) y, después del merge, la etiqueta `fase-5`.

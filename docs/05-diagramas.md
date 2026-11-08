@@ -17,10 +17,8 @@ flowchart TB
 
     AS -.-> REDIS[(Redis)]
 
-    IS --> DBI[(PostgreSQL de itinerarios)]
-    IS --> OUTBOX[Transactional Outbox]
-
-    OUTBOX --> PUB[Worker / Publisher]
+    IS --> DBI[(PostgreSQL de itinerarios<br/>itineraries + outbox_events)]
+    DBI --> PUB[Outbox Relay]
     PUB --> RMQ[RabbitMQ]
 
     RMQ --> NS[Sistema de notificaciones]
@@ -62,7 +60,7 @@ flowchart LR
         CATALOG[AirportCatalog Port]
         HTTPADAPTER[HttpAirportCatalogAdapter]
         PUBPORT[EventPublisher Port]
-        MSGADAPTER[RabbitMQEventPublisher]
+        OUTBOXADAPTER[OutboxEventPublisher]
 
         IC --> UC
         UC --> DOMAIN
@@ -71,10 +69,25 @@ flowchart LR
         UC --> PUBPORT
         PERSIST -.->|implements| REPO
         HTTPADAPTER -.->|implements| CATALOG
-        MSGADAPTER -.->|implements| PUBPORT
+        OUTBOXADAPTER -.->|implements| PUBPORT
     end
 
-    DB[(PostgreSQL)] <--> PERSIST
+    subgraph Relay["Outbox Relay (proceso aparte)"]
+        RELAY[OutboxRelay]
+        OUTPORT[OutboxRepository Port]
+        OUTREPO[SqlAlchemyOutboxRepository]
+        PUBPORT2[EventPublisher Port]
+        MSGADAPTER[RabbitMQEventPublisher]
+
+        RELAY --> OUTPORT
+        RELAY --> PUBPORT2
+        OUTREPO -.->|implements| OUTPORT
+        MSGADAPTER -.->|implements| PUBPORT2
+    end
+
+    DB[(PostgreSQL<br/>itineraries + outbox_events)] <--> PERSIST
+    OUTBOXADAPTER -->|INSERT en la misma transacción| DB
+    OUTREPO <-->|"SELECT ... FOR UPDATE SKIP LOCKED"| DB
     HTTPADAPTER -->|"HTTP GET /airports/{id}"| AC
     MSGADAPTER -->|publicación de evento| MQ[RabbitMQ]
     MQ --> NF[SendNotificationFunction]
@@ -83,6 +96,8 @@ flowchart LR
 Las flechas punteadas representan una relación de implementación conceptual de los puertos, no una llamada en tiempo de ejecución.
 
 Itinerary Service no accede a las capas internas de Airport Service: el adaptador `HttpAirportCatalogAdapter` llama a su API REST. Los casos de uso tampoco hablan directamente con RabbitMQ: usan el puerto `EventPublisher`, implementado en la Fase 4 por un publicador de RabbitMQ y en la Fase 5 por un adaptador Outbox, que registra el evento antes del commit, en la misma transacción del itinerario (ADR-013, ADR-026).
+
+El mismo puerto `EventPublisher` tiene dos adaptadores, uno en cada proceso: en la API, `OutboxEventPublisher` guarda el evento en `outbox_events`; en el Outbox Relay, `RabbitMQEventPublisher` (el de la Fase 4, sin cambios) lo publica en RabbitMQ. El relay lee y marca los pendientes con su propio puerto, `OutboxRepository` (ADR-025).
 
 ## 3. Secuencia de creación de un itinerario
 
@@ -94,6 +109,7 @@ sequenceDiagram
     participant IS as Itinerary Service
     participant AS as Airport Service
     participant DB as PostgreSQL
+    participant R as Outbox Relay
     participant MQ as RabbitMQ
     participant NF as SendNotificationFunction
 
@@ -105,18 +121,22 @@ sequenceDiagram
     IS->>AS: Validar aeropuerto de llegada
 
     alt Aeropuertos válidos (200)
-        IS->>DB: Guardar itinerario y COMMIT
-        Note over IS,DB: En la fase Outbox se guardarán<br/>itinerario y evento en una transacción
+        IS->>DB: INSERT itinerario + INSERT outbox_events y COMMIT
+        Note over IS,DB: Una sola transacción (Transactional Outbox, Fase 5):<br/>se guardan los dos o ninguno
         DB-->>IS: Confirmación
-        IS->>MQ: Publicar ItineraryCreatedEvent (Fase 4: tras el commit)
-        alt RabbitMQ confirma
-            MQ-->>IS: Confirm (ack)
-        else RabbitMQ no disponible
-            Note over IS,MQ: Log ERROR "Evento perdido" (double write).<br/>El itinerario ya existe: igual se responde 201
-        end
         IS-->>GW: 201 Itinerario creado
         GW-->>FE: Respuesta HTTP
         FE-->>Usuario: Mostrar resultado
+
+        R->>DB: Leer pendientes (FOR UPDATE SKIP LOCKED)
+        R->>MQ: Publicar ItineraryCreatedEvent
+        alt RabbitMQ confirma
+            MQ-->>R: Confirm (ack)
+            R->>DB: Marcar published_at y COMMIT
+        else RabbitMQ no disponible
+            R->>DB: attempts + 1 y COMMIT
+            Note over R,DB: El evento sigue pendiente:<br/>se reintenta en el siguiente ciclo
+        end
 
         MQ-->>NF: Entregar evento (asíncrono, Fase 6)
         NF->>NF: Simular notificación
@@ -136,7 +156,7 @@ sequenceDiagram
     end
 ```
 
-**Nota:** en la Fase 4 la publicación es directa y ocurre dentro de la solicitud, después del commit y antes de responder (ADR-022). El procesamiento de la notificación sí es independiente de la respuesta HTTP. La publicación directa se sustituirá por el mecanismo Outbox en la Fase 5. La topología de RabbitMQ está en `docs/04-comunicacion-y-eventos.md` (sección 3.3) y el contrato en `docs/asyncapi/asyncapi.yaml`.
+**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados y el consumidor debe ser idempotente con `event_id`. En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 y 7), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`.
 
 ## 4. Flujo de resiliencia de Airport Service
 
