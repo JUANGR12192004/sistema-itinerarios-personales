@@ -77,10 +77,14 @@ Se aplicarán arquitectura hexagonal, el patrón Adapter y conceptos de DDD para
 | 0 | Planificación y arquitectura | Completada |
 | 1 | Airport Service | Completada |
 | 2 | Resiliencia y caché | Completada |
-| 3 | Itinerary Service | Siguiente |
-| 4 a 12 | Eventos, Outbox, serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
+| 3 | Itinerary Service | Completada |
+| 4 | Eventos y RabbitMQ | Completada |
+| 5 | Transactional Outbox | Siguiente |
+| 6 a 12 | Serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
 
-**Fase actual:** Fase 3 — Itinerary Service (CRUD de itinerarios con PostgreSQL y validación de aeropuertos contra Airport Service).
+**Fase actual:** Fase 5 — Transactional Outbox (guardar el itinerario y su evento en la misma transacción y publicarlo con un relay). Aún no iniciada.
+
+La documentación de Itinerary Service (PostgreSQL, Alembic, RabbitMQ, ejecución, pruebas, endpoints y demostración) está en [`services/itinerary-service/README.md`](services/itinerary-service/README.md). El contrato del evento `ItineraryCreatedEvent` está en [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml).
 
 ### Fase 2 — Resiliencia y caché (completada)
 

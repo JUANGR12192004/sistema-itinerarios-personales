@@ -495,6 +495,7 @@ ADR-020 y ADR-021).
 | Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
 | Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
+| Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
@@ -650,7 +651,7 @@ Rama `fase-4-eventos-rabbitmq`. Una pausa al final de cada entrega (decisión de
 
 | Entrega | Contenido | Verificación |
 |---|---|---|
-| **4A** | ADR-020 a ADR-022, evento de integración `ItineraryCreatedEvent`, `EventPublishError`, puerto `UnitOfWork` y `SqlAlchemyUnitOfWork`, puerto `EventPublisher.publish(event)`, caso de uso guardar → commit → publicar, correlation ID en el evento, fakes y pruebas | `pytest -v testspplication testspi` pasa |
+| **4A** | ADR-020 a ADR-022, evento de integración `ItineraryCreatedEvent`, `EventPublishError`, puerto `UnitOfWork` y `SqlAlchemyUnitOfWork`, puerto `EventPublisher.publish(event)`, caso de uso guardar → commit → publicar, correlation ID en el evento, fakes y pruebas | `pytest -v tests\application tests\api` pasa |
 | **4B** | `pika`, configuración de RabbitMQ, declaración de la topología, `RabbitMQEventPublisher` (persistente, confirms, `mandatory`), ensamblaje en `dependencies.py`, pruebas unitarias con canal falso e integración con RabbitMQ real (SKIPPED sin RabbitMQ) | Pruebas del publicador pasan sin RabbitMQ |
 | **4C** | `docs/asyncapi/asyncapi.yaml`, explicación HTTP vs evento vs evento de dominio vs evento de integración, diagramas, README del servicio con la demostración (RabbitMQ en Docker, panel 15672, double write), estado de CLAUDE.md, PR | Mensaje visible en la cola `notification.itinerary-created` |
 
@@ -693,7 +694,10 @@ pytest -v
 > Actualiza esta sección al terminar cada entrega o fase (explicando el cambio).
 
 - **Fase 0:** completada (documentación en `docs/`).
-- **Fase 1:** completada y **fusionada en `main`** (PR #2, merge `ee183bc`) con la **etiqueta `fase-1`**
+- **Historial de `main`:** se reescribió una vez con un push forzado (intento de quitar la línea de
+  coautoría de Claude de los commits de la Fase 3, que todavía la tienen). Los identificadores de esta
+  sección son los actuales de `main`. No se vuelve a reescribir `main` (sección 5).
+- **Fase 1:** completada y **fusionada en `main`** (PR #2, merge `fad95fe`) con la **etiqueta `fase-1`**
   (97 pruebas). Documentación del servicio en `services/airport-service/README.md`.
   - Entrega **1A** completada: `.gitignore`, `.gitattributes`, entorno y `requirements.txt` de
     Airport Service, capa de dominio (`Airport`, `Coordinates`, excepciones) con pruebas.
@@ -715,7 +719,9 @@ pytest -v
   - Entrega **3B** completada: puertos (`ItineraryRepository`, `AirportCatalog`, `EventPublisher`), `SqlAlchemyItineraryRepository`, modelo ORM `ItineraryORM`, `database.py`, Alembic (migración `a3f1e2b4c5d0` aplicada), `FakeItineraryRepository` con 13 pruebas, pruebas de integración contra PostgreSQL real en `tests/integration/` (8 pruebas, SKIPPED en CI).
   - Entrega **3C** completada: `HttpAirportCatalogAdapter` (404→`AirportNotFoundInCatalogError`, 504/timeout→`AirportServiceTimeoutError`, 503/502/red→`AirportServiceUnavailableError`) con 7 pruebas respx.
   - Entrega **3D** completada: casos de uso CRUD (`CreateItineraryUseCase`, `GetItineraryUseCase`, `ListItinerariesUseCase`, `UpdateItineraryUseCase`, `DeleteItineraryUseCase`), `NoopEventPublisher`, esquemas Pydantic, manejador único de errores (7 tipos), `dependencies.py` (Unit of Work con SQLAlchemy), rutas FastAPI en `/itineraries`, `main.py` en el puerto 8002, `README.md`, job de CI en `tests.yml`. 16 pruebas de API con fakes. Total del servicio: **52 pruebas pasan, 8 omitidas** (integración sin PostgreSQL en CI).
-- **Fase 4:** completada en la rama `fase-4-eventos-rabbitmq` (pendiente de PR y merge).
+- SonarCloud agregado (PR #7, merge `dac1acc`, ADR-023).
+- **Fase 4:** completada y **fusionada en `main`** (PR #8, merge `bbeebd3`) con la **etiqueta `fase-4`**.
+  La rama `fase-4-eventos-rabbitmq` se conserva como archivo de solo lectura.
   - Entrega **4A** completada: decisiones ADR-020 a ADR-022, `ItineraryCreatedEvent` (capa de aplicación),
     `EventPublishError`, puerto `UnitOfWork` con `SqlAlchemyUnitOfWork`, `EventPublisher.publish(event)`,
     `CreateItineraryUseCase` con guardar → commit → publicar (201 + log `ERROR` si falla la publicación),
@@ -730,3 +736,10 @@ pytest -v
     dominio vs evento de integración, double write), diagrama de secuencia de `docs/05-diagramas.md` y README del
     servicio con la demostración (RabbitMQ en Docker, mensaje en la cola, double write).
     Total del servicio: **93 pruebas pasan, 10 omitidas**.
+- **Cierre de la Fase 4** (rama `chore/cierre-fase-4`): `.claude/settings.json` sin coautoría de Claude,
+  reglas de coautoría, de no reescribir `main` y de ramas por fase de solo lectura (sección 5,
+  `CONTRIBUTING.md` y `README.md`), ADR-023 de SonarCloud, y en Itinerary Service: pruebas sin `.env`
+  (`tests/conftest.py`), `connect_timeout` de 2 s en el fixture `pg_engine` (de 4,5 min a ~12 s sin
+  PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
+  Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
+- **Siguiente:** Fase 5 — Transactional Outbox (no iniciada).
