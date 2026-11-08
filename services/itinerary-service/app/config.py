@@ -16,7 +16,11 @@ class Settings(BaseSettings):
 
     # Cadena de conexión a PostgreSQL (psycopg 3, modo síncrono).
     # Configurar con la variable de entorno DATABASE_URL o en el archivo .env (ver .env.example).
+    # No tiene valor por defecto para no dejar credenciales en el código.
     database_url: str
+    # Tiempo máximo para abrir una conexión a PostgreSQL (segundos enteros, como espera libpq).
+    # psycopg trata los valores menores que 2 como 2, por eso el mínimo es 2.
+    database_connect_timeout_seconds: int = Field(default=5, ge=2)
 
     # URL de Airport Service y timeout de sus llamadas HTTP
     airport_service_url: str = Field(default="http://localhost:8001")

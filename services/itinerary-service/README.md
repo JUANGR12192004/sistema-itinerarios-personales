@@ -53,7 +53,8 @@ copy .env.example .env
 
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://itinerary:itinerary@localhost:5433/itinerary_db` | Conexión a PostgreSQL |
+| `DATABASE_URL` | Sin valor por defecto (**obligatoria**). En `.env.example`: `postgresql+psycopg://itinerary:itinerary@localhost:5433/itinerary_db` | Conexión a PostgreSQL. Las pruebas no la necesitan: `tests/conftest.py` usa una URL de prueba si no está definida |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | Tiempo máximo para abrir una conexión a PostgreSQL (segundos enteros, mínimo 2) |
 | `AIRPORT_SERVICE_URL` | `http://localhost:8001` | URL de Airport Service |
 | `AIRPORT_SERVICE_TIMEOUT_SECONDS` | `5.0` | Timeout en segundos para llamadas a Airport Service |
 | `RABBITMQ_URL` | `amqp://localhost:5672/%2F` (usuario `guest`) | Conexión a RabbitMQ |

@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 
+# Espera máxima (segundos) para comprobar si PostgreSQL está disponible. Sin este límite,
+# psycopg espera hasta 130 s por cada dirección de localhost (::1 y 127.0.0.1 en Windows).
+CONNECT_TIMEOUT_SECONDS = 2
+
 
 @pytest.fixture(scope="session")
 def pg_engine():
@@ -20,7 +24,10 @@ def pg_engine():
     """
     settings = get_settings()
     try:
-        engine = create_engine(settings.database_url)
+        engine = create_engine(
+            settings.database_url,
+            connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
+        )
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         yield engine
