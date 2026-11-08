@@ -16,8 +16,10 @@ flowchart LR
     P --> CI[Integración continua en verde]
     CI --> A[1 aprobación de otro integrante]
     A --> M[Quien hizo el PR fusiona: merge commit]
-    M --> B[Borrar la rama]
-    B --> T[Etiqueta fase-N al cerrar la fase]
+    M --> B{Tipo de rama}
+    B -->|fase-N-...| K[Se conserva como archivo de solo lectura]
+    B -->|chore/ fix/ docs/| D[Se borra]
+    K --> T[Etiqueta fase-N en el commit del merge]
 ```
 
 ## 1. Configuración inicial (una vez por equipo)
@@ -52,6 +54,10 @@ git config user.email
 ## 3. Ramas
 
 - **Nunca se trabaja directamente en `main`.** Todo cambio entra por pull request.
+- **Nunca se hace push forzado a `main` ni se reescribe su historial** (`git push --force`,
+  `rebase`, `commit --amend` o `filter-branch` sobre commits que ya están en `main`). Reescribir
+  `main` obliga a los demás integrantes a rehacer sus copias locales y rompe las referencias a
+  commits que ya aparecen en issues, PR y documentación.
 - Rama por **fase**: `fase-N-nombre` (por ejemplo `fase-2-resiliencia`, `fase-3-itinerary-service`).
 - Rama por **tarea** que no pertenece a una fase: `tipo/descripcion-corta`
   (por ejemplo `chore/github-practices`, `fix/coordenadas-mapa`, `docs/readme-gateway`).
@@ -62,6 +68,18 @@ git switch main
 git pull --ff-only origin main
 git switch -c fase-2-resiliencia
 ```
+
+### 3.1. Qué pasa con cada rama después del merge
+
+| Rama | Después del merge | Por qué |
+|---|---|---|
+| `fase-N-...` | **Se conserva** como archivo de **solo lectura** | Permite ver cómo quedó cada fase y sus commits en GitHub sin buscar en el historial de `main` |
+| `chore/...`, `fix/...`, `docs/...` | **Se borra** | Son cambios pequeños; su contenido ya quedó en `main` y en el PR |
+
+- En una rama `fase-N-...` ya fusionada **no se vuelve a hacer commit**. Si hay que corregir algo
+  de esa fase, se crea una rama nueva desde `main` actualizado (por ejemplo `fix/validacion-fechas`)
+  y se abre un PR nuevo.
+- La versión integrada y vigente del sistema está siempre en `main`.
 
 ## 4. Commits: Conventional Commits
 
@@ -100,17 +118,27 @@ presente y en minúscula.
 - **Quien revisa aprueba; quien hizo el PR fusiona.**
 - Método de merge: **"Create a merge commit"** (no *squash* ni *rebase*), para conservar los
   commits de cada entrega en el historial.
-- Después del merge, **borrar la rama** (botón *Delete branch* en GitHub) y actualizar la copia local:
+- Después del merge, actualizar la copia local de `main`:
 
 ```
 git switch main
 git pull --ff-only origin main
+```
+
+- Si la rama es **auxiliar** (`chore/`, `fix/`, `docs/`), borrarla en GitHub (botón *Delete branch*)
+  y en la copia local:
+
+```
 git branch -d nombre-de-la-rama
 ```
 
+- Si la rama es de **fase** (`fase-N-...`), **no se borra**: queda como archivo de solo lectura
+  (sección 3.1).
+
 ## 7. Cierre de fase: etiqueta `fase-N`
 
-Al terminar una fase y fusionarla en `main`, se crea una etiqueta anotada sobre el commit de merge:
+Al terminar una fase y fusionarla en `main`, se crea una etiqueta anotada sobre el **commit del
+merge** de esa fase (el que crea GitHub al fusionar el PR):
 
 ```
 git switch main
@@ -118,6 +146,9 @@ git pull --ff-only origin main
 git tag -a fase-2 -m "Fase 2: Resiliencia y caché"
 git push origin fase-2
 ```
+
+Si `main` ya avanzó después del merge, se indica el commit del merge al final del comando
+(por ejemplo `git tag -a fase-4 -m "..." bbeebd3`).
 
 Así se puede volver al estado exacto de cada fase (`git switch --detach fase-1`).
 
@@ -131,10 +162,26 @@ orden, y al terminar la fase la responsabilidad pasa al siguiente integrante.
 - El responsable de cada fase se registra en la descripción del milestone y en el campo
   "Responsable" de cada issue.
 
-## 9. Lista rápida antes de pedir revisión
+## 9. Uso de Claude Code y coautoría
+
+El equipo usa **Claude Code** como herramienta de desarrollo. Sus reglas para este repositorio
+están en [`CLAUDE.md`](CLAUDE.md).
+
+- **Ningún commit ni descripción de pull request lleva la línea `Co-Authored-By` de Claude**
+  (ni el pie "Generated with Claude Code"). Quien hace el commit es el autor y responde por el cambio.
+- La atribución está desactivada para todo el equipo en `.claude/settings.json`
+  (`attribution.commit` y `attribution.pr` vacíos). Ese archivo **sí se sube** al repositorio;
+  la configuración personal va en `.claude/settings.local.json`, que está en `.gitignore`.
+- Si la línea aparece en un commit **propio que todavía no se ha subido**, se quita antes del push
+  (por ejemplo con `git commit --amend` si es el último commit). Nunca se reescriben commits que ya
+  están en `main`.
+- Los commits de la Fase 3 conservan la línea porque son anteriores a esta regla.
+
+## 10. Lista rápida antes de pedir revisión
 
 - [ ] La rama sale de `main` actualizado y tiene un nombre `fase-N-...` o `tipo/...`.
 - [ ] Los commits siguen Conventional Commits.
+- [ ] Ningún commit ni la descripción del PR tienen la línea `Co-Authored-By` de Claude.
 - [ ] `pytest -v` pasa localmente en cada servicio modificado.
 - [ ] `CLAUDE.md` y la documentación están actualizados si aplica.
 - [ ] No hay `.env` ni `.venv` en el commit (`git status` antes de `git add`).

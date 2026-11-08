@@ -167,6 +167,17 @@ Estas son las reglas que debes seguir tú:
 - Ramas desde `main` actualizado:
   - una rama por fase: `fase-1-airport-service`, `fase-2-resiliencia`, `fase-3-itinerary-service`, etc.;
   - una rama por tarea fuera de una fase: `tipo/descripcion-corta` (por ejemplo `chore/github-practices`).
+- **Nunca hagas push forzado a `main` ni reescribas su historial** (`rebase`, `commit --amend`,
+  `filter-branch` o similares sobre commits que ya están en `main`).
+- **Ramas por fase de solo lectura:** la rama `fase-N-...` se **conserva** después del merge como
+  archivo de la fase. No se trabaja en ella después de fusionarla: las correcciones salen siempre de
+  una rama nueva desde `main` (por ejemplo `fix/...`). La versión integrada y vigente está en `main`.
+- Las ramas auxiliares (`chore/`, `fix/`, `docs/`) **sí se borran** después del merge.
+- **Coautoría:** ningún commit ni descripción de pull request lleva la línea
+  `Co-Authored-By` de Claude (ni el pie "Generated with Claude Code"). Está desactivada en
+  `.claude/settings.json` (`attribution.commit` y `attribution.pr` vacíos). Si aparece en un commit
+  propio que todavía no se ha subido, quítala antes del push. Los commits de la Fase 3 la conservan
+  porque son anteriores a esta regla y `main` no se vuelve a reescribir.
 - Un commit por entrega (o varios separados por tipo), con mensajes en formato Conventional Commits:
   el prefijo en inglés y la descripción en español (por ejemplo `feat: agrega capa de dominio de Airport Service`):
   - `feat: ...` nueva funcionalidad
@@ -183,11 +194,13 @@ Estas son las reglas que debes seguir tú:
 - Antes del merge: la integración continua (`.github/workflows/tests.yml`, check "Pruebas") debe
   pasar y debe haber **1 aprobación de otro integrante** (acuerdo del equipo; `main` aún no tiene
   protección en GitHub). Quien revisa aprueba y quien hizo el PR fusiona, con
-  **"Create a merge commit"**, y después se borra la rama.
+  **"Create a merge commit"**. Después se borra la rama solo si es auxiliar (`chore/`, `fix/`,
+  `docs/`); la rama `fase-N-...` se conserva como archivo de solo lectura.
 - **Nunca intentes aprobar ni fusionar pull requests**, aunque tengas acceso para hacerlo.
 - La integración a `main` se hace cuando la lista de verificación de la fase está completa.
-- **Al terminar cada fase, después del merge, propone crear la etiqueta anotada `fase-N`** sobre el
-  commit de merge (`git tag -a fase-N -m "..."` y `git push origin fase-N`), y espera confirmación.
+- **Al terminar cada fase, después del merge, se crea la etiqueta anotada `fase-N`** sobre el
+  commit del merge (`git tag -a fase-N -m "..."` y `git push origin fase-N`). Tú la propones y
+  esperas confirmación antes de crearla y subirla.
 - Las fases rotan entre los tres integrantes; el responsable de cada fase figura en su milestone.
 - El correo de los commits se configura solo para este repositorio (`git config user.email`, sin
   `--global`). No cambies la configuración de Git del equipo.
