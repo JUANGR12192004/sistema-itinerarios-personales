@@ -226,7 +226,7 @@ Estas son las reglas que debes seguir tú:
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
-| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente y las carpetas `tests` como código de pruebas |
+| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023) |
 
 No agregues librerías fuera de esta lista sin explicar por qué y pedir aprobación.
 
@@ -481,6 +481,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
 | Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
 | Publicación directa tras el commit (Fase 4, ADR-022) | Puerto `UnitOfWork`; el caso de uso hace guardar → commit → publicar. Si RabbitMQ falla tras el commit: 201 + log `ERROR` "Evento perdido" (double write, lo resuelve la Fase 5) |
+| SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
