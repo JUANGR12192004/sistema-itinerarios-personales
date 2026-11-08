@@ -609,8 +609,9 @@ El Transactional Outbox (ADR-006) necesita guardar cada evento pendiente en la *
 | `published_at` | TIMESTAMPTZ, nulo | `NULL` mientras está pendiente; la fecha de publicación después |
 | `attempts` | INTEGER, por defecto 0 | Intentos de publicación fallidos |
 | `last_error` | TEXT, nulo | Último error de publicación |
+| `failed_at` | TIMESTAMPTZ, nulo | Agregada por ADR-027 (migración `c4d8e2f6a9b1`): fecha del fallo permanente de un mensaje venenoso; `NULL` si no lo hubo |
 
-- **Índice parcial** `ix_outbox_events_pending` sobre `occurred_at` con la condición `WHERE published_at IS NULL`. Un índice parcial solo incluye las filas que cumplen la condición: contiene únicamente los pendientes, así que sigue siendo pequeño aunque la tabla crezca, y sirve para la consulta del relay (`WHERE published_at IS NULL ORDER BY occurred_at`).
+- **Índice parcial** `ix_outbox_events_pending` sobre `occurred_at` con la condición `WHERE published_at IS NULL` (desde ADR-027: `WHERE published_at IS NULL AND failed_at IS NULL`). Un índice parcial solo incluye las filas que cumplen la condición: contiene únicamente los pendientes, así que sigue siendo pequeño aunque la tabla crezca, y sirve para la consulta del relay (`WHERE published_at IS NULL ORDER BY occurred_at`).
 - En el código, cada fila es un **`OutboxMessage`** ("mensaje pendiente" en el lenguaje ubicuo), un `dataclass` de la capa de **aplicación**. No va en el dominio porque es un concepto técnico de entrega de mensajes, no una regla del negocio de itinerarios. El modelo ORM `OutboxEventORM` vive en `infrastructure/persistence`.
 - Los eventos publicados **se conservan** en la tabla. La limpieza periódica queda como mejora futura.
 
@@ -638,8 +639,8 @@ Alguien debe leer los eventos pendientes de `outbox_events` y publicarlos en Rab
 - **Un commit por lote**: hacer commit evento por evento liberaría los bloqueos del resto del lote, que otro relay podría tomar mientras este todavía los publica.
 - Orden: **publicar y después marcar** `published_at`. Esto da una entrega **al menos una vez**.
 - Si una publicación falla: se incrementa `attempts`, se guarda `last_error`, el evento sigue pendiente y **se detiene el lote**. Los eventos restantes no se tocan ni suman intentos, y todos se reintentan en el siguiente ciclo. Si RabbitMQ está caído, seguir con el resto solo alargaría el ciclo (cada intento espera hasta `RABBITMQ_TIMEOUT_SECONDS`).
-- Si el `payload` no se puede leer o el `event_type` es desconocido, el evento se marca como fallido (`attempts`, `last_error`) y el relay **continúa** con el siguiente, porque ese fallo no depende de RabbitMQ.
-- No hay límite de intentos en esta fase.
+- Si el `payload` no se puede leer o el `event_type` es desconocido, el relay **continúa** con el siguiente, porque ese fallo no depende de RabbitMQ. *Corrección (ADR-027):* la primera versión solo sumaba el intento y el mensaje seguía pendiente; ahora es un fallo permanente y se marca con `failed_at`.
+- No hay límite de intentos para los fallos temporales (ADR-027).
 
 ### Justificación
 
@@ -648,7 +649,7 @@ Un proceso aparte desacopla la respuesta HTTP de la disponibilidad de RabbitMQ: 
 ### Consecuencias
 
 - **Puede haber duplicados.** Si el relay publica y se detiene (o PostgreSQL falla) antes del commit que marca `published_at`, la transacción se deshace, el evento sigue pendiente y se publicará otra vez. Como el commit es por lote, puede repetirse hasta un lote completo. Por eso el consumidor de la Fase 6 **debe ser idempotente** con `event_id`, que ya viaja como `message_id` (ADR-021).
-- Un evento que falle siempre (por ejemplo, RabbitMQ lo rechaza de forma permanente) quedaría primero en la cola y detendría cada lote. Un límite de intentos con estado "muerto" queda como mejora futura.
+- Los mensajes ilegibles ya no bloquean el relay: ADR-027 los descarta con `failed_at`. Un evento que RabbitMQ rechace siempre (`EventPublishError` permanente) sí seguiría deteniendo cada lote; ver las consecuencias de ADR-027.
 - El evento llega a RabbitMQ con un pequeño retraso (como máximo, el intervalo de revisión más el tiempo de publicación).
 - `RabbitMQEventPublisher` abre una conexión por publicación (ADR-021); con lotes pequeños es aceptable.
 
@@ -683,6 +684,58 @@ El caso de uso sigue sin conocer RabbitMQ ni la outbox (depende solo de puertos,
 - `POST /itineraries` ya no habla con RabbitMQ: responde 201 aunque RabbitMQ esté caído, y el evento queda pendiente hasta que el relay lo publique.
 - Mientras no exista el relay (entre las entregas 5A y 5B), los eventos se acumulan como pendientes en la tabla.
 - La API depende solo de PostgreSQL para crear itinerarios (además de Airport Service).
+
+## ADR-027 — Mensajes venenosos en la outbox: fallo temporal vs. fallo permanente (Fase 5)
+
+**Estado:** Aceptada (Fase 5, primer commit de la entrega 5C). Amplía ADR-024 y ADR-025.
+
+### Contexto
+
+Un **mensaje venenoso** (*poison message*) es un mensaje que siempre falla al procesarse, por mucho que se reintente. En la outbox ocurre cuando el `payload` no se puede leer (le falta un campo, un UUID es inválido, la versión no existe) o cuando el `event_type` es desconocido.
+
+En la entrega 5B el relay le sumaba un intento (`mark_failed`), pero el mensaje seguía pendiente (`published_at` nulo). Esto causaba tres problemas:
+
+1. Se volvía a leer y a fallar en **cada ciclo, para siempre**.
+2. Llenaba el log con el mismo error cada pocos segundos.
+3. Como se leen los más antiguos primero, si se acumulaban tantos mensajes ilegibles como `OUTBOX_RELAY_BATCH_SIZE`, ocupaban todo el lote y el relay **nunca volvía a publicar un evento válido**.
+
+### Decisión
+
+- El relay distingue dos tipos de fallo:
+
+| Tipo | Causa | Qué hace el relay |
+|---|---|---|
+| **Temporal** | `EventPublishError` (por ejemplo, RabbitMQ caído) | `mark_failed`: suma `attempts`, guarda `last_error`, el evento **sigue pendiente** y se detiene el lote. Se reintenta en el siguiente ciclo, **sin máximo de intentos** |
+| **Permanente** | `payload` ilegible o `event_type` desconocido | `mark_dead`: suma `attempts`, guarda `last_error` y la fecha en **`failed_at`**. El mensaje **deja de estar pendiente**, no se reintenta y el lote **continúa** |
+
+- Nueva columna `failed_at` (TIMESTAMPTZ, nula) en `outbox_events`, con la migración `c4d8e2f6a9b1`.
+- Nuevo método del puerto `OutboxRepository.mark_dead(message_id, failed_at, error)`.
+- Pendiente = `published_at IS NULL AND failed_at IS NULL`. `get_pending` usa esa condición, y el índice parcial `ix_outbox_events_pending` se recrea con la misma condición. Un índice parcial no se puede modificar, así que la migración lo borra y lo crea de nuevo.
+- `RelayResult` separa `failed` (temporales) de `dead` (descartados). El log del relay registra cada mensaje descartado en `ERROR`, una sola vez.
+- Los descartados **cuentan** para el "lote completo" del bucle (el siguiente ciclo empieza sin esperar); los fallos temporales no, para no reintentar sin pausa cuando RabbitMQ está caído.
+
+### Justificación
+
+Un fallo temporal se arregla solo cuando vuelve la dependencia; descartar el evento sería perderlo, que es justo lo que el Outbox evita. Por eso no hay máximo de intentos: un RabbitMQ caído durante horas no debe descartar eventos válidos. Un fallo permanente, en cambio, no se arregla reintentando: sacarlo de los pendientes protege a los eventos válidos que vienen detrás. La fila **no se borra**: queda en la tabla con su error para que una persona la revise.
+
+### Relación con la DLQ de RabbitMQ
+
+Es la misma idea que la **dead letter queue** (DLQ) de la topología (ADR-021), aplicada en el otro extremo del flujo:
+
+| | `failed_at` en `outbox_events` | DLQ `notification.itinerary-created.dlq` |
+|---|---|---|
+| Dónde actúa | En el **productor**, antes de publicar | En el **consumidor** (Fase 6), después de publicar |
+| Qué aparta | Mensajes que el relay no puede convertir en evento | Mensajes que el consumidor rechaza sin reencolar |
+| Para qué | Que no bloqueen la publicación de los demás | Que no bloqueen el consumo de los demás |
+| Qué se hace después | Revisar la fila (`last_error`) y corregirla a mano | Revisar el mensaje en la DLQ |
+
+Un mensaje descartado con `failed_at` **nunca llega a RabbitMQ**, así que tampoco llega a la DLQ.
+
+### Consecuencias
+
+- Un mensaje descartado no se publica nunca solo. Para reintentarlo después de corregirlo, hay que dejar `failed_at` en `NULL` a mano (`UPDATE outbox_events SET failed_at = NULL WHERE id = ...`).
+- Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`UnroutableError` o `NackError`). Son poco probables porque el publicador declara la topología antes de publicar, pero si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura.
+- Las consultas para monitorear la outbox deben separar pendientes (`published_at IS NULL AND failed_at IS NULL`), publicados y descartados (`failed_at IS NOT NULL`).
 
 ## 2. Revisión de decisiones
 

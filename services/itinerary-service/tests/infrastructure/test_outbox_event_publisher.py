@@ -66,6 +66,7 @@ def test_la_fila_queda_pendiente():
     assert row.published_at is None
     assert row.attempts == 0
     assert row.last_error is None
+    assert row.failed_at is None
 
 
 def test_no_hace_commit():

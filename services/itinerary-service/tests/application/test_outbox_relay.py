@@ -107,9 +107,24 @@ def test_fallo_de_publicacion_suma_intento_y_guarda_el_error():
     stored = outbox.messages[message.id]
     assert result == RelayResult(published=0, failed=1)
     assert stored.published_at is None  # sigue pendiente: no se pierde
+    assert stored.failed_at is None  # fallo temporal: no se descarta
     assert stored.attempts == 1
     assert "RabbitMQ no disponible" in stored.last_error
     assert uow.commits == 1  # el intento fallido también se guarda
+
+
+def test_fallos_temporales_no_tienen_maximo_de_intentos():
+    """Con RabbitMQ caído mucho tiempo, el evento válido sigue pendiente (ADR-027)."""
+    message = _message()
+    relay, outbox, _, _ = _relay([message], publisher_fails=True)
+
+    for _ in range(50):
+        relay.run_once()
+
+    stored = outbox.messages[message.id]
+    assert stored.attempts == 50
+    assert stored.failed_at is None
+    assert outbox.get_pending(10) == [stored]
 
 
 def test_fallo_de_publicacion_detiene_el_lote():
@@ -149,28 +164,61 @@ def test_el_evento_fallido_se_publica_en_el_siguiente_ciclo():
     ],
     ids=["sin-data", "version-desconocida", "uuid-invalido"],
 )
-def test_mensaje_ilegible_se_marca_fallido_y_continua(corrupt):
+def test_mensaje_ilegible_se_descarta_con_failed_at_y_continua(corrupt):
     broken, valid = _message(minutes_ago=2), _message(minutes_ago=1)
     corrupt(broken)
     relay, outbox, publisher, _ = _relay([broken, valid])
 
     result = relay.run_once()
 
-    assert result == RelayResult(published=1, failed=1)
-    assert outbox.messages[broken.id].attempts == 1
-    assert outbox.messages[broken.id].last_error.startswith("Mensaje ilegible")
+    stored = outbox.messages[broken.id]
+    assert result == RelayResult(published=1, failed=0, dead=1)
+    assert stored.failed_at == NOW
+    assert stored.published_at is None
+    assert stored.attempts == 1
+    assert stored.last_error.startswith("Mensaje ilegible")
     assert [e.event_id for e in publisher.published] == [valid.id]
 
 
-def test_event_type_desconocido_se_marca_fallido_y_continua():
+def test_event_type_desconocido_se_descarta_con_failed_at_y_continua():
     unknown, valid = _message(minutes_ago=2), _message(minutes_ago=1)
     unknown.event_type = "itinerary.deleted"
     relay, outbox, publisher, _ = _relay([unknown, valid])
 
     result = relay.run_once()
 
-    assert result == RelayResult(published=1, failed=1)
+    assert result == RelayResult(published=1, failed=0, dead=1)
+    assert outbox.messages[unknown.id].failed_at == NOW
     assert "event_type desconocido" in outbox.messages[unknown.id].last_error
+    assert [e.event_id for e in publisher.published] == [valid.id]
+
+
+def test_mensaje_venenoso_no_vuelve_a_leerse_en_el_siguiente_ciclo():
+    broken = _message()
+    broken.payload.pop("data")
+    relay, outbox, _, _ = _relay([broken])
+    relay.run_once()
+
+    second = relay.run_once()
+
+    assert second == RelayResult()
+    assert outbox.messages[broken.id].attempts == 1  # no se reintentó
+    assert outbox.get_pending(10) == []
+
+
+def test_un_lote_lleno_de_venenosos_no_bloquea_los_eventos_validos():
+    """Antes del ADR-027, BATCH_SIZE mensajes ilegibles ocupaban el lote para siempre."""
+    poisoned = [_message(minutes_ago=10 + i) for i in range(2)]  # los más antiguos
+    for message in poisoned:
+        message.payload.pop("data")
+    valid = _message(minutes_ago=1)
+    relay, _, publisher, _ = _relay([*poisoned, valid], batch_size=2)
+
+    first = relay.run_once()
+    second = relay.run_once()
+
+    assert first == RelayResult(published=0, failed=0, dead=2)
+    assert second == RelayResult(published=1, failed=0, dead=0)
     assert [e.event_id for e in publisher.published] == [valid.id]
 
 

@@ -28,6 +28,8 @@ class OutboxMessage:
     - `payload` es el evento completo con la forma exacta del contrato (ADR-020).
     - `published_at` es None mientras el evento está pendiente.
     - `attempts` y `last_error` registran los intentos fallidos del relay (Fase 5B).
+    - `failed_at` marca un fallo PERMANENTE (mensaje venenoso, ADR-027): el mensaje
+      deja de estar pendiente y no se reintenta.
     """
 
     id: UUID
@@ -40,6 +42,7 @@ class OutboxMessage:
     published_at: datetime | None = None
     attempts: int = 0
     last_error: str | None = None
+    failed_at: datetime | None = None
 
     @classmethod
     def from_event(cls, event: ItineraryCreatedEvent) -> OutboxMessage:

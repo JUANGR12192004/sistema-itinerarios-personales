@@ -41,12 +41,12 @@ class OutboxEventORM(Base):
 
     __tablename__ = "outbox_events"
     __table_args__ = (
-        # Índice parcial: solo contiene las filas pendientes (published_at IS NULL),
-        # que son las que busca el relay ordenadas por occurred_at.
+        # Índice parcial: solo contiene las filas pendientes (ni publicadas ni con fallo
+        # permanente), que son las que busca el relay ordenadas por occurred_at.
         sa.Index(
             "ix_outbox_events_pending",
             "occurred_at",
-            postgresql_where=sa.text("published_at IS NULL"),
+            postgresql_where=sa.text("published_at IS NULL AND failed_at IS NULL"),
         ),
     )
 
@@ -62,3 +62,5 @@ class OutboxEventORM(Base):
         sa.Integer, nullable=False, default=0, server_default=sa.text("0")
     )
     last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # Fecha del fallo permanente (mensaje venenoso, ADR-027); NULL si no lo hubo
+    failed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)

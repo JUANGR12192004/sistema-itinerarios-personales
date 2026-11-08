@@ -70,6 +70,25 @@ def test_no_espera_si_publico_un_lote_completo():
     assert sleeps == [2.0]  # solo después del segundo ciclo
 
 
+def test_los_descartados_cuentan_para_el_lote_completo():
+    """Un lote de mensajes venenosos descartados también deja pendientes por revisar."""
+    results = iter([RelayResult(published=6, dead=4), RelayResult()])
+    sleeps: list[float] = []
+
+    run_loop(lambda: next(results), interval_seconds=2.0, batch_size=10, sleep=sleeps.append, max_cycles=2)
+
+    assert sleeps == [2.0]
+
+
+def test_con_fallos_temporales_siempre_espera():
+    """Con RabbitMQ caído no se reintenta sin pausa, aunque el lote sea de 1."""
+    sleeps: list[float] = []
+
+    run_loop(lambda: RelayResult(failed=1), interval_seconds=2.0, batch_size=1, sleep=sleeps.append, max_cycles=2)
+
+    assert sleeps == [2.0, 2.0]
+
+
 def test_un_ciclo_fallido_no_detiene_el_proceso(caplog):
     calls: list[int] = []
 

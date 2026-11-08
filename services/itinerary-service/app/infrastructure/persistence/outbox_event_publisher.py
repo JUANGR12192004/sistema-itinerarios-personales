@@ -50,4 +50,5 @@ def _to_orm(message: OutboxMessage) -> OutboxEventORM:
         published_at=message.published_at,
         attempts=message.attempts,
         last_error=message.last_error,
+        failed_at=message.failed_at,
     )

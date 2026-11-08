@@ -62,8 +62,9 @@ def run_loop(
 ) -> None:
     """Repite `cycle` con una pausa entre ciclos.
 
-    Si un ciclo publicó un lote completo, probablemente quedan más pendientes
-    (por ejemplo, al volver RabbitMQ): el siguiente ciclo empieza sin esperar.
+    Si un ciclo procesó un lote completo (publicados + descartados), probablemente
+    quedan más pendientes (por ejemplo, al volver RabbitMQ): el siguiente ciclo empieza
+    sin esperar. Los fallos temporales no cuentan: con RabbitMQ caído siempre se espera.
     `max_cycles` solo se usa en las pruebas; en producción el bucle no termina.
     """
     cycles = 0
@@ -78,7 +79,7 @@ def run_loop(
             )
             result = RelayResult()
 
-        if result.published < batch_size:
+        if result.published + result.dead < batch_size:
             sleep(interval_seconds)
 
 

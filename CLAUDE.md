@@ -481,8 +481,9 @@ Confirmadas en la Fase 3 (ADR-015):
 | Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
 | Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
 | Publicación directa tras el commit (Fase 4, ADR-022) | **Reemplazada por ADR-026 en la Fase 5.** Puerto `UnitOfWork`; el caso de uso hacía guardar → commit → publicar. Si RabbitMQ fallaba tras el commit: 201 + log `ERROR` "Evento perdido" (double write) |
-| Tabla `outbox_events` (Fase 5, ADR-024) | Columnas `id` (= `event_id`), `aggregate_type`, `aggregate_id`, `event_type`, `event_version`, `payload` (JSONB), `occurred_at`, `published_at` (nulo = pendiente), `attempts`, `last_error`; índice parcial `ix_outbox_events_pending` sobre `occurred_at WHERE published_at IS NULL`. `OutboxMessage` vive en la capa de aplicación (`app/application/outbox.py`). Los eventos publicados se conservan |
-| Outbox Relay (Fase 5, ADR-025) | Proceso aparte (`python -m app.outbox_relay`) con `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2) y `OUTBOX_RELAY_BATCH_SIZE` (10). `SELECT ... FOR UPDATE SKIP LOCKED`, un commit por lote, publicar y después marcar `published_at` (al menos una vez: puede haber duplicados, el consumidor es idempotente con `event_id`). Fallo de publicación → `attempts + 1`, `last_error` y se detiene el lote; payload ilegible o `event_type` desconocido → se marca como fallido y se continúa. Sin límite de intentos |
+| Tabla `outbox_events` (Fase 5, ADR-024) | Columnas `id` (= `event_id`), `aggregate_type`, `aggregate_id`, `event_type`, `event_version`, `payload` (JSONB), `occurred_at`, `published_at`, `attempts`, `last_error`, `failed_at` (ADR-027); pendiente = `published_at IS NULL AND failed_at IS NULL`; índice parcial `ix_outbox_events_pending` sobre `occurred_at` con esa condición. `OutboxMessage` vive en la capa de aplicación (`app/application/outbox.py`). Los eventos publicados se conservan |
+| Outbox Relay (Fase 5, ADR-025) | Proceso aparte (`python -m app.outbox_relay`) con `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2) y `OUTBOX_RELAY_BATCH_SIZE` (10). `SELECT ... FOR UPDATE SKIP LOCKED`, un commit por lote, publicar y después marcar `published_at` (al menos una vez: puede haber duplicados, el consumidor es idempotente con `event_id`). Fallo temporal (`EventPublishError`) → `mark_failed` (`attempts + 1`, `last_error`), sigue pendiente y se detiene el lote, sin límite de intentos. Fallo permanente (ver ADR-027) → `mark_dead` y se continúa |
+| Mensajes venenosos (Fase 5, ADR-027) | Payload ilegible o `event_type` desconocido = fallo permanente: `mark_dead` guarda `failed_at` y `last_error`, el mensaje deja de estar pendiente y no se reintenta (la fila se conserva para revisarla). `RelayResult` separa `failed` (temporales) de `dead` (descartados). Equivale, del lado del productor, a la DLQ de RabbitMQ |
 | Registro del evento en la misma transacción (Fase 5, ADR-026) | Reemplaza a ADR-022. El caso de uso hace guardar → registrar el evento (`OutboxEventPublisher`, misma sesión) → commit. Si el registro falla, no hay commit (500). El relay reutiliza `RabbitMQEventPublisher` sin cambios y reconstruye el evento con `ItineraryCreatedEvent.from_dict`. Contrato y topología sin cambios |
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
@@ -666,7 +667,7 @@ Rama `fase-5-transactional-outbox`. Una pausa al final de cada entrega, antes de
 |---|---|---|
 | **5A** | ADR-024 a ADR-026 (y ajustes de ADR-006, ADR-013, ADR-022), `OutboxEventORM` y migración `b7c2d9e1f4a6`, `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`, caso de uso guardar → registrar → commit, ensamblaje en `dependencies.py`, pruebas | `pytest -v` pasa; `alembic upgrade head` aplica la migración; pruebas de `tests/integration/test_outbox_integration.py` pasan con PostgreSQL |
 | **5B** | Puerto `OutboxRepository`, `SqlAlchemyOutboxRepository` (`SKIP LOCKED`), `OutboxRelay` en `application`, proceso `app/outbox_relay.py`, variables del relay, pruebas unitarias con fakes e integración (SKIPPED sin PostgreSQL o RabbitMQ) | Pruebas del relay pasan sin PostgreSQL ni RabbitMQ |
-| **5C** | `docs/04` (Outbox, duplicados e idempotencia), diagramas de `docs/05`, descripción en AsyncAPI (sin cambiar el contrato), README del servicio con la demostración del double write resuelto, revisión del job de CI, estado de CLAUDE.md | Con RabbitMQ detenido: 201 y evento pendiente; al levantarlo, el relay lo publica en la cola |
+| **5C** | Primer commit: mensajes venenosos (ADR-027, columna `failed_at` con la migración `c4d8e2f6a9b1`, `mark_dead`, índice parcial ajustado, pruebas). Después: `docs/04` (Outbox, duplicados e idempotencia), diagramas de `docs/05`, descripción en AsyncAPI (sin cambiar el contrato), README del servicio con la demostración del double write resuelto, revisión del job de CI, estado de CLAUDE.md | Con RabbitMQ detenido: 201 y evento pendiente; al levantarlo, el relay lo publica en la cola |
 
 ---
 
@@ -762,11 +763,14 @@ pytest -v
     La API ya no publica en RabbitMQ: los eventos quedan pendientes hasta el relay de la 5B.
     Total del servicio: **114 pruebas pasan, 13 omitidas** sin PostgreSQL ni RabbitMQ; con PostgreSQL
     (migración aplicada): **126 pasan, 1 omitida** (la de RabbitMQ).
-  - Entrega **5B** completada (pendiente de commit): puerto `OutboxRepository` y `SqlAlchemyOutboxRepository`
+  - Entrega **5B** completada (commit `266d177`): puerto `OutboxRepository` y `SqlAlchemyOutboxRepository`
     (`FOR UPDATE SKIP LOCKED`, marcas con `UPDATE`), `OutboxRelay` en `app/application/outbox_relay.py`
     (un commit por lote, fallo de publicación detiene el lote, mensaje ilegible se marca y se continúa),
     proceso `python -m app.outbox_relay` (`app/outbox_relay.py`: un ciclo fallido no detiene el proceso,
     sin pausa tras un lote completo, logs de pika en `CRITICAL`), variables `OUTBOX_RELAY_POLL_INTERVAL_SECONDS`
     y `OUTBOX_RELAY_BATCH_SIZE`. El fixture `rabbitmq_channel` pasa a `tests/integration/conftest.py`.
     Total del servicio: **138 pasan, 21 omitidas** sin PostgreSQL ni RabbitMQ; **159 pasan** con ambos.
-- **Siguiente:** entrega 5C — documentación y demostración.
+  - Entrega **5C**, primer commit (pendiente de commit): mensajes venenosos (ADR-027). Columna `failed_at`
+    (migración `c4d8e2f6a9b1`, índice parcial `published_at IS NULL AND failed_at IS NULL`), `mark_dead` en
+    `OutboxRepository`, `RelayResult.dead`, sección 7.1 de `docs/04`. Total: **167 pasan** con PostgreSQL y RabbitMQ.
+- **Siguiente:** resto de la entrega 5C — documentación y demostración.

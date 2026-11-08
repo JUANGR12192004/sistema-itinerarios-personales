@@ -125,7 +125,9 @@ class FakeOutboxRepository(OutboxRepository):
         self.messages: dict[UUID, OutboxMessage] = {m.id: m for m in messages or []}
 
     def get_pending(self, limit: int) -> list[OutboxMessage]:
-        pending = [m for m in self.messages.values() if m.published_at is None]
+        pending = [
+            m for m in self.messages.values() if m.published_at is None and m.failed_at is None
+        ]
         return sorted(pending, key=lambda m: m.occurred_at)[:limit]
 
     def mark_published(self, message_id: UUID, published_at: datetime) -> None:
@@ -135,3 +137,7 @@ class FakeOutboxRepository(OutboxRepository):
         message = self.messages[message_id]
         message.attempts += 1
         message.last_error = error
+
+    def mark_dead(self, message_id: UUID, failed_at: datetime, error: str) -> None:
+        self.mark_failed(message_id, error)
+        self.messages[message_id].failed_at = failed_at

@@ -12,6 +12,12 @@ Cada ciclo (`run_once`) procesa un lote dentro de UNA transacción:
 Garantía "al menos una vez": primero se publica y después se marca. Si el proceso
 se detiene entre la publicación y el commit, la marca se pierde y el evento se
 publicará otra vez. Por eso el consumidor debe ser idempotente con `event_id`.
+
+Dos tipos de fallo (ADR-027):
+- TEMPORAL (EventPublishError, por ejemplo RabbitMQ caído): el mensaje sigue pendiente
+  y se reintenta sin límite en los siguientes ciclos; se detiene el lote.
+- PERMANENTE (mensaje ilegible o event_type desconocido, "mensaje venenoso"): reintentar
+  no lo arregla. Se marca con `failed_at`, deja de leerse y el lote continúa.
 """
 
 import logging
@@ -29,10 +35,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RelayResult:
-    """Resumen de un ciclo del relay."""
+    """Resumen de un ciclo del relay.
+
+    - published: eventos publicados.
+    - failed: fallos temporales (siguen pendientes y se reintentan).
+    - dead: mensajes venenosos descartados con `failed_at` (no se reintentan).
+    """
 
     published: int = 0
     failed: int = 0
+    dead: int = 0
 
 
 def _utc_now() -> datetime:
@@ -58,17 +70,20 @@ class OutboxRelay:
         """Procesa un lote de pendientes y confirma el resultado con un solo commit."""
         published = 0
         failed = 0
+        dead = 0
 
         for message in self._outbox.get_pending(self._batch_size):
             try:
                 event = _to_event(message)
             except (KeyError, TypeError, ValueError) as exc:
-                # El mensaje está mal formado: reintentarlo no lo arreglará y no depende
-                # de RabbitMQ, así que se marca como fallido y se sigue con el siguiente.
-                self._outbox.mark_failed(message.id, f"Mensaje ilegible: {exc!r}")
-                failed += 1
+                # Fallo PERMANENTE (mensaje venenoso): reintentarlo no lo arreglará y no
+                # depende de RabbitMQ. Se marca con failed_at para que no vuelva a leerse
+                # y no ocupe el lote de los eventos válidos; se sigue con el siguiente.
+                self._outbox.mark_dead(message.id, self._clock(), f"Mensaje ilegible: {exc!r}")
+                dead += 1
                 logger.error(
-                    "Mensaje de la outbox ilegible (id=%s, event_type=%s): %r",
+                    "Mensaje venenoso descartado de la outbox (id=%s, event_type=%s): %r. "
+                    "No se reintentará; revisar la fila en outbox_events",
                     message.id,
                     message.event_type,
                     exc,
@@ -78,8 +93,10 @@ class OutboxRelay:
             try:
                 self._publisher.publish(event)
             except EventPublishError as exc:
-                # Lo más probable es que RabbitMQ no esté disponible: se registra el fallo
-                # y se detiene el lote. Los demás siguen pendientes, sin sumar intentos.
+                # Fallo TEMPORAL: lo más probable es que RabbitMQ no esté disponible. Se
+                # registra el intento y se detiene el lote; los demás siguen pendientes, sin
+                # sumar intentos. No hay máximo de intentos: un RabbitMQ caído mucho tiempo
+                # no debe descartar eventos válidos.
                 self._outbox.mark_failed(message.id, str(exc))
                 failed += 1
                 logger.warning(
@@ -96,9 +113,14 @@ class OutboxRelay:
 
         self._unit_of_work.commit()
 
-        if published or failed:
-            logger.info("Ciclo del Outbox Relay: %d publicados, %d fallidos", published, failed)
-        return RelayResult(published=published, failed=failed)
+        if published or failed or dead:
+            logger.info(
+                "Ciclo del Outbox Relay: %d publicados, %d fallidos (se reintentan), %d descartados",
+                published,
+                failed,
+                dead,
+            )
+        return RelayResult(published=published, failed=failed, dead=dead)
 
 
 def _to_event(message: OutboxMessage) -> ItineraryCreatedEvent:

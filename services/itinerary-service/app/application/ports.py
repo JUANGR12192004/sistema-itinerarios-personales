@@ -102,6 +102,7 @@ class OutboxRepository(ABC):
     def get_pending(self, limit: int) -> list[OutboxMessage]:
         """Devuelve hasta `limit` mensajes pendientes, los más antiguos primero.
 
+        Pendiente = sin publicar y sin fallo permanente (`failed_at` vacío).
         Los mensajes quedan bloqueados para este relay hasta el commit; los que
         otro relay ya bloqueó se saltan (no se espera por ellos).
         """
@@ -112,4 +113,9 @@ class OutboxRepository(ABC):
 
     @abstractmethod
     def mark_failed(self, message_id: UUID, error: str) -> None:
-        """Suma un intento fallido y guarda el error; el mensaje sigue pendiente."""
+        """Fallo TEMPORAL: suma un intento y guarda el error; el mensaje sigue pendiente."""
+
+    @abstractmethod
+    def mark_dead(self, message_id: UUID, failed_at: datetime, error: str) -> None:
+        """Fallo PERMANENTE (mensaje venenoso, ADR-027): suma un intento, guarda el error
+        y la fecha en `failed_at`. El mensaje deja de estar pendiente y no se reintenta."""

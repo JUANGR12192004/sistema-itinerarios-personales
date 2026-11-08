@@ -53,3 +53,4 @@ def test_nace_pendiente_y_sin_intentos():
     assert message.published_at is None
     assert message.attempts == 0
     assert message.last_error is None
+    assert message.failed_at is None

@@ -27,9 +27,10 @@ class SqlAlchemyOutboxRepository(OutboxRepository):
         self._session = session
 
     def get_pending(self, limit: int) -> list[OutboxMessage]:
+        # Misma condición que el índice parcial ix_outbox_events_pending, para que PostgreSQL lo use
         stmt = (
             select(OutboxEventORM)
-            .where(OutboxEventORM.published_at.is_(None))
+            .where(OutboxEventORM.published_at.is_(None), OutboxEventORM.failed_at.is_(None))
             .order_by(OutboxEventORM.occurred_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
@@ -53,6 +54,14 @@ class SqlAlchemyOutboxRepository(OutboxRepository):
             execution_options={"synchronize_session": False},
         )
 
+    def mark_dead(self, message_id: UUID, failed_at: datetime, error: str) -> None:
+        self._session.execute(
+            update(OutboxEventORM)
+            .where(OutboxEventORM.id == message_id)
+            .values(attempts=OutboxEventORM.attempts + 1, last_error=error, failed_at=failed_at),
+            execution_options={"synchronize_session": False},
+        )
+
 
 def _to_message(orm: OutboxEventORM) -> OutboxMessage:
     return OutboxMessage(
@@ -66,4 +75,5 @@ def _to_message(orm: OutboxEventORM) -> OutboxMessage:
         published_at=orm.published_at,
         attempts=orm.attempts,
         last_error=orm.last_error,
+        failed_at=orm.failed_at,
     )

@@ -163,6 +163,50 @@ Un proceso independiente publicará posteriormente los eventos pendientes en Rab
 
 La publicación y el consumo requerirán manejo de duplicados y recuperación ante fallos.
 
+### 7.1. Mensajes venenosos: fallo temporal vs. fallo permanente (ADR-027)
+
+Un **mensaje venenoso** (*poison message*) es un mensaje que **siempre** falla al procesarse, por mucho
+que se reintente. Si se trata igual que un fallo pasajero, se reintenta para siempre: llena el log y,
+como el relay toma primero los más antiguos, unos cuantos mensajes así pueden ocupar todo el lote
+(`OUTBOX_RELAY_BATCH_SIZE`) y dejar sin publicar a los eventos válidos que vienen detrás.
+
+Por eso el Outbox Relay separa dos tipos de fallo:
+
+| Tipo | Ejemplo | ¿Se arregla reintentando? | Qué hace el relay |
+|---|---|---|---|
+| **Temporal** | RabbitMQ caído (`EventPublishError`) | Sí, cuando vuelva RabbitMQ | Suma `attempts` y guarda `last_error`. El evento **sigue pendiente**, se detiene el lote y se reintenta en el siguiente ciclo, **sin máximo de intentos** |
+| **Permanente** | `payload` ilegible o `event_type` desconocido | No | Suma `attempts`, guarda `last_error` y marca **`failed_at`**. El mensaje **deja de estar pendiente**, no se vuelve a leer y el lote **continúa** con los demás |
+
+- **Pendiente** significa `published_at IS NULL AND failed_at IS NULL`. Esa es la condición de la consulta
+  del relay y del índice parcial `ix_outbox_events_pending`.
+- **No hay máximo de intentos para los fallos temporales.** Un máximo descartaría eventos válidos si RabbitMQ
+  estuviera caído mucho tiempo, que es justo lo que el Outbox debe evitar.
+- La fila descartada **no se borra**: queda en `outbox_events` con su error para revisarla. Después de
+  corregirla, se vuelve a dejar pendiente poniendo `failed_at` en `NULL`.
+
+```mermaid
+flowchart TD
+    P[Mensaje pendiente] --> R{¿Se puede leer<br/>el evento?}
+    R -- No --> D["mark_dead: failed_at = ahora<br/>(fallo permanente, no se reintenta)"]
+    D --> N[Sigue con el siguiente mensaje]
+    R -- Sí --> PUB{¿RabbitMQ lo aceptó?}
+    PUB -- Sí --> OK[mark_published]
+    OK --> N
+    PUB -- No --> F["mark_failed: attempts + 1<br/>(fallo temporal, sigue pendiente)"]
+    F --> STOP[Detiene el lote; se reintenta<br/>en el siguiente ciclo]
+```
+
+**Relación con la DLQ de RabbitMQ.** Es la misma idea que la *dead letter queue* de la sección 3.3,
+pero en el otro extremo del flujo:
+
+| | `failed_at` en la outbox | DLQ `notification.itinerary-created.dlq` |
+|---|---|---|
+| Dónde actúa | En el **productor**, antes de publicar | En el **consumidor** (Fase 6), después de publicar |
+| Qué aparta | Mensajes que el relay no puede convertir en evento | Mensajes que el consumidor rechaza sin reencolar |
+| Para qué | Que no bloqueen la publicación de los demás | Que no bloqueen el consumo de los demás |
+
+Un mensaje descartado con `failed_at` nunca llega a RabbitMQ, así que tampoco llega a la DLQ.
+
 ## 8. Integración serverless
 
 El evento publicado en RabbitMQ deberá llegar al componente responsable de ejecutar SendNotificationFunction.

@@ -1,13 +1,15 @@
 """Pruebas de integración de SqlAlchemyOutboxRepository y del relay contra PostgreSQL real.
 
 Comprueban lo que los fakes no pueden simular: el orden y el filtro de pendientes en SQL,
-el bloqueo con FOR UPDATE SKIP LOCKED entre dos sesiones (dos relays) y que un fallo de
-RabbitMQ deja el evento pendiente con su intento registrado (ADR-025).
+el bloqueo con FOR UPDATE SKIP LOCKED entre dos sesiones (dos relays), que un fallo de
+RabbitMQ deja el evento pendiente con su intento registrado (ADR-025) y que un mensaje
+venenoso se descarta con failed_at sin frenar a los válidos (ADR-027).
 
 Se omiten (SKIPPED) cuando PostgreSQL no está disponible. Requieren `alembic upgrade head`.
 """
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ from app.infrastructure.persistence.models import OutboxEventORM
 from app.infrastructure.persistence.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
+from tests.fakes import FakeEventPublisher
 
 BASE_TIME = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
 # Puerto donde no escucha nadie: simula RabbitMQ caído sin tener que detenerlo
@@ -92,6 +95,69 @@ def test_mark_failed_suma_intentos_y_guarda_el_error(db_session):
     assert pending.published_at is None
 
 
+def test_mark_dead_guarda_failed_at_y_saca_el_mensaje_de_los_pendientes(db_session):
+    poisoned, valid = _store_events(db_session, 2)
+    repo = SqlAlchemyOutboxRepository(db_session)
+
+    repo.mark_dead(poisoned.event_id, BASE_TIME, "Mensaje ilegible: KeyError('data')")
+    db_session.commit()
+
+    assert [m.id for m in repo.get_pending(10)] == [valid.event_id]
+    row = db_session.get(OutboxEventORM, poisoned.event_id)
+    db_session.refresh(row)
+    assert row.failed_at == BASE_TIME
+    assert row.published_at is None
+    assert row.attempts == 1
+    assert row.last_error == "Mensaje ilegible: KeyError('data')"
+
+
+def test_el_indice_de_pendientes_excluye_publicados_y_descartados(db_session):
+    """La migración c4d8e2f6a9b1 recrea el índice parcial con las dos condiciones."""
+    indexdef = db_session.execute(
+        text("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_outbox_events_pending'")
+    ).scalar_one()
+
+    assert "published_at IS NULL" in indexdef
+    assert "failed_at IS NULL" in indexdef
+
+
+def test_relay_descarta_el_venenoso_y_publica_el_valido(db_session):
+    """Un mensaje ilegible recibe failed_at, no vuelve a leerse y no frena a los válidos."""
+    poisoned_id = uuid4()
+    db_session.add(
+        OutboxEventORM(
+            id=poisoned_id,
+            aggregate_type="itinerary",
+            aggregate_id=uuid4(),
+            event_type="itinerary.created",
+            event_version=1,
+            payload={"event_type": "itinerary.created"},  # le faltan los demás campos
+            occurred_at=BASE_TIME - timedelta(hours=1),  # el más antiguo: va primero
+        )
+    )
+    db_session.commit()
+    (valid,) = _store_events(db_session, 1)
+    publisher = FakeEventPublisher()
+    relay = OutboxRelay(
+        outbox=SqlAlchemyOutboxRepository(db_session),
+        publisher=publisher,
+        unit_of_work=SqlAlchemyUnitOfWork(db_session),
+        batch_size=10,
+    )
+
+    first = relay.run_once()
+    second = relay.run_once()
+
+    assert first == RelayResult(published=1, failed=0, dead=1)
+    assert second == RelayResult()  # el venenoso no se vuelve a leer
+    assert [e.event_id for e in publisher.published] == [valid.event_id]
+    with Session(db_session.get_bind()) as other:
+        row = other.get(OutboxEventORM, poisoned_id)
+    assert row.failed_at is not None
+    assert row.attempts == 1
+    assert row.last_error.startswith("Mensaje ilegible")
+
+
 def test_skip_locked_dos_relays_no_toman_el_mismo_evento(db_session):
     """El relay A bloquea dos eventos; el relay B, al mismo tiempo, solo ve el tercero."""
     events = _store_events(db_session, 3)
@@ -125,5 +191,6 @@ def test_relay_con_rabbitmq_caido_deja_el_evento_pendiente(db_session):
     with Session(db_session.get_bind()) as other:
         row = other.get(OutboxEventORM, event.event_id)
     assert row.published_at is None
+    assert row.failed_at is None  # fallo temporal: se sigue reintentando
     assert row.attempts == 1
     assert "No se pudo conectar con RabbitMQ" in row.last_error
