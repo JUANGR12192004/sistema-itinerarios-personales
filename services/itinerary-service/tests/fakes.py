@@ -4,6 +4,7 @@ Cada fake implementa el puerto correspondiente con una lógica mínima en memori
 No dependen de PostgreSQL, de Airport Service ni de RabbitMQ.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from app.application.events import ItineraryCreatedEvent
@@ -13,22 +14,30 @@ from app.application.exceptions import (
     AirportServiceUnavailableError,
     EventPublishError,
 )
+from app.application.outbox import OutboxMessage
 from app.application.ports import (
     AirportCatalog,
     EventPublisher,
     ItineraryRepository,
+    OutboxRepository,
     UnitOfWork,
 )
 from app.domain.itinerary import Itinerary
 
 
 class FakeItineraryRepository(ItineraryRepository):
-    """Repositorio en memoria. Comportamiento idéntico al contrato del puerto."""
+    """Repositorio en memoria. Comportamiento idéntico al contrato del puerto.
 
-    def __init__(self) -> None:
+    `calls` es una lista opcional compartida con FakeUnitOfWork y FakeEventPublisher
+    para verificar el ORDEN de las operaciones (guardar → registrar evento → commit).
+    """
+
+    def __init__(self, calls: list[str] | None = None) -> None:
         self._store: dict[UUID, Itinerary] = {}
+        self._calls = calls if calls is not None else []
 
     def save(self, itinerary: Itinerary) -> None:
+        self._calls.append("save")
         self._store[itinerary.id] = itinerary
 
     def get_by_id(self, itinerary_id: UUID) -> Itinerary | None:
@@ -72,8 +81,8 @@ class FakeAirportCatalog(AirportCatalog):
 class FakeUnitOfWork(UnitOfWork):
     """Unidad de trabajo en memoria: cuenta los commits y los anota en `calls`.
 
-    `calls` es una lista opcional compartida con FakeEventPublisher para verificar
-    el ORDEN de las operaciones (commit antes de publicar).
+    `calls` es una lista opcional compartida con los demás fakes para verificar
+    el ORDEN de las operaciones (el commit va después de registrar el evento).
     """
 
     def __init__(self, calls: list[str] | None = None) -> None:
@@ -88,17 +97,47 @@ class FakeUnitOfWork(UnitOfWork):
 class FakeEventPublisher(EventPublisher):
     """Publisher que guarda los eventos en memoria para verificarlos en pruebas.
 
-    - fail: simula que RabbitMQ no está disponible (lanza EventPublishError).
-    - calls: lista compartida con FakeUnitOfWork para verificar el orden.
+    - fail: simula que el evento no se pudo registrar ni publicar (lanza EventPublishError).
+    - calls: lista compartida con los demás fakes para verificar el orden.
     """
 
     def __init__(self, fail: bool = False, calls: list[str] | None = None) -> None:
         self.published: list[ItineraryCreatedEvent] = []
-        self._fail = fail
+        # Público para que una prueba pueda "levantar" RabbitMQ entre dos ciclos del relay
+        self.fail = fail
         self._calls = calls if calls is not None else []
 
     def publish(self, event: ItineraryCreatedEvent) -> None:
         self._calls.append("publish")
-        if self._fail:
+        if self.fail:
             raise EventPublishError("RabbitMQ no disponible (simulado)")
         self.published.append(event)
+
+
+class FakeOutboxRepository(OutboxRepository):
+    """Outbox en memoria: guarda OutboxMessage y aplica las marcas sobre ellos.
+
+    No simula bloqueos (SKIP LOCKED): eso se prueba contra PostgreSQL real
+    en tests/integration/test_outbox_repository_integration.py.
+    """
+
+    def __init__(self, messages: list[OutboxMessage] | None = None) -> None:
+        self.messages: dict[UUID, OutboxMessage] = {m.id: m for m in messages or []}
+
+    def get_pending(self, limit: int) -> list[OutboxMessage]:
+        pending = [
+            m for m in self.messages.values() if m.published_at is None and m.failed_at is None
+        ]
+        return sorted(pending, key=lambda m: m.occurred_at)[:limit]
+
+    def mark_published(self, message_id: UUID, published_at: datetime) -> None:
+        self.messages[message_id].published_at = published_at
+
+    def mark_failed(self, message_id: UUID, error: str) -> None:
+        message = self.messages[message_id]
+        message.attempts += 1
+        message.last_error = error
+
+    def mark_dead(self, message_id: UUID, failed_at: datetime, error: str) -> None:
+        self.mark_failed(message_id, error)
+        self.messages[message_id].failed_at = failed_at

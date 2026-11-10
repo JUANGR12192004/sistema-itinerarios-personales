@@ -79,12 +79,26 @@ Se aplicarán arquitectura hexagonal, el patrón Adapter y conceptos de DDD para
 | 2 | Resiliencia y caché | Completada |
 | 3 | Itinerary Service | Completada |
 | 4 | Eventos y RabbitMQ | Completada |
-| 5 | Transactional Outbox | Siguiente |
+| 5 | Transactional Outbox | En revisión (rama `fase-5-transactional-outbox`) |
 | 6 a 12 | Serverless, gateway, frontend, observabilidad, Docker, pruebas y documentación | Pendientes |
 
-**Fase actual:** Fase 5 — Transactional Outbox (guardar el itinerario y su evento en la misma transacción y publicarlo con un relay). Aún no iniciada.
+**Fase actual:** Fase 5 — Transactional Outbox. Implementada en la rama `fase-5-transactional-outbox`, pendiente de pull request y merge.
 
-La documentación de Itinerary Service (PostgreSQL, Alembic, RabbitMQ, ejecución, pruebas, endpoints y demostración) está en [`services/itinerary-service/README.md`](services/itinerary-service/README.md). El contrato del evento `ItineraryCreatedEvent` está en [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml).
+La documentación de Itinerary Service (PostgreSQL, Alembic, RabbitMQ, Outbox Relay, ejecución, pruebas, endpoints y demostración) está en [`services/itinerary-service/README.md`](services/itinerary-service/README.md). El contrato del evento `ItineraryCreatedEvent` está en [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml).
+
+### Fase 5 — Transactional Outbox
+
+Resuelve el problema de *double write* de la Fase 4 (guardar en PostgreSQL y publicar en RabbitMQ sin una transacción común), sin cambiar el contrato del evento.
+
+| Pieza | Qué hace |
+|---|---|
+| Tabla `outbox_events` | Guarda el evento en la **misma transacción** que el itinerario: se guardan los dos o ninguno (ADR-024, ADR-026) |
+| Outbox Relay (`python -m app.outbox_relay`) | Proceso aparte que publica los pendientes con `FOR UPDATE SKIP LOCKED` y los marca como publicados (ADR-025) |
+| Fallo temporal (RabbitMQ caído) | El evento sigue pendiente y se reintenta sin límite: no se pierde |
+| Fallo permanente (mensaje ilegible) | Se descarta con `failed_at` para que no bloquee a los demás (ADR-027) |
+| Entrega al menos una vez | Puede haber duplicados: el consumidor debe ser idempotente con `event_id` |
+
+La explicación completa está en [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md) (sección 7).
 
 ### Fase 2 — Resiliencia y caché (completada)
 

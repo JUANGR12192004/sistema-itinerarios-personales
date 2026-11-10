@@ -1,7 +1,7 @@
 """Prueba de integración de SqlAlchemyUnitOfWork contra PostgreSQL real.
 
 Verifica que, después de `commit()`, el itinerario es visible desde OTRA sesión:
-es decir, que el dato ya está confirmado antes de publicar el evento (ADR-022).
+es decir, que el commit del caso de uso realmente confirma los datos (ADR-026).
 
 Se omite automáticamente (SKIPPED) cuando PostgreSQL no está disponible.
 """

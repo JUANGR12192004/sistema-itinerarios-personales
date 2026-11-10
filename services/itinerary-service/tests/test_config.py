@@ -47,3 +47,42 @@ def test_connect_timeout_menor_que_dos_se_rechaza(
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, database_url=DATABASE_URL)
+
+
+# ── Outbox Relay (Fase 5, ADR-025) ────────────────────────────────────────────
+
+def test_valores_por_defecto_del_outbox_relay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("OUTBOX_RELAY_BATCH_SIZE", raising=False)
+
+    settings = Settings(_env_file=None, database_url=DATABASE_URL)
+
+    assert settings.outbox_relay_poll_interval_seconds == 2.0
+    assert settings.outbox_relay_batch_size == 10
+
+
+def test_el_outbox_relay_se_configura_por_variables_de_entorno(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0.5")
+    monkeypatch.setenv("OUTBOX_RELAY_BATCH_SIZE", "25")
+
+    settings = Settings(_env_file=None, database_url=DATABASE_URL)
+
+    assert settings.outbox_relay_poll_interval_seconds == 0.5
+    assert settings.outbox_relay_batch_size == 25
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0"),
+        ("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "-1"),
+        ("OUTBOX_RELAY_BATCH_SIZE", "0"),
+    ],
+)
+def test_valores_invalidos_del_outbox_relay_se_rechazan(
+    monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+) -> None:
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url=DATABASE_URL)

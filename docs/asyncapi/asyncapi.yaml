@@ -1,8 +1,9 @@
-# Contrato de eventos del Sistema de Itinerarios Personales (Fase 4).
+# Contrato de eventos del Sistema de Itinerarios Personales (Fase 4; sin cambios en la Fase 5).
 #
 # Describe el evento de integración ItineraryCreatedEvent tal como lo publica
-# RabbitMQEventPublisher (services/itinerary-service/app/infrastructure/messaging).
-# Decisiones: ADR-020 (contrato v1) y ADR-021 (topología de RabbitMQ).
+# RabbitMQEventPublisher (services/itinerary-service/app/infrastructure/messaging),
+# que desde la Fase 5 usa el Outbox Relay.
+# Decisiones: ADR-020 (contrato v1), ADR-021 (topología de RabbitMQ) y ADR-024 a ADR-027 (Outbox).
 # Se puede visualizar pegando este archivo en https://studio.asyncapi.com
 asyncapi: 3.0.0
 
@@ -76,11 +77,14 @@ operations:
     channel:
       $ref: '#/channels/itineraryCreated'
     title: Publicar ItineraryCreatedEvent
-    summary: Itinerary Service publica el evento después de confirmar (commit) el itinerario en PostgreSQL.
+    summary: El Outbox Relay de Itinerary Service publica los eventos guardados en la tabla outbox_events.
     description: |
-      Productor: `itinerary-service`. Fase 4: publicación directa tras el commit (ADR-022).
-      Se usan publisher confirms y `mandatory=true`. Si RabbitMQ falla, el itinerario ya está
-      guardado y el evento se pierde (double write), problema que resuelve la Fase 5 (Outbox).
+      Productor: `itinerary-service`. Fase 5: Transactional Outbox (ADR-024 a ADR-027).
+      El itinerario y su evento se guardan en la misma transacción de PostgreSQL; el Outbox Relay
+      (`python -m app.outbox_relay`) publica después los pendientes con publisher confirms y
+      `mandatory=true`. Si RabbitMQ falla, el evento sigue pendiente y se reintenta: no se pierde.
+      El relay publica y después marca el evento como publicado, así que puede enviarlo más de una
+      vez (entrega al menos una vez, ver `info.description`).
     bindings:
       amqp:
         deliveryMode: 2
