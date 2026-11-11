@@ -756,7 +756,8 @@ pytest -v
   (`tests/conftest.py`), `connect_timeout` de 2 s en el fixture `pg_engine` (de 4,5 min a ~12 s sin
   PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
   Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
-- **Fase 5:** en curso en la rama `fase-5-transactional-outbox`.
+- **Fase 5:** completada y **fusionada en `main`** (PR #10, merge `a711afa`) con la **etiqueta `fase-5`**.
+  La rama `fase-5-transactional-outbox` se conserva como archivo de solo lectura.
   - Entrega **5A** completada (commit `599f4e0`): ADR-024 a ADR-026, tabla `outbox_events`
     (migración `b7c2d9e1f4a6`), `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`
     y `CreateItineraryUseCase` con guardar → registrar el evento → commit (desaparece "Evento perdido").
@@ -782,4 +783,4 @@ pytest -v
     - Demostración real hecha el 2026-11-08: con RabbitMQ detenido, `POST /itineraries` → 201 y evento pendiente;
       el relay falló 9 veces sin perderlo y lo publicó al volver RabbitMQ (`message_id` = `event_id`).
     - Total del servicio: **167 pasan** con PostgreSQL y RabbitMQ; **143 pasan, 24 omitidas** sin ellos.
-- **Siguiente:** pull request de la Fase 5 hacia `main` (lo crea el equipo) y, después del merge, la etiqueta `fase-5`.
+- **Fase 6:** en curso en la rama `fase-6-serverless`.
