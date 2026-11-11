@@ -543,7 +543,7 @@ La topología estaba como propuesta (sección 11.2 de `CLAUDE.md`) y faltaba ele
 - Mensajes persistentes (`delivery_mode=2`), `content_type=application/json`, `message_id = event_id`, `type = event_type` y `correlation_id` en las propiedades AMQP.
 - Publisher confirms y `mandatory=True`: la publicación solo se considera exitosa si RabbitMQ confirma que el mensaje llegó a una cola.
 - Librería **pika 1.3.2** (cliente síncrono oficial de RabbitMQ). Se abre una conexión por publicación, porque `BlockingConnection` no es segura entre hilos y FastAPI ejecuta las rutas `def` en varios hilos.
-- Mientras no exista el consumidor (Fase 6), el publicador declara toda la topología (las declaraciones son idempotentes), para que ningún mensaje se pierda por falta de cola.
+- Mientras no exista el consumidor (Fase 6), el publicador declara toda la topología (las declaraciones son idempotentes), para que ningún mensaje se pierda por falta de cola. *Corrección (Fase 6, ADR-032):* desde la entrega 6B el publicador declara **solo el exchange** `itinerary.events`; la cola, su binding, la DLX y la DLQ las declara el Event Trigger, que es su dueño.
 
 ### Justificación
 
@@ -760,7 +760,7 @@ Un mensaje descartado con `failed_at` **nunca llega a RabbitMQ**, así que tampo
 ### Consecuencias
 
 - Un mensaje descartado no se publica nunca solo. Para reintentarlo después de corregirlo, hay que dejar `failed_at` en `NULL` a mano (`UPDATE outbox_events SET failed_at = NULL WHERE id = ...`).
-- Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`UnroutableError` o `NackError`). Son poco probables porque el publicador declara la topología antes de publicar, pero si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura.
+- Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`NackError`). Si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura. *Actualización (Fase 6, ADR-032):* `UnroutableError` (ninguna cola recibió el mensaje) **sí es temporal**: ocurre mientras el Event Trigger no ha declarado su cola, y se resuelve en cuanto arranca. Tratarlo como temporal es lo que hace que el evento espere en la outbox.
 - Las consultas para monitorear la outbox deben separar pendientes (`published_at IS NULL AND failed_at IS NULL`), publicados y descartados (`failed_at IS NOT NULL`).
 
 ## ADR-028 — Modelo de programación de SendNotificationFunction (Fase 6)
@@ -906,6 +906,127 @@ La entrega es **al menos una vez** (ADR-025): el mismo evento puede llegar más 
 
 - **Queda una ventana pequeña:** si el envío sale bien pero el `COMMIT` falla, el reintento envía otra vez. La notificación también es "al menos una vez". Para un correo simulado es aceptable; un proveedor real de correo se protegería enviando el `event_id` como su propia clave de idempotencia.
 - Un `ALREADY_PROCESSED` es un éxito para quien invoca: el trigger debe confirmar (ACK) el mensaje.
+
+## ADR-031 — Event Trigger: consumo, invocación y política de reintentos (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6B).
+
+### Contexto
+
+RabbitMQ no sabe invocar una función serverless, y la función no lee colas (ADR-028). Hace falta un componente que cumpla el papel del **Event Source Mapping** de AWS Lambda: leer la cola `notification.itinerary-created`, invocar SendNotificationFunction y decidir qué hacer con cada mensaje según la respuesta.
+
+Como la entrega es "al menos una vez" y la función es idempotente (ADR-030), reintentar nunca duplica una notificación. Lo que hay que decidir es **cuándo** reintentar y **cuándo** apartar el mensaje en la DLQ.
+
+### Decisión
+
+**Componente.** El Event Trigger es un proceso aparte (`python -m app.main` en `serverless/event-trigger`):
+
+- Consume con **ACK manual** y `prefetch_count=1`: RabbitMQ le entrega un mensaje a la vez y no le da el siguiente hasta que el trigger responde ACK, reject o nack del actual.
+- Invoca la función con `POST` a la API de invocación del RIE (ADR-008), con el evento JSON como cuerpo y un timeout propio (`FUNCTION_TIMEOUT_SECONDS`, 15 s, mayor que los 10 s de la función).
+- Si se pierde la conexión con RabbitMQ, espera y se reconecta, en lugar de terminar. Se detiene con Ctrl+C.
+
+**Clasificación de la respuesta.** El RIE responde HTTP 200 también cuando la función falla (ADR-028), así que el trigger lee el código HTTP **y** el cuerpo:
+
+| Respuesta de la invocación | Tipo de fallo | Acción |
+|---|---|---|
+| `status` = `PROCESSED` o `ALREADY_PROCESSED` | Ninguno | `basic_ack` |
+| `status` = `REJECTED` | **Permanente** | `basic_reject(requeue=False)` → DLX → DLQ, sin reintentos |
+| El mensaje no es JSON (no se invoca la función) | **Permanente** | `basic_reject(requeue=False)` → DLQ |
+| Sin conexión con la función, timeout de la invocación, HTTP 5xx, `errorType` = `TransientError` o timeout de la propia función (el RIE responde HTTP 200 con el texto `Task timed out after N seconds`, comprobado en la 6B) | **Infraestructura** (temporal) | Reintentos con espera dentro del trigger. Si se agotan, espera `TRIGGER_REQUEUE_DELAY_SECONDS` y `basic_nack(requeue=True)`: el mensaje vuelve a la cola y se intenta otra vez. **Sin límite y nunca a la DLQ** |
+| Cualquier otro `errorType`, un código HTTP inesperado o una respuesta que no se entiende | **Error de la función** (probablemente de programación) | Reintentos limitados con espera. Si se agotan, `basic_reject(requeue=False)` → DLQ |
+
+**Valores por defecto** (variables de entorno, ver `.env.example`):
+
+| Variable | Valor | Significado |
+|---|---|---|
+| `TRIGGER_INFRASTRUCTURE_ATTEMPTS` | 3 | Intentos por entrega ante un fallo de infraestructura, antes de devolver el mensaje a la cola |
+| `TRIGGER_FUNCTION_ERROR_ATTEMPTS` | 3 | Intentos ante un error de la función, antes de enviarlo a la DLQ |
+| `TRIGGER_RETRY_BACKOFF_SECONDS` | 1 | Espera inicial entre intentos; se duplica en cada intento (1 s, 2 s, 4 s…) |
+| `TRIGGER_RETRY_MAX_BACKOFF_SECONDS` | 8 | Máximo de esa espera |
+| `TRIGGER_REQUEUE_DELAY_SECONDS` | 10 | Pausa antes de devolver el mensaje a la cola, para no reintentar sin descanso |
+
+**Capas.** El trigger no tiene reglas de negocio, así que no tiene capa de dominio:
+
+| Capa | Contenido |
+|---|---|
+| `application` | `DeliveryHandler` (la política: de la respuesta a ACK, reject o requeue), `RetryPolicy`, el puerto `FunctionInvoker` y los tipos `InvocationResult` y `Decision`. Se prueba con fakes, sin RabbitMQ ni la función |
+| `infrastructure` | `LambdaFunctionInvoker` (cliente HTTP con httpx que clasifica la respuesta del RIE), el consumidor de RabbitMQ con pika y la declaración de la topología (ADR-032) |
+| `app/main.py` | Ensamblaje, bucle de reconexión y parada con Ctrl+C |
+
+Las esperas usan `connection.sleep()` de pika, no `time.sleep()`. Mientras espera, pika sigue atendiendo los *heartbeats* (señales periódicas con las que RabbitMQ comprueba que el cliente sigue vivo), así RabbitMQ no cierra la conexión durante una pausa larga.
+
+### Relación con ADR-027
+
+Es el **mismo criterio de fallo temporal vs. permanente** que el Outbox Relay aplica en el productor, ahora en el consumidor:
+
+| | Outbox Relay (productor, ADR-027) | Event Trigger (consumidor, esta decisión) |
+|---|---|---|
+| Fallo temporal | RabbitMQ no disponible (`EventPublishError`) | La función o su base de datos no disponibles (sin conexión, timeout, 5xx, `TransientError`) |
+| Qué se hace | Sigue pendiente, se reintenta **sin límite** | Vuelve a la cola, se reintenta **sin límite** |
+| Fallo permanente | Mensaje venenoso (payload ilegible, `event_type` desconocido) | Mensaje que no es JSON o que la función rechaza (`REJECTED`) |
+| Qué se hace | `failed_at`: se aparta sin reintentar | DLQ: se aparta sin reintentar |
+| Por qué | Un fallo temporal se arregla solo cuando vuelve la dependencia: descartar sería perder el evento. Un fallo permanente no se arregla reintentando y bloquearía a los demás | Lo mismo |
+
+Hay un caso que el relay no tiene: un **error de la función que no es de infraestructura**. No se sabe si es temporal, así que recibe unos pocos reintentos y después va a la DLQ. Con `prefetch_count=1`, un mensaje que falla siempre bloquearía la cola para todos los demás si se reintentara sin límite.
+
+### Justificación
+
+- Reintentar sin límite los fallos de infraestructura evita llenar la DLQ con mensajes sanos cuando la función o PostgreSQL están caídos un rato. Cuando vuelven, los mensajes se procesan solos.
+- Los reintentos dentro del trigger cubren cortes de pocos segundos sin devolver el mensaje. La pausa antes de `nack` evita un bucle que consuma CPU y llene el log mientras la dependencia sigue caída.
+- La idempotencia de la función (ADR-030) hace seguro reintentar: un mensaje procesado cuya confirmación se perdió responde `ALREADY_PROCESSED` y recibe ACK.
+
+### Consecuencias
+
+- Mientras la función o su base de datos estén caídas, el mensaje vuelve una y otra vez al **inicio** de la cola y los que vienen detrás esperan. Es aceptable, porque fallarían igual por la misma causa.
+- Un error de programación en la función manda a la DLQ cada mensaje que lo provoque, después de 3 intentos. Corregida la función, hay que reenviar esos mensajes desde la DLQ a mano (por ejemplo, con *Move messages* del panel de RabbitMQ).
+- El nombre `TransientError` y los estados de la respuesta son parte del contrato entre la función y el trigger (ADR-028).
+- En AWS, el Event Source Mapping de Amazon MQ cumpliría este papel y no haría falta el trigger. Su política de reintentos se configura en la plataforma, no en código.
+
+## ADR-032 — Propiedad de la topología de RabbitMQ (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6B). Corrige ADR-021.
+
+### Contexto
+
+Desde la Fase 4, el publicador de Itinerary Service declaraba toda la topología: el exchange, la cola de notificaciones, su binding, la DLX y la DLQ (ADR-021). Era una medida provisional mientras no existía el consumidor. Con el Event Trigger, hay que decidir quién declara cada elemento.
+
+### Decisión
+
+Cada lado declara **lo que le pertenece**:
+
+| Elemento | Quién lo declara | Por qué |
+|---|---|---|
+| Exchange `itinerary.events` (topic, durable) | El publicador de Itinerary Service **y** el Event Trigger | Es el contrato público del productor. El trigger también lo declara porque necesita que exista para enlazar su cola |
+| Cola `notification.itinerary-created` (durable, `x-dead-letter-exchange: itinerary.events.dlx`) y su binding con `itinerary.created` | El Event Trigger | Es la cola de **este** consumidor |
+| DLX `itinerary.events.dlx` (direct, durable) y DLQ `notification.itinerary-created.dlq` (durable) con su binding | El Event Trigger | Reciben lo que **este** consumidor rechaza (ADR-031) |
+
+- Las declaraciones son idempotentes y usan **los mismos argumentos de ADR-021**. Así no hay `PRECONDITION_FAILED` contra una cola que ya exista desde las fases anteriores.
+- El trigger las declara cada vez que se conecta o reconecta, así no depende de que Itinerary Service haya arrancado antes.
+
+### Qué pasa si el trigger nunca arrancó
+
+1. La cola no existe, así que el exchange no tiene a quién entregar el mensaje.
+2. Como el publicador usa `mandatory=True`, RabbitMQ devuelve el mensaje y pika lanza `UnroutableError`, que `RabbitMQEventPublisher` convierte en `EventPublishError`.
+3. El Outbox Relay lo trata como **fallo temporal** (ADR-025 y ADR-027): suma un intento y el evento **sigue pendiente en la outbox**.
+4. Cuando el trigger arranca y declara su cola, el siguiente ciclo del relay publica el evento y se procesa.
+
+No se pierde nada, y el relay no necesita ningún cambio para esto.
+
+### Justificación
+
+- En publicación/suscripción, el productor no debería conocer las colas de sus consumidores. Si mañana se agrega un segundo consumidor (por ejemplo, un reporte), este declara su propia cola y el productor no cambia.
+- El Transactional Outbox ya garantiza que un evento sin destino espera en lugar de perderse. La versión anterior declaraba la cola desde el productor justamente para evitar esa pérdida, y ya no hace falta.
+
+### Consecuencias
+
+- Archivos de las Fases 4 y 5 modificados en Itinerary Service:
+  - `app/infrastructure/messaging/topology.py` deja solo el exchange (`declare_exchange`).
+  - `RabbitMQEventPublisher` llama a `declare_exchange`.
+  - Las pruebas con canal falso comprueban que el publicador ya no declara colas.
+  - El fixture de integración `rabbitmq_channel` declara la cola como lo haría el consumidor.
+  - Se agrega una prueba de integración: sin cola enlazada, el evento queda pendiente.
+- Los argumentos de la cola existen ahora en un solo componente (el trigger). Si cambian, solo cambia el trigger; pero la cola ya creada en RabbitMQ conserva los anteriores y habría que borrarla antes (RabbitMQ no permite cambiar los argumentos de una cola existente).
+- En la demostración, el orden de arranque deja de importar: el trigger puede arrancar antes o después de Itinerary Service.
 
 ## 2. Revisión de decisiones
 

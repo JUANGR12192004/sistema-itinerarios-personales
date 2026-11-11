@@ -91,7 +91,7 @@ Garantías del lado del productor (`RabbitMQEventPublisher`, librería `pika`):
 - **`mandatory=True`:** si el mensaje no llega a ninguna cola, RabbitMQ lo devuelve y la publicación falla en vez de perderse en silencio.
 - **Timeout** de 3 segundos (`RABBITMQ_TIMEOUT_SECONDS`) para no quedarse esperando si RabbitMQ no responde.
   Desde la Fase 5 quien publica es el Outbox Relay, no la solicitud HTTP (sección 7).
-- Mientras no exista el consumidor, el productor declara toda la topología (las declaraciones son idempotentes).
+- Desde la Fase 6 (ADR-032), el productor declara solo el exchange y el Event Trigger declara su cola, el binding, la DLX y la DLQ (las declaraciones son idempotentes). Si el trigger todavía no ha arrancado, el evento espera en la outbox.
 
 ### 3.4. Tratamiento de errores
 
