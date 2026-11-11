@@ -1,0 +1,17 @@
+{
+  "event_id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+  "event_type": "itinerary.created",
+  "event_version": 1,
+  "occurred_at": "2026-11-10T15:40:00Z",
+  "producer": "itinerary-service",
+  "correlation_id": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f7a",
+  "data": {
+    "itinerary_id": "no-es-un-uuid",
+    "traveler_name": "Ana Pérez",
+    "traveler_email": "ana@example.com",
+    "departure_airport_id": 1,
+    "arrival_airport_id": 5,
+    "travel_date": "2026-12-15T08:00:00",
+    "duration_minutes": 0
+  }
+}

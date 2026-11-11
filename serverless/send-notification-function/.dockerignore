@@ -1,0 +1,14 @@
+# Solo entran a la imagen requirements.txt y app/ (ver Dockerfile).
+# Esto evita enviar al build archivos grandes o con credenciales.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+tests/
+alembic/
+alembic.ini
+events/
+requirements-dev.txt
