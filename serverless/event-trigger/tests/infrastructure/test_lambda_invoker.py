@@ -82,6 +82,34 @@ def test_otro_error_type_es_error_de_la_funcion(invoker, error_type):
 
 
 @respx.mock
+def test_del_error_message_solo_guarda_la_primera_linea(invoker):
+    """El SQL y sus parámetros (con el correo del viajero) no llegan al log del trigger."""
+    message = (
+        '(psycopg.errors.UndefinedTable) relation "notification_history" does not exist\n'
+        "[SQL: INSERT INTO notification_history ...]\n"
+        "[parameters: {'recipient': 'ana@example.com'}]"
+    )
+    respx.post(URL).mock(return_value=httpx.Response(200, json=rie_error("ProgrammingError", message)))
+
+    result = invoker.invoke(EVENT)
+
+    assert result.detail == (
+        'errorType=ProgrammingError: (psycopg.errors.UndefinedTable) relation "notification_history" does not exist'
+    )
+    assert "ana@example.com" not in result.detail
+
+
+@respx.mock
+def test_un_error_message_muy_largo_se_recorta(invoker):
+    respx.post(URL).mock(return_value=httpx.Response(200, json=rie_error("KeyError", "x" * 500)))
+
+    detail = invoker.invoke(EVENT).detail
+
+    assert len(detail) < 250
+    assert detail.endswith("…")
+
+
+@respx.mock
 @pytest.mark.parametrize("status_code", [500, 502, 503])
 def test_http_5xx_es_fallo_de_infraestructura(invoker, status_code):
     respx.post(URL).mock(return_value=httpx.Response(status_code, text="error"))

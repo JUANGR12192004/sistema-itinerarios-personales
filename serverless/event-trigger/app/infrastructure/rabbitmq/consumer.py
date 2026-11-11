@@ -22,7 +22,7 @@ from pika.adapters.blocking_connection import BlockingChannel, BlockingConnectio
 from pika.exceptions import AMQPError
 
 from app.application.delivery_handler import Decision, DeliveryHandler
-from app.infrastructure.rabbitmq.topology import QUEUE_NOTIFICATIONS, declare_topology
+from app.infrastructure.rabbitmq.topology import NOTIFICATION_TOPOLOGY, QueueTopology, declare_topology
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class RabbitMQConsumer:
         timeout_seconds: float,
         handler_factory: HandlerFactory,
         connection_factory: ConnectionFactory = pika.BlockingConnection,
+        topology: QueueTopology = NOTIFICATION_TOPOLOGY,
     ) -> None:
         self._parameters = pika.URLParameters(url)
         self._parameters.socket_timeout = timeout_seconds
@@ -62,6 +63,7 @@ class RabbitMQConsumer:
         self._parameters.connection_attempts = 1
         self._handler_factory = handler_factory
         self._connection_factory = connection_factory
+        self._topology = topology
 
     def run(self, max_messages: int | None = None, stop_when_idle: bool = False) -> int:
         """Consume hasta que se pierda la conexión (lanza AMQPError) o se pulse Ctrl+C.
@@ -73,18 +75,18 @@ class RabbitMQConsumer:
         processed = 0
         try:
             channel = connection.channel()
-            declare_topology(channel)
+            declare_topology(channel, self._topology)
             channel.basic_qos(prefetch_count=PREFETCH_COUNT)
             handler = self._handler_factory(connection.sleep)
             logger.info(
                 "Event Trigger conectado a %s:%s; escuchando la cola %s",
                 self._parameters.host,
                 self._parameters.port,
-                QUEUE_NOTIFICATIONS,
+                self._topology.queue,
             )
 
             for method, properties, body in channel.consume(
-                QUEUE_NOTIFICATIONS, auto_ack=False, inactivity_timeout=INACTIVITY_TIMEOUT_SECONDS
+                self._topology.queue, auto_ack=False, inactivity_timeout=INACTIVITY_TIMEOUT_SECONDS
             ):
                 if method is None:  # pasó un segundo sin mensajes
                     if stop_when_idle:

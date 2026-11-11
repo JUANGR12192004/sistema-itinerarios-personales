@@ -142,6 +142,19 @@ def test_topologia_del_consumidor_con_los_argumentos_de_adr_021():
     ) in channel.calls
 
 
+def test_la_dlq_tambien_recibe_los_mensajes_reprocesados_que_vuelven_a_fallar():
+    """Un mensaje devuelto por replay_dlq llega con routing key = nombre de la cola; si se
+    rechaza otra vez, la DLX lo enruta con esa clave. Sin este binding se perdería."""
+    channel = FakeChannel()
+
+    declare_topology(channel)
+
+    assert (
+        "queue_bind",
+        {"queue": DEAD_LETTER_QUEUE, "exchange": DEAD_LETTER_EXCHANGE, "routing_key": QUEUE_NOTIFICATIONS},
+    ) in channel.calls
+
+
 def test_nombres_de_la_topologia():
     assert EXCHANGE == "itinerary.events"
     assert QUEUE_NOTIFICATIONS == "notification.itinerary-created"

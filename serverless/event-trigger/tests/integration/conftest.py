@@ -1,11 +1,17 @@
 """Fixtures para las pruebas de integración del trigger (SKIPPED si falta el servicio).
 
-rabbitmq_channel — canal real con la topología del trigger declarada y las colas vacías.
-function_invoker — LambdaFunctionInvoker contra la función real (RIE en el puerto 9000).
+AISLAMIENTO: las pruebas NO tocan la cola real notification.itinerary-created ni su DLQ.
+Usan su propia topología con nombres únicos (prefijo `test-<id>.`), con los mismos argumentos
+que la real: se declara una vez por sesión de pytest, sus colas (de prueba) se vacían antes y
+después de cada prueba, y se borra al terminar la sesión. Así se pueden correr durante una
+demostración sin vaciar ni consumir los mensajes de las colas reales.
 
-ATENCIÓN: rabbitmq_channel vacía (purge) la cola notification.itinerary-created y la DLQ
-antes y después de cada prueba. Detener el trigger (`python -m app.main`) antes de correr
-estas pruebas y no usarlas contra un RabbitMQ con mensajes que se quieran conservar.
+Se declara una sola vez porque en RabbitMQ declarar y borrar colas tarda varios segundos.
+
+rabbitmq_parameters — parámetros de conexión; SKIPPED (una sola vez) si RabbitMQ no responde.
+rabbitmq_channel    — canal real para cada prueba.
+test_topology       — topología de prueba con las colas vacías.
+function_invoker    — LambdaFunctionInvoker contra la función real (RIE en el puerto 9000).
 """
 
 import json
@@ -23,13 +29,7 @@ from app.application.ports import FunctionInvoker
 from app.config import get_settings
 from app.infrastructure.lambda_invoker import LambdaFunctionInvoker
 from app.infrastructure.rabbitmq.consumer import RabbitMQConsumer
-from app.infrastructure.rabbitmq.topology import (
-    DEAD_LETTER_QUEUE,
-    EXCHANGE,
-    QUEUE_NOTIFICATIONS,
-    ROUTING_KEY_ITINERARY_CREATED,
-    declare_topology,
-)
+from app.infrastructure.rabbitmq.topology import QueueTopology, declare_topology
 
 # Esperas cortas para que las pruebas no dependan de servicios lentos o caídos
 RABBITMQ_TIMEOUT_SECONDS = 2.0
@@ -45,22 +45,70 @@ FAST_POLICY = RetryPolicy(
 )
 
 
-@pytest.fixture
-def rabbitmq_channel():
+@pytest.fixture(scope="session")
+def rabbitmq_parameters() -> pika.URLParameters:
+    """Comprueba una vez si RabbitMQ responde; si no, todas las pruebas que lo usan quedan SKIPPED."""
     parameters = pika.URLParameters(get_settings().rabbitmq_url)
     parameters.socket_timeout = RABBITMQ_TIMEOUT_SECONDS
     parameters.stack_timeout = RABBITMQ_TIMEOUT_SECONDS
     parameters.connection_attempts = 1
     try:
-        connection = pika.BlockingConnection(parameters)
+        pika.BlockingConnection(parameters).close()
     except (AMQPError, OSError):
         pytest.skip("RabbitMQ no disponible — omitiendo prueba de integración")
+    return parameters
 
+
+@pytest.fixture
+def rabbitmq_channel(rabbitmq_parameters):
+    connection = pika.BlockingConnection(rabbitmq_parameters)
+    yield connection.channel()
+    if connection.is_open:
+        connection.close()
+
+
+@pytest.fixture(scope="session")
+def _session_topology(rabbitmq_parameters):
+    """Topología con nombres únicos para esta sesión; se borra al final, pase lo que pase."""
+    prefix = f"test-{uuid4().hex[:8]}."
+    topology = QueueTopology(
+        exchange=prefix + "itinerary.events",
+        routing_key="itinerary.created",
+        queue=prefix + "notification.itinerary-created",
+        dead_letter_exchange=prefix + "itinerary.events.dlx",
+        dead_letter_queue=prefix + "notification.itinerary-created.dlq",
+    )
+    connection = pika.BlockingConnection(rabbitmq_parameters)
+    declare_topology(connection.channel(), topology)
+    connection.close()
+    try:
+        yield topology
+    finally:
+        _delete_topology(rabbitmq_parameters, topology)
+
+
+@pytest.fixture
+def test_topology(rabbitmq_channel, _session_topology):
+    """La topología de prueba con sus dos colas vacías (solo se vacían las colas de prueba)."""
+    _purge(rabbitmq_channel, _session_topology)
+    yield _session_topology
+    if rabbitmq_channel.is_open:
+        _purge(rabbitmq_channel, _session_topology)
+
+
+def _purge(channel: BlockingChannel, topology: QueueTopology) -> None:
+    channel.queue_purge(topology.queue)
+    channel.queue_purge(topology.dead_letter_queue)
+
+
+def _delete_topology(parameters: pika.URLParameters, topology: QueueTopology) -> None:
+    """Borra las colas y exchanges de prueba con una conexión nueva."""
+    connection = pika.BlockingConnection(parameters)
     channel = connection.channel()
-    declare_topology(channel)
-    _purge(channel)
-    yield channel
-    _purge(channel)
+    channel.queue_delete(queue=topology.queue)
+    channel.queue_delete(queue=topology.dead_letter_queue)
+    channel.exchange_delete(exchange=topology.exchange)
+    channel.exchange_delete(exchange=topology.dead_letter_exchange)
     connection.close()
 
 
@@ -76,33 +124,32 @@ def function_invoker():
     invoker.close()
 
 
-def _purge(channel: BlockingChannel) -> None:
-    channel.queue_purge(QUEUE_NOTIFICATIONS)
-    channel.queue_purge(DEAD_LETTER_QUEUE)
-
-
-def publish(channel: BlockingChannel, body: bytes, message_id: str | None = None) -> str:
-    """Publica en el exchange como lo hace Itinerary Service y devuelve el message_id."""
+def publish(channel: BlockingChannel, topology: QueueTopology, body: bytes, message_id: str | None = None) -> str:
+    """Publica en el exchange de prueba como lo hace Itinerary Service y devuelve el message_id."""
     message_id = message_id or str(uuid4())
     channel.basic_publish(
-        exchange=EXCHANGE,
-        routing_key=ROUTING_KEY_ITINERARY_CREATED,
+        exchange=topology.exchange,
+        routing_key=topology.routing_key,
         body=body,
-        properties=pika.BasicProperties(message_id=message_id, delivery_mode=2),
+        properties=pika.BasicProperties(
+            message_id=message_id, delivery_mode=2, content_type="application/json", correlation_id="cid-test"
+        ),
     )
     return message_id
 
 
-def publish_event(channel: BlockingChannel, event: dict) -> str:
-    return publish(channel, json.dumps(event).encode("utf-8"), event.get("event_id"))
+def publish_event(channel: BlockingChannel, topology: QueueTopology, event: dict) -> str:
+    return publish(channel, topology, json.dumps(event).encode("utf-8"), event.get("event_id"))
 
 
-def run_trigger(invoker: FunctionInvoker, max_messages: int = 1) -> int:
-    """Ejecuta el consumidor real hasta procesar `max_messages` o quedar la cola vacía."""
+def run_trigger(invoker: FunctionInvoker, topology: QueueTopology, max_messages: int = 1) -> int:
+    """Ejecuta el consumidor real sobre la topología de prueba hasta procesar `max_messages`
+    o quedar la cola vacía."""
     consumer = RabbitMQConsumer(
         get_settings().rabbitmq_url,
         RABBITMQ_TIMEOUT_SECONDS,
         handler_factory=lambda sleep: DeliveryHandler(invoker, FAST_POLICY, sleep),
+        topology=topology,
     )
     return consumer.run(max_messages=max_messages, stop_when_idle=True)
 
