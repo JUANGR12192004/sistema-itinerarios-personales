@@ -92,7 +92,7 @@ El servicio controlará su esquema, sus migraciones y las operaciones sobre sus 
 
 Se deberán definir migraciones versionadas y una estrategia de respaldo y configuración.
 
-La tecnología de persistencia del historial de notificaciones se decidirá por separado.
+La tecnología de persistencia del historial de notificaciones se decidió por separado en la Fase 6 (ADR-029).
 
 ## ADR-005 — RabbitMQ para mensajería
 
@@ -166,17 +166,11 @@ Se deberán definir expiración, invalidación y comportamiento ante resultados 
 
 ## ADR-008 — Tecnología serverless local
 
-**Estado:** Pendiente de decisión.
+**Estado:** Aceptada (Fase 6, entrega 6A).
 
 ### Contexto
 
-El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo local.
-
-### Alternativas
-
-- LocalStack con AWS Lambda.
-- Knative.
-- OpenFaaS.
+El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo local. El profesor no exige una plataforma serverless específica. El equipo trabaja en Windows 11 y la solución también debe funcionar en macOS con Apple Silicon.
 
 ### Criterios de selección
 
@@ -186,9 +180,41 @@ El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo l
 - Complejidad de configuración.
 - Facilidad para demostrar el modelo FaaS en la sustentación.
 
-### Decisión final
+### Alternativas evaluadas
 
-Se registrará después de comparar las alternativas y comprobar su compatibilidad con el entorno.
+| Alternativa | Qué necesita | Resultado |
+|---|---|---|
+| **Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (RIE)** | Solo Docker | **Elegida** |
+| LocalStack con AWS Lambda | Docker, más una cuenta de LocalStack y un *auth token* (obligatorios desde marzo de 2026) | Descartada: cada integrante dependería de una cuenta externa |
+| Knative | Un clúster de Kubernetes (kind, minikube o el de Docker Desktop) con Knative Serving y Eventing | Descartada: su instalación es mucho más compleja que el resto del proyecto |
+| OpenFaaS | Kubernetes (o faasd, que necesita Linux con containerd) | Descartada: por la misma razón que Knative |
+
+### Decisión
+
+- SendNotificationFunction se empaqueta como una **imagen de contenedor de Lambda** construida desde `public.ecr.aws/lambda/python:3.12`.
+- La imagen trae el cliente del runtime de Lambda (`awslambdaric`) y el **Runtime Interface Emulator**. En local, el RIE hace el papel del servicio AWS Lambda: recibe la invocación, llama al handler y devuelve su resultado.
+- El RIE escucha en el puerto 8080 del contenedor, que se publica como **9000** en el equipo (sección 7.6 de `CLAUDE.md`):
+
+```
+POST http://localhost:9000/2015-03-31/functions/function/invocations
+```
+
+- Es la misma ruta de la API *Invoke* de AWS Lambda. El cuerpo de la solicitud es el `event` que recibe el handler, y la respuesta es lo que el handler devuelve.
+
+### Justificación
+
+- Solo necesita Docker Desktop, que el equipo ya usa desde la Fase 2.
+- Funciona igual en Windows 11 y en macOS con Apple Silicon: la imagen es multiarquitectura (amd64 y arm64).
+- La misma imagen se puede desplegar en AWS Lambda sin cambios (subiéndola a Amazon ECR).
+- Permite demostrar el modelo FaaS sin cuentas externas ni Kubernetes.
+
+### Limitaciones en local (y por qué la función sigue siendo FaaS)
+
+- **No hay escalado automático:** un contenedor es una sola instancia de la función y atiende una invocación a la vez.
+- **No se apaga cuando no hay eventos** (no hay *scale to zero*): el contenedor queda encendido. Sí se puede ver el arranque en frío: la primera invocación inicializa la función y tarda más.
+- **No hay facturación por invocación, límites de concurrencia ni Event Source Mapping.** Por eso existe el Event Trigger (entrega 6B), que cumple el papel del Event Source Mapping.
+
+Lo que hace FaaS a una función es su **modelo de programación y su contrato con la plataforma**: es una función `handler(event, context)` que invoca la plataforma, sin servidor propio y sin estado entre invocaciones (ADR-028). Eso se cumple igual en local y en AWS. Las limitaciones anteriores son de la **operación** de la plataforma local, no del código: la misma imagen, desplegada en AWS Lambda, escalaría y se apagaría sola.
 
 ## ADR-009 — API Gateway / BFF
 
@@ -517,7 +543,7 @@ La topología estaba como propuesta (sección 11.2 de `CLAUDE.md`) y faltaba ele
 - Mensajes persistentes (`delivery_mode=2`), `content_type=application/json`, `message_id = event_id`, `type = event_type` y `correlation_id` en las propiedades AMQP.
 - Publisher confirms y `mandatory=True`: la publicación solo se considera exitosa si RabbitMQ confirma que el mensaje llegó a una cola.
 - Librería **pika 1.3.2** (cliente síncrono oficial de RabbitMQ). Se abre una conexión por publicación, porque `BlockingConnection` no es segura entre hilos y FastAPI ejecuta las rutas `def` en varios hilos.
-- Mientras no exista el consumidor (Fase 6), el publicador declara toda la topología (las declaraciones son idempotentes), para que ningún mensaje se pierda por falta de cola.
+- Mientras no exista el consumidor (Fase 6), el publicador declara toda la topología (las declaraciones son idempotentes), para que ningún mensaje se pierda por falta de cola. *Corrección (Fase 6, ADR-032):* desde la entrega 6B el publicador declara **solo el exchange** `itinerary.events`; la cola, su binding, la DLX y la DLQ las declara el Event Trigger, que es su dueño.
 
 ### Justificación
 
@@ -566,9 +592,9 @@ Las pruebas (pytest y la integración continua de `.github/workflows/tests.yml`)
 | Propiedad | Valor | Efecto |
 |---|---|---|
 | `sonar.python.version` | `3.12` | Aplica las reglas de Python 3.12 (sin ella, SonarCloud asume compatibilidad con varias versiones de 3.x) |
-| `sonar.sources` | `services` | Código de producción: todo lo que está dentro de `services/` |
+| `sonar.sources` | `services,serverless` | Código de producción: todo lo que está dentro de `services/` y, desde la Fase 6, de `serverless/` |
 | `sonar.exclusions` | `**/tests/**,**/alembic/versions/**` | Las pruebas y las migraciones generadas por Alembic no cuentan como código de producción |
-| `sonar.tests` | `services` | Las pruebas se buscan dentro de `services/` |
+| `sonar.tests` | `services,serverless` | Las pruebas se buscan dentro de `services/` y `serverless/` |
 | `sonar.test.inclusions` | `**/tests/**` | Solo las carpetas `tests/` se tratan como código de pruebas |
 
 ### Qué analiza
@@ -582,7 +608,7 @@ Automatic Analysis no necesita configurar un *workflow* ni guardar un token como
 ### Consecuencias
 
 - Automatic Analysis **no importa reportes de cobertura**: SonarCloud no muestra el porcentaje de cobertura de pytest. Si se quisiera, habría que cambiar a análisis desde GitHub Actions (con token).
-- Solo se analiza `services/`. Cuando existan `serverless/`, `gateway/` y `frontend/` (Fases 6 a 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
+- Se analizan `services/` y, desde la entrega 6C, `serverless/` (SendNotificationFunction y el Event Trigger). Cuando existan `gateway/` y `frontend/` (Fases 7 y 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
 - El acuerdo del equipo para fusionar exige el check "Pruebas" y una aprobación; el resultado de SonarCloud (su *Quality Gate*) no forma parte de ese acuerdo por ahora.
 
 ## ADR-024 — Tabla `outbox_events` y `OutboxMessage` (Fase 5)
@@ -734,8 +760,312 @@ Un mensaje descartado con `failed_at` **nunca llega a RabbitMQ**, así que tampo
 ### Consecuencias
 
 - Un mensaje descartado no se publica nunca solo. Para reintentarlo después de corregirlo, hay que dejar `failed_at` en `NULL` a mano (`UPDATE outbox_events SET failed_at = NULL WHERE id = ...`).
-- Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`UnroutableError` o `NackError`). Son poco probables porque el publicador declara la topología antes de publicar, pero si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura.
+- Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`NackError`). Si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura. *Actualización (Fase 6, ADR-032):* `UnroutableError` (ninguna cola recibió el mensaje) **sí es temporal**: ocurre mientras el Event Trigger no ha declarado su cola, y se resuelve en cuanto arranca. Tratarlo como temporal es lo que hace que el evento espere en la outbox.
 - Las consultas para monitorear la outbox deben separar pendientes (`published_at IS NULL AND failed_at IS NULL`), publicados y descartados (`failed_at IS NOT NULL`).
+
+## ADR-028 — Modelo de programación de SendNotificationFunction (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A).
+
+### Contexto
+
+SendNotificationFunction recibe `ItineraryCreatedEvent`, simula la notificación y guarda el historial. Debe seguir el modelo FaaS de la plataforma elegida (ADR-008) sin abandonar la arquitectura hexagonal del proyecto (ADR-002).
+
+### Decisión
+
+- **Modelo de Lambda:** la función es `handler(event, context)` en `app/handler.py`. La imagen la declara con `CMD ["app.handler.handler"]`.
+- **Sin estado entre invocaciones:** no guarda datos de negocio en memoria. Lo único que se reutiliza es el *engine* de SQLAlchemy (el administrador de conexiones), creado la primera vez y conservado mientras el contenedor siga "caliente". Es la práctica que recomienda AWS para no abrir una conexión nueva en cada invocación.
+- **Sin código de RabbitMQ:** la función recibe el evento ya extraído del mensaje. Leer la cola, confirmar (ACK) y reintentar es trabajo del Event Trigger (entrega 6B).
+- **Arquitectura hexagonal dentro de la función:**
+
+| Capa | Contenido |
+|---|---|
+| `domain` | `NotificationRecord`, `NotificationStatus` y la regla del destinatario (ADR-030) |
+| `application` | `ItineraryCreatedEvent` (el evento tal como lo lee este consumidor), puertos `NotificationHistoryRepository`, `NotificationSender` y `UnitOfWork`, caso de uso `NotifyItineraryCreatedUseCase`, excepciones `InvalidEventError` y `TransientError` |
+| `infrastructure` | `SimulatedEmailSender` (simula el correo con un log) y la persistencia con SQLAlchemy (ADR-029) |
+| Adaptador de entrada | `app/handler.py` (el handler de Lambda) y `app/event_schema.py` (esquema Pydantic del contrato v1). Cumplen el papel de las rutas FastAPI en los servicios |
+
+- **Validación del evento:** el esquema Pydantic comprueba el contrato v1 (ADR-020): `event_type = itinerary.created`, `event_version = 1`, UUID válidos, fechas con zona horaria, ids de aeropuerto y duración mayores que 0. Ignora los campos que no conoce (*Tolerant Reader*, igual que el Adapter de la Fase 1), para que un campo nuevo compatible no rompa al consumidor. La función **no importa código de Itinerary Service**: son contextos distintos y solo comparten el contrato publicado.
+- **Respuesta de la función** (lo que recibe quien la invoca):
+
+| `status` | Cuándo | Campos adicionales |
+|---|---|---|
+| `PROCESSED` | Se registró la notificación | `event_id`, `notification_id`, `notification_status` (`SENT` o `SKIPPED`) |
+| `ALREADY_PROCESSED` | El `event_id` ya estaba en el historial (ADR-030) | `event_id` |
+| `REJECTED` | El evento no cumple el contrato v1 (fallo permanente) | `event_id` (si se pudo leer) y `reason` |
+
+- **Errores que lanza la función:** el RIE, igual que AWS Lambda, informa una excepción no capturada con un cuerpo `{"errorType": "<nombre de la clase>", "errorMessage": "..."}`.
+
+| Situación | Qué hace la función | `errorType` |
+|---|---|---|
+| Evento inválido | No lanza excepción: responde `REJECTED` | — |
+| PostgreSQL no disponible (sin conexión, timeout, conexión cortada) | Captura el error de SQLAlchemy y lanza `TransientError` | `TransientError` |
+| Cualquier otro error (por ejemplo, un error de programación) | No lo captura | El nombre de su clase |
+
+El Event Trigger (entrega 6B) usa ese `errorType` para distinguir un fallo de infraestructura de uno de otro tipo.
+
+**Comportamiento comprobado del RIE (demostración de la 6A, 2026-11-10):**
+
+- Un error de la función responde **HTTP 200**, igual que un éxito. El error solo se reconoce porque el cuerpo trae `errorType` (además de `errorMessage`, `requestId` y `stackTrace`); el RIE no agrega un header que lo marque. Por eso el trigger debe revisar el cuerpo y no solo el código HTTP.
+- Con PostgreSQL detenido, la invocación responde en unos 2,6 s con `"errorType": "TransientError"`, dentro del timeout de la función (10 s).
+- Si el cuerpo no es JSON, el runtime falla **antes** de llamar al handler con `"errorType": "Runtime.UnmarshalError"`. Por eso el trigger comprueba que el mensaje sea JSON antes de invocar la función.
+- Al volver PostgreSQL, el mismo contenedor caliente se reconecta solo gracias a `pool_pre_ping` (ADR-029).
+
+### Justificación
+
+- El handler es delgado, como una ruta FastAPI: valida, llama al caso de uso y traduce el resultado. El caso de uso se prueba con *fakes* sin Lambda ni PostgreSQL.
+- Responder `REJECTED` en lugar de lanzar una excepción hace explícito que el evento no sirve y que reintentarlo no lo arreglará.
+- `TransientError` le da al trigger una señal estable para reconocer el fallo de infraestructura, sin que tenga que interpretar mensajes de error de PostgreSQL.
+
+### Consecuencias
+
+- Cambiar los nombres `PROCESSED`, `ALREADY_PROCESSED`, `REJECTED` o `TransientError` es un cambio de contrato con el Event Trigger.
+- Si se olvida aplicar la migración, PostgreSQL responde "la tabla no existe". No es un error de conexión, así que **no** se informa como `TransientError` (ver ADR-029).
+
+## ADR-029 — Historial de notificaciones en PostgreSQL propio (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A). Resuelve la decisión pendiente sobre el almacenamiento del historial (ADR-004).
+
+### Contexto
+
+El historial de notificaciones necesita persistencia propia, separada de la base de itinerarios. También necesita una restricción de unicidad sobre `event_id` para la idempotencia (ADR-030).
+
+### Decisión
+
+- **Contenedor propio**, con el mismo patrón de ADR-016: `notification-postgres` (postgres:16-alpine) en el puerto **5434**, usuario y clave `notification` y base `notification_db`. Itinerary Service no lo conoce y la función no conoce la base de itinerarios.
+- **Tabla `notification_history`** (una fila por `NotificationRecord`):
+
+| Columna | Tipo | Significado |
+|---|---|---|
+| `id` | UUID, clave primaria | Identificador de la notificación |
+| `event_id` | UUID, **único** (`uq_notification_history_event_id`) | `event_id` del evento recibido: clave de idempotencia |
+| `itinerary_id` | UUID | Itinerario notificado (referencia por id, sin clave foránea: está en otra base) |
+| `recipient` | VARCHAR(255), nulo | Correo del viajero; `NULL` si el itinerario no tiene correo |
+| `channel` | VARCHAR(50) | `simulated-email` |
+| `message` | TEXT | Texto de la notificación |
+| `status` | VARCHAR(20), `CHECK` `SENT` o `SKIPPED` | Resultado (ADR-030) |
+| `status_reason` | TEXT, nulo | Por qué no se envió (solo en `SKIPPED`) |
+| `correlation_id` | VARCHAR(255), nulo | Correlation ID del evento, para seguir el flujo (Fase 9) |
+| `processed_at` | TIMESTAMPTZ | Cuándo se procesó el evento |
+
+- **Migraciones aparte, no en cada invocación:** Alembic vive en la carpeta de la función y se ejecuta desde su entorno virtual (`alembic upgrade head`), igual que en Itinerary Service. La imagen de la función **no incluye Alembic**:
+  - `requirements.txt` tiene solo lo que va dentro de la función.
+  - `requirements-dev.txt` agrega Alembic y pytest para el equipo.
+  - En la Fase 10 la migración podrá correr como un contenedor de una sola ejecución.
+- **Red Docker `notification-net`:** la función y `notification-postgres` se conectan por esta red. Dentro de un contenedor, `localhost` es el propio contenedor, así que la función usa `notification-postgres:5432`. Desde el equipo (Alembic y pruebas) se usa `localhost:5434`.
+- **Conexión:** `connect_timeout` de 3 s (`DATABASE_CONNECT_TIMEOUT_SECONDS`) y `pool_pre_ping`. Este último comprueba la conexión guardada antes de usarla: si PostgreSQL se reinició mientras el contenedor estaba caliente, abre una nueva en lugar de fallar.
+
+### Justificación
+
+- PostgreSQL ya es conocido por el equipo y garantiza la unicidad de `event_id` con una restricción, que es la base de la idempotencia.
+- Aplicar las migraciones en cada invocación haría más lenta cada ejecución y podría correr migraciones en paralelo si hubiera varias instancias. Las migraciones son una tarea de despliegue, no de la función.
+- Una imagen sin herramientas de desarrollo es más pequeña y arranca más rápido (arranque en frío).
+
+### Consecuencias
+
+- Hay que aplicar la migración antes de la primera invocación. Si no se aplica, la función falla con un error que no es `TransientError` (ADR-028).
+- Hasta la Fase 10 el contenedor y la red se crean a mano.
+
+## ADR-030 — Idempotencia y destinatario de la notificación (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A). Cambia los estados de `NotificationRecord` (sección 8.3 de `CLAUDE.md`).
+
+### Contexto
+
+La entrega es **al menos una vez** (ADR-025): el mismo evento puede llegar más de una vez. Además, `traveler_email` es opcional (ADR-018), así que hay itinerarios sin destinatario.
+
+### Decisión
+
+**Idempotencia.** *Idempotente* significa que procesar el mismo evento dos veces deja el mismo resultado que procesarlo una. El caso de uso sigue este orden dentro de una transacción:
+
+1. Construye el `NotificationRecord`.
+2. Lo inserta con `INSERT ... ON CONFLICT (event_id) DO NOTHING`. Si no se insertó, el evento ya estaba procesado: responde `ALREADY_PROCESSED` **sin volver a enviar** y sin duplicar el registro.
+3. Si se insertó y hay destinatario, envía la notificación (simulada).
+4. Hace `COMMIT` y responde `PROCESSED`.
+
+**Por qué se inserta antes de enviar:** la restricción única "reserva" el `event_id`.
+
+- Si llegan dos copias a la vez, la segunda espera a que termine la transacción de la primera, ve el conflicto y no envía nada.
+- Si el envío falla, se hace rollback: no queda registro y el evento se puede reintentar.
+
+**Destinatario** (regla del dominio, en `NotificationRecord.create`):
+
+| Caso | `recipient` | `status` | `status_reason` |
+|---|---|---|---|
+| El evento trae `traveler_email` | El correo | `SENT` | `NULL` |
+| `traveler_email` es `null` o vacío | `NULL` | `SKIPPED` | "El itinerario no tiene traveler_email: no hay destinatario para la notificación" |
+
+`SKIPPED` **reemplaza a `FAILED`** de la sección 8.3. No tener correo no es un fallo, porque el correo es opcional por diseño. Y en esta fase nada produce `FAILED`: un envío que falla deshace la transacción y se reintenta, no se registra.
+
+### Justificación
+
+- La restricción única de PostgreSQL resuelve la idempotencia incluso con varias invocaciones en paralelo, sin bloqueos programados a mano.
+- Registrar el caso sin correo deja constancia de que el evento sí se procesó y explica por qué no hubo envío.
+
+### Consecuencias
+
+- **Queda una ventana pequeña:** si el envío sale bien pero el `COMMIT` falla, el reintento envía otra vez. La notificación también es "al menos una vez". Para un correo simulado es aceptable; un proveedor real de correo se protegería enviando el `event_id` como su propia clave de idempotencia.
+- Un `ALREADY_PROCESSED` es un éxito para quien invoca: el trigger debe confirmar (ACK) el mensaje.
+
+## ADR-031 — Event Trigger: consumo, invocación y política de reintentos (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6B).
+
+### Contexto
+
+RabbitMQ no sabe invocar una función serverless, y la función no lee colas (ADR-028). Hace falta un componente que cumpla el papel del **Event Source Mapping** de AWS Lambda: leer la cola `notification.itinerary-created`, invocar SendNotificationFunction y decidir qué hacer con cada mensaje según la respuesta.
+
+Como la entrega es "al menos una vez" y la función es idempotente (ADR-030), reintentar nunca duplica una notificación. Lo que hay que decidir es **cuándo** reintentar y **cuándo** apartar el mensaje en la DLQ.
+
+### Decisión
+
+**Componente.** El Event Trigger es un proceso aparte (`python -m app.main` en `serverless/event-trigger`):
+
+- Consume con **ACK manual** y `prefetch_count=1`: RabbitMQ le entrega un mensaje a la vez y no le da el siguiente hasta que el trigger responde ACK, reject o nack del actual.
+- Invoca la función con `POST` a la API de invocación del RIE (ADR-008), con el evento JSON como cuerpo y un timeout propio (`FUNCTION_TIMEOUT_SECONDS`, 15 s, mayor que los 10 s de la función).
+- Si se pierde la conexión con RabbitMQ, espera y se reconecta, en lugar de terminar. Se detiene con Ctrl+C.
+
+**Clasificación de la respuesta.** El RIE responde HTTP 200 también cuando la función falla (ADR-028), así que el trigger lee el código HTTP **y** el cuerpo:
+
+| Respuesta de la invocación | Tipo de fallo | Acción |
+|---|---|---|
+| `status` = `PROCESSED` o `ALREADY_PROCESSED` | Ninguno | `basic_ack` |
+| `status` = `REJECTED` | **Permanente** | `basic_reject(requeue=False)` → DLX → DLQ, sin reintentos |
+| El mensaje no es JSON (no se invoca la función) | **Permanente** | `basic_reject(requeue=False)` → DLQ |
+| Sin conexión con la función, timeout de la invocación, HTTP 5xx, `errorType` = `TransientError` o timeout de la propia función (el RIE responde HTTP 200 con el texto `Task timed out after N seconds`, comprobado en la 6B) | **Infraestructura** (temporal) | Reintentos con espera dentro del trigger. Si se agotan, espera `TRIGGER_REQUEUE_DELAY_SECONDS` y `basic_nack(requeue=True)`: el mensaje vuelve a la cola y se intenta otra vez. **Sin límite y nunca a la DLQ** |
+| Cualquier otro `errorType`, un código HTTP inesperado o una respuesta que no se entiende | **Error de la función** (probablemente de programación) | Reintentos limitados con espera. Si se agotan, `basic_reject(requeue=False)` → DLQ |
+
+**Valores por defecto** (variables de entorno, ver `.env.example`):
+
+| Variable | Valor | Significado |
+|---|---|---|
+| `TRIGGER_INFRASTRUCTURE_ATTEMPTS` | 3 | Intentos por entrega ante un fallo de infraestructura, antes de devolver el mensaje a la cola |
+| `TRIGGER_FUNCTION_ERROR_ATTEMPTS` | 3 | Intentos ante un error de la función, antes de enviarlo a la DLQ |
+| `TRIGGER_RETRY_BACKOFF_SECONDS` | 1 | Espera inicial entre intentos; se duplica en cada intento (1 s, 2 s, 4 s…) |
+| `TRIGGER_RETRY_MAX_BACKOFF_SECONDS` | 8 | Máximo de esa espera |
+| `TRIGGER_REQUEUE_DELAY_SECONDS` | 10 | Pausa antes de devolver el mensaje a la cola, para no reintentar sin descanso |
+
+**Capas.** El trigger no tiene reglas de negocio, así que no tiene capa de dominio:
+
+| Capa | Contenido |
+|---|---|
+| `application` | `DeliveryHandler` (la política: de la respuesta a ACK, reject o requeue), `RetryPolicy`, el puerto `FunctionInvoker` y los tipos `InvocationResult` y `Decision`. Se prueba con fakes, sin RabbitMQ ni la función |
+| `infrastructure` | `LambdaFunctionInvoker` (cliente HTTP con httpx que clasifica la respuesta del RIE), el consumidor de RabbitMQ con pika y la declaración de la topología (ADR-032) |
+| `app/main.py` | Ensamblaje, bucle de reconexión y parada con Ctrl+C |
+
+Las esperas usan `connection.sleep()` de pika, no `time.sleep()`. Mientras espera, pika sigue atendiendo los *heartbeats* (señales periódicas con las que RabbitMQ comprueba que el cliente sigue vivo), así RabbitMQ no cierra la conexión durante una pausa larga.
+
+### Relación con ADR-027
+
+Es el **mismo criterio de fallo temporal vs. permanente** que el Outbox Relay aplica en el productor, ahora en el consumidor:
+
+| | Outbox Relay (productor, ADR-027) | Event Trigger (consumidor, esta decisión) |
+|---|---|---|
+| Fallo temporal | RabbitMQ no disponible (`EventPublishError`) | La función o su base de datos no disponibles (sin conexión, timeout, 5xx, `TransientError`) |
+| Qué se hace | Sigue pendiente, se reintenta **sin límite** | Vuelve a la cola, se reintenta **sin límite** |
+| Fallo permanente | Mensaje venenoso (payload ilegible, `event_type` desconocido) | Mensaje que no es JSON o que la función rechaza (`REJECTED`) |
+| Qué se hace | `failed_at`: se aparta sin reintentar | DLQ: se aparta sin reintentar |
+| Por qué | Un fallo temporal se arregla solo cuando vuelve la dependencia: descartar sería perder el evento. Un fallo permanente no se arregla reintentando y bloquearía a los demás | Lo mismo |
+
+Hay un caso que el relay no tiene: un **error de la función que no es de infraestructura**. No se sabe si es temporal, así que recibe unos pocos reintentos y después va a la DLQ. Con `prefetch_count=1`, un mensaje que falla siempre bloquearía la cola para todos los demás si se reintentara sin límite.
+
+### Justificación
+
+- Reintentar sin límite los fallos de infraestructura evita llenar la DLQ con mensajes sanos cuando la función o PostgreSQL están caídos un rato. Cuando vuelven, los mensajes se procesan solos.
+- Los reintentos dentro del trigger cubren cortes de pocos segundos sin devolver el mensaje. La pausa antes de `nack` evita un bucle que consuma CPU y llene el log mientras la dependencia sigue caída.
+- La idempotencia de la función (ADR-030) hace seguro reintentar: un mensaje procesado cuya confirmación se perdió responde `ALREADY_PROCESSED` y recibe ACK.
+
+### Consecuencias
+
+- Mientras la función o su base de datos estén caídas, el mensaje vuelve una y otra vez al **inicio** de la cola y los que vienen detrás esperan. Es aceptable, porque fallarían igual por la misma causa.
+- Un error de programación en la función manda a la DLQ cada mensaje que lo provoque, después de 3 intentos. Corregida la función, esos mensajes se devuelven a la cola con el comando de reprocesamiento (ver más abajo).
+- El nombre `TransientError` y los estados de la respuesta son parte del contrato entre la función y el trigger (ADR-028).
+- En AWS, el Event Source Mapping de Amazon MQ cumpliría este papel y no haría falta el trigger. Su política de reintentos se configura en la plataforma, no en código.
+
+### Reprocesamiento de la DLQ (agregado en la entrega 6C)
+
+Un mensaje **válido** también puede terminar en la DLQ por un problema de despliegue. Por ejemplo, si falta la migración del historial, PostgreSQL responde "la tabla no existe": no es un `TransientError` (ADR-028), así que es un error de la función y va a la DLQ tras 3 intentos. Lo mismo pasa con una imagen de la función rota. Corregido el problema, esos mensajes deben volver a procesarse.
+
+**Comando** (desde `serverless/event-trigger`):
+
+```
+python -m app.replay_dlq          # mueve UN mensaje (el más antiguo)
+python -m app.replay_dlq --all    # mueve todos los que hay en la DLQ al empezar
+```
+
+**Cómo mueve cada mensaje (`DeadLetterReplayer`), de uno en uno:**
+
+1. Lo toma de la DLQ sin confirmarlo (`basic_get` con ACK manual).
+2. Lo publica **directamente en la cola principal**: exchange por defecto (`""`) con la routing key igual al nombre de la cola. Así llega solo a `notification.itinerary-created`, aunque en el futuro haya otros consumidores enlazados a `itinerary.events`. Si se publicara en el exchange, les llegaría una copia repetida a todos.
+3. Espera la confirmación de RabbitMQ (publisher confirms y `mandatory=True`).
+4. Recién entonces lo confirma (ACK) en la DLQ.
+
+Si los pasos 2 o 3 fallan, devuelve el mensaje a la DLQ (`nack` con `requeue`): no se pierde. Si el proceso se cae entre los pasos 3 y 4, el mensaje queda en las dos colas; la función es idempotente, así que la segunda copia responde `ALREADY_PROCESSED`.
+
+**Otros detalles:**
+
+- Conserva `message_id`, `correlation_id`, `content_type` y el modo persistente.
+- Quita los headers que RabbitMQ agregó al rechazarlo (`x-death`, `x-first-death-*`, `x-last-death-*`) y suma 1 al header `x-dlq-replays`, para saber cuántas veces se reprocesó.
+- Registra en el log cada mensaje movido: `message_id`, motivo del rechazo y veces rechazado.
+- Solo mueve los mensajes que había **al empezar**. Si el problema sigue y el trigger los vuelve a rechazar, regresan a la DLQ y el comando termina, sin un ciclo infinito.
+- Declara la topología antes de empezar, así funciona aunque el trigger nunca haya arrancado. El trigger puede estar encendido (procesa los mensajes en cuanto llegan) o apagado (esperan en la cola).
+
+**Binding adicional de la DLQ.** Un mensaje devuelto así que se rechaza otra vez llega a la DLX con la routing key `notification.itinerary-created`, no con `itinerary.created`. Por eso la DLQ tiene un **segundo binding** a la DLX con esa clave. Sin él, la DLX no tendría a dónde enviarlo y el mensaje **se perdería**: lo detectó una prueba de integración de la 6C. Agregar un binding no cambia los argumentos de la cola, así que no causa `PRECONDITION_FAILED` con la cola existente.
+
+**Procedimiento.** Está en `serverless/event-trigger/README.md`:
+
+1. Revisar el motivo en la DLQ (panel de RabbitMQ, header `x-death` y log del trigger).
+2. Corregir la causa.
+3. Mover **un** mensaje y comprobar que se procesa.
+4. Mover el resto con `--all`.
+
+Los mensajes que no cumplen el contrato (`REJECTED`) **no** deben reprocesarse: volverían a la DLQ.
+
+## ADR-032 — Propiedad de la topología de RabbitMQ (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6B). Corrige ADR-021.
+
+### Contexto
+
+Desde la Fase 4, el publicador de Itinerary Service declaraba toda la topología: el exchange, la cola de notificaciones, su binding, la DLX y la DLQ (ADR-021). Era una medida provisional mientras no existía el consumidor. Con el Event Trigger, hay que decidir quién declara cada elemento.
+
+### Decisión
+
+Cada lado declara **lo que le pertenece**:
+
+| Elemento | Quién lo declara | Por qué |
+|---|---|---|
+| Exchange `itinerary.events` (topic, durable) | El publicador de Itinerary Service **y** el Event Trigger | Es el contrato público del productor. El trigger también lo declara porque necesita que exista para enlazar su cola |
+| Cola `notification.itinerary-created` (durable, `x-dead-letter-exchange: itinerary.events.dlx`) y su binding con `itinerary.created` | El Event Trigger | Es la cola de **este** consumidor |
+| DLX `itinerary.events.dlx` (direct, durable) y DLQ `notification.itinerary-created.dlq` (durable) con sus bindings (`itinerary.created` y, desde la 6C, `notification.itinerary-created` para los mensajes reprocesados) | El Event Trigger | Reciben lo que **este** consumidor rechaza (ADR-031) |
+
+- Las declaraciones son idempotentes y usan **los mismos argumentos de ADR-021**. Así no hay `PRECONDITION_FAILED` contra una cola que ya exista desde las fases anteriores.
+- El trigger las declara cada vez que se conecta o reconecta, así no depende de que Itinerary Service haya arrancado antes.
+
+### Qué pasa si el trigger nunca arrancó
+
+1. La cola no existe, así que el exchange no tiene a quién entregar el mensaje.
+2. Como el publicador usa `mandatory=True`, RabbitMQ devuelve el mensaje y pika lanza `UnroutableError`, que `RabbitMQEventPublisher` convierte en `EventPublishError`.
+3. El Outbox Relay lo trata como **fallo temporal** (ADR-025 y ADR-027): suma un intento y el evento **sigue pendiente en la outbox**.
+4. Cuando el trigger arranca y declara su cola, el siguiente ciclo del relay publica el evento y se procesa.
+
+No se pierde nada, y el relay no necesita ningún cambio para esto.
+
+### Justificación
+
+- En publicación/suscripción, el productor no debería conocer las colas de sus consumidores. Si mañana se agrega un segundo consumidor (por ejemplo, un reporte), este declara su propia cola y el productor no cambia.
+- El Transactional Outbox ya garantiza que un evento sin destino espera en lugar de perderse. La versión anterior declaraba la cola desde el productor justamente para evitar esa pérdida, y ya no hace falta.
+
+### Consecuencias
+
+- Archivos de las Fases 4 y 5 modificados en Itinerary Service:
+  - `app/infrastructure/messaging/topology.py` deja solo el exchange (`declare_exchange`).
+  - `RabbitMQEventPublisher` llama a `declare_exchange`.
+  - Las pruebas con canal falso comprueban que el publicador ya no declara colas.
+  - El fixture de integración `rabbitmq_channel` declara la cola como lo haría el consumidor.
+  - Se agrega una prueba de integración: sin cola enlazada, el evento queda pendiente.
+- Los argumentos de la cola existen ahora en un solo componente (el trigger). Si cambian, solo cambia el trigger; pero la cola ya creada en RabbitMQ conserva los anteriores y habría que borrarla antes (RabbitMQ no permite cambiar los argumentos de una cola existente).
+- En la demostración, el orden de arranque deja de importar: el trigger puede arrancar antes o después de Itinerary Service.
 
 ## 2. Revisión de decisiones
 

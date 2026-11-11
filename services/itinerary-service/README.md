@@ -108,7 +108,10 @@ docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.1
 
 - Puerto `5672`: protocolo AMQP (lo usa el Outbox Relay).
 - Puerto `15672`: panel web en http://localhost:15672 (usuario y clave `guest`, solo para desarrollo local).
-- No hace falta crear nada a mano: el publicador declara el exchange, las colas y los enlaces al publicar.
+- No hace falta crear nada a mano. Desde la Fase 6 (ADR-032) cada lado declara lo suyo: el publicador
+  declara el exchange `itinerary.events` y el Event Trigger (`serverless/event-trigger`) declara la cola,
+  su enlace, la DLX y la DLQ. Si el trigger todavía no ha arrancado, la cola no existe: el relay registra
+  un fallo temporal y el evento **espera en la outbox** hasta que el trigger arranque.
 - RabbitMQ tarda unos segundos en arrancar. Está listo cuando `docker logs itinerary-rabbitmq` muestra
   `Server startup complete`. No uses `docker exec ... rabbitmq-diagnostics` mientras arranca: puede crear el
   archivo `.erlang.cookie` con el dueño equivocado y el contenedor se detiene con el error `eacces`.
@@ -123,6 +126,27 @@ docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.1
 El contrato del evento está en [`docs/asyncapi/asyncapi.yaml`](../../docs/asyncapi/asyncapi.yaml)
 y la explicación completa (Outbox, duplicados, idempotencia y mensajes venenosos) en
 [`docs/04-comunicacion-y-eventos.md`](../../docs/04-comunicacion-y-eventos.md).
+
+## Orden de arranque del sistema completo
+
+Itinerary Service ocupa los pasos **5** (API) y **6** (Outbox Relay) del orden completo, explicado en el
+[README raíz](../../README.md#orden-de-arranque):
+
+1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
+2. Migraciones: `itinerary_db` (**este servicio**, `alembic upgrade head`) y `notification_db`.
+3. SendNotificationFunction.
+4. Airport Service.
+5. **API de Itinerary Service.**
+6. **Outbox Relay.**
+7. Event Trigger.
+
+| Paso omitido | Consecuencia |
+|---|---|
+| `itinerary-postgres` apagado | `POST /itineraries` responde 500 `INTERNAL_ERROR`; el relay registra un error en cada ciclo y sigue |
+| Migración de `itinerary_db` sin aplicar | `POST /itineraries` responde 500 (la tabla no existe) |
+| Airport Service apagado | `POST /itineraries` responde 503 `AIRPORT_SERVICE_UNAVAILABLE` y no se guarda nada |
+| Outbox Relay apagado | Los itinerarios se crean (201), pero sus eventos se acumulan pendientes en la outbox hasta que arranque |
+| RabbitMQ apagado, o Event Trigger que nunca arrancó (la cola no existe) | El relay registra un fallo temporal (`EventPublishError` o `UnroutableError`) y el evento **espera en la outbox** hasta que se resuelva |
 
 ## Ejecución
 
@@ -177,10 +201,11 @@ pytest -v tests\domain tests\application tests\infrastructure tests\api tests\te
 pytest -v tests\integration
 ```
 
-Resultado esperado: **167 passed** con PostgreSQL y RabbitMQ; **143 passed, 24 skipped** sin ellos.
+Resultado esperado: **167 passed** con PostgreSQL y RabbitMQ; **142 passed, 25 skipped** sin ellos.
 
-> Las pruebas de integración **borran** las filas de `itineraries` y `outbox_events` y **vacían** la cola
-> `notification.itinerary-created`. No las ejecutes contra datos que quieras conservar.
+> Las pruebas de integración **borran** las filas de `itineraries` y `outbox_events`, **vacían** la cola
+> `notification.itinerary-created` y la **desenlazan** durante una prueba (escenario "el trigger no ha arrancado").
+> No las ejecutes contra datos que quieras conservar ni mientras el Event Trigger esté procesando una demostración.
 
 ## Endpoints
 
@@ -281,6 +306,12 @@ INFO app.application.outbox_relay: Ciclo del Outbox Relay: 1 publicados, 0 falli
 ```
 
 ### 5. Ver el evento en la cola
+
+Desde la Fase 6 la cola `notification.itinerary-created` la declara el Event Trigger (ADR-032). Si el trigger nunca
+arrancó, la cola no existe y el relay del paso 4 registra `UnroutableError` en lugar de publicar: el evento sigue
+esperando en la outbox. Arranca el trigger una vez (`python -m app.main` en `serverless\event-trigger`) y detenlo
+con Ctrl+C antes de este paso si quieres ver el mensaje en la cola; con el trigger encendido, el mensaje se procesa
+enseguida y la cola queda vacía.
 
 Leer el mensaje sin sacarlo de la cola (API del panel de RabbitMQ).
 

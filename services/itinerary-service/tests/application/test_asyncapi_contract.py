@@ -11,11 +11,7 @@ import pytest
 
 from app.application.events import ItineraryCreatedEvent
 from app.domain.itinerary import Itinerary
-from app.infrastructure.messaging.topology import (
-    EXCHANGE,
-    QUEUE_NOTIFICATIONS,
-    ROUTING_KEY_ITINERARY_CREATED,
-)
+from app.infrastructure.messaging.topology import EXCHANGE, ROUTING_KEY_ITINERARY_CREATED
 
 yaml = pytest.importorskip("yaml")
 
@@ -69,9 +65,10 @@ def test_el_ejemplo_tiene_la_forma_del_evento(spec, payload):
     assert set(example["data"]) == set(payload["data"])
 
 
-def test_topologia_coincide_con_asyncapi(spec):
-    channels = spec["channels"]
+def test_exchange_y_routing_key_coinciden_con_asyncapi(spec):
+    """Solo la parte de la topología que pertenece al productor (ADR-032).
+    La cola de notificaciones la declara y la verifica el Event Trigger."""
+    channel = spec["channels"]["itineraryCreated"]
 
-    assert channels["itineraryCreated"]["address"] == ROUTING_KEY_ITINERARY_CREATED
-    assert channels["itineraryCreated"]["bindings"]["amqp"]["exchange"]["name"] == EXCHANGE
-    assert channels["notificationQueue"]["address"] == QUEUE_NOTIFICATIONS
+    assert channel["address"] == ROUTING_KEY_ITINERARY_CREATED
+    assert channel["bindings"]["amqp"]["exchange"]["name"] == EXCHANGE

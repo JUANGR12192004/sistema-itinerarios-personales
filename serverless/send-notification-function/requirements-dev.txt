@@ -1,0 +1,9 @@
+# Dependencias para desarrollar SendNotificationFunction en el equipo (no van en la imagen).
+# Instala también las de la función.
+-r requirements.txt
+
+# Migraciones del historial: se aplican aparte, no en cada invocación (ADR-029)
+alembic==1.16.1
+
+# Pruebas
+pytest==9.1.1

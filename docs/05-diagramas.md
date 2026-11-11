@@ -21,16 +21,21 @@ flowchart TB
     DBI --> PUB[Outbox Relay]
     PUB --> RMQ[RabbitMQ]
 
-    RMQ --> NS[Sistema de notificaciones]
-    NS --> FN[SendNotificationFunction]
-    FN --> NH[(Historial de notificaciones)]
+    subgraph NS["Sistema de notificaciones (Fase 6)"]
+        TR[Event Trigger]
+        FN["SendNotificationFunction<br/>(AWS Lambda + RIE)"]
+        NH[("PostgreSQL de notificaciones<br/>notification_history")]
+        TR -->|"HTTP: API Invoke de Lambda"| FN
+        FN --> NH
+    end
+    RMQ --> TR
 
     FE --> MAP[Plotly JS]
 ```
 
-El diagrama representa la arquitectura objetivo. Los componentes se incorporarán progresivamente, no todos desde la Fase 0.
+El diagrama representa la arquitectura objetivo. Los componentes se incorporan progresivamente: el frontend y el gateway llegan en las Fases 7 y 8.
 
-La persistencia del historial de notificaciones se representa de forma conceptual; la tecnología definitiva queda pendiente de selección.
+El sistema de notificaciones está formado por el Event Trigger, la función y su base de datos `notification_db` (ADR-029). No hay un microservicio de notificaciones adicional.
 
 ## 2. Diagrama de componentes
 
@@ -89,8 +94,39 @@ flowchart LR
     OUTBOXADAPTER -->|INSERT en la misma transacción| DB
     OUTREPO <-->|"SELECT ... FOR UPDATE SKIP LOCKED"| DB
     HTTPADAPTER -->|"HTTP GET /airports/{id}"| AC
-    MSGADAPTER -->|publicación de evento| MQ[RabbitMQ]
-    MQ --> NF[SendNotificationFunction]
+    MSGADAPTER -->|"publica en el exchange itinerary.events"| MQ[RabbitMQ]
+
+    subgraph Trigger["Event Trigger (proceso aparte)"]
+        CONSUMER[RabbitMQConsumer]
+        POLICY[DeliveryHandler<br/>política de reintentos]
+        INVPORT[FunctionInvoker Port]
+        INVOKER[LambdaFunctionInvoker]
+
+        CONSUMER --> POLICY
+        POLICY --> INVPORT
+        INVOKER -.->|implements| INVPORT
+    end
+
+    subgraph Function["SendNotificationFunction (FaaS)"]
+        HANDLER["handler(event, context)"]
+        NUC[NotifyItineraryCreatedUseCase]
+        NDOMAIN[NotificationRecord]
+        HISTPORT[NotificationHistoryRepository Port]
+        SENDPORT[NotificationSender Port]
+        HISTREPO[SqlAlchemyNotificationHistoryRepository]
+        SENDER[SimulatedEmailSender]
+
+        HANDLER --> NUC
+        NUC --> NDOMAIN
+        NUC --> HISTPORT
+        NUC --> SENDPORT
+        HISTREPO -.->|implements| HISTPORT
+        SENDER -.->|implements| SENDPORT
+    end
+
+    MQ -->|"cola notification.itinerary-created"| CONSUMER
+    INVOKER -->|"POST /2015-03-31/functions/function/invocations"| HANDLER
+    HISTREPO <--> NDB[(PostgreSQL<br/>notification_history)]
 ```
 
 Las flechas punteadas representan una relación de implementación conceptual de los puertos, no una llamada en tiempo de ejecución.
@@ -98,6 +134,8 @@ Las flechas punteadas representan una relación de implementación conceptual de
 Itinerary Service no accede a las capas internas de Airport Service: el adaptador `HttpAirportCatalogAdapter` llama a su API REST. Los casos de uso tampoco hablan directamente con RabbitMQ: usan el puerto `EventPublisher`, implementado en la Fase 4 por un publicador de RabbitMQ y en la Fase 5 por un adaptador Outbox, que registra el evento antes del commit, en la misma transacción del itinerario (ADR-013, ADR-026).
 
 El mismo puerto `EventPublisher` tiene dos adaptadores, uno en cada proceso: en la API, `OutboxEventPublisher` guarda el evento en `outbox_events`; en el Outbox Relay, `RabbitMQEventPublisher` (el de la Fase 4, sin cambios) lo publica en RabbitMQ. El relay lee y marca los pendientes con su propio puerto, `OutboxRepository` (ADR-025).
+
+En el sistema de notificaciones (Fase 6), el Event Trigger separa la **política** (`DeliveryHandler`, capa de aplicación) de los adaptadores: el consumidor de RabbitMQ y el cliente HTTP de la función (ADR-031). La función sigue la arquitectura hexagonal por dentro: el handler de Lambda es el adaptador de entrada, como una ruta FastAPI (ADR-028).
 
 ## 3. Secuencia de creación de un itinerario
 
@@ -111,7 +149,9 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant R as Outbox Relay
     participant MQ as RabbitMQ
+    participant TR as Event Trigger
     participant NF as SendNotificationFunction
+    participant NH as PostgreSQL notificaciones
 
     Usuario->>FE: Crear itinerario
     FE->>GW: POST /itineraries
@@ -138,9 +178,17 @@ sequenceDiagram
             Note over R,DB: El evento sigue pendiente:<br/>se reintenta en el siguiente ciclo
         end
 
-        MQ-->>NF: Entregar evento (asíncrono, Fase 6)
-        NF->>NF: Simular notificación
-        NF->>NF: Registrar historial
+        MQ->>TR: Entregar evento (asíncrono, ACK manual)
+        TR->>NF: Invocar handler(event, context)
+        NF->>NH: INSERT ... ON CONFLICT (event_id) DO NOTHING
+        alt event_id nuevo
+            NF->>NF: Simular la notificación
+            NF->>NH: COMMIT
+            NF-->>TR: PROCESSED
+        else event_id repetido
+            NF-->>TR: ALREADY_PROCESSED
+        end
+        TR->>MQ: ACK (el mensaje se borra de la cola)
     else Aeropuerto no encontrado (404 de Airport Service)
         IS-->>GW: 422 AIRPORT_NOT_FOUND
         GW-->>FE: Respuesta de error
@@ -156,7 +204,40 @@ sequenceDiagram
     end
 ```
 
-**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados y el consumidor debe ser idempotente con `event_id`. En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 y 7), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`.
+**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados, y la función es idempotente con `event_id` (ADR-030). En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 a 8), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`. Los fallos del lado del consumidor (función o base de datos caídas, evento inválido, reprocesamiento de la DLQ) están en la sección 3.1.
+
+## 3.1. Fallos en el consumidor: reintentos, DLQ y reprocesamiento (Fase 6)
+
+```mermaid
+sequenceDiagram
+    participant MQ as RabbitMQ
+    participant TR as Event Trigger
+    participant NF as SendNotificationFunction
+    participant DLQ as DLQ
+    actor OP as Equipo
+
+    MQ->>TR: Entregar evento
+    alt Función o su base de datos no disponibles
+        TR->>NF: Invocar (3 intentos con backoff)
+        NF-->>TR: sin conexión / TransientError
+        TR->>MQ: basic_nack(requeue=True) tras 10 s
+        Note over MQ,TR: Vuelve a la cola: se reintenta sin límite<br/>y nunca va a la DLQ
+    else Evento que no cumple el contrato
+        TR->>NF: Invocar
+        NF-->>TR: REJECTED
+        TR->>MQ: basic_reject(requeue=False)
+        MQ->>DLQ: x-death: reason=rejected
+    else Error de la función (por ejemplo, falta la migración)
+        TR->>NF: Invocar (3 intentos con backoff)
+        NF-->>TR: errorType=ProgrammingError
+        TR->>MQ: basic_reject(requeue=False)
+        MQ->>DLQ: x-death: reason=rejected
+        OP->>OP: Corregir la causa (alembic upgrade head)
+        OP->>DLQ: python -m app.replay_dlq
+        DLQ->>MQ: El mensaje vuelve a notification.itinerary-created
+        MQ->>TR: Entregar de nuevo → PROCESSED → ACK
+    end
+```
 
 ## 4. Flujo de resiliencia de Airport Service
 
@@ -188,10 +269,13 @@ flowchart TB
         GATE[API Gateway]
         AIR[Airport Service]
         ITIN[Itinerary Service]
-        PG[(PostgreSQL)]
+        PG[("PostgreSQL itinerarios<br/>itinerary-postgres :5433")]
         RED[(Redis)]
-        RAB[RabbitMQ]
-        NOTIF[Función serverless / adaptador]
+        RAB["RabbitMQ<br/>itinerary-rabbitmq :5672 / :15672"]
+        RELAY[Outbox Relay]
+        TRIG[Event Trigger]
+        FUNC["SendNotificationFunction<br/>imagen Lambda + RIE :9000"]
+        NPG[("PostgreSQL notificaciones<br/>notification-postgres :5434")]
         OBS[Stack de observabilidad]
 
         FRONT --> GATE
@@ -200,12 +284,15 @@ flowchart TB
         ITIN --> PG
         ITIN --> AIR
         AIR --> RED
-        ITIN --> RAB
-        RAB --> NOTIF
+        RELAY --> PG
+        RELAY --> RAB
+        RAB --> TRIG
+        TRIG --> FUNC
+        FUNC -->|red notification-net| NPG
     end
 ```
 
-El despliegue completo se definirá y validará en la Fase 10. La integración de observabilidad se desarrollará en la Fase 9.
+El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual; el orden de arranque está en el `README.md` raíz. La integración de observabilidad se desarrollará en la Fase 9.
 
 ## 6. Consideraciones
 

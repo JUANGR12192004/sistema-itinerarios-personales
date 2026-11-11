@@ -1,0 +1,15 @@
+# Dependencias del Event Trigger (Fase 6, ADR-031)
+
+# Cliente de RabbitMQ (síncrono), el mismo de Itinerary Service (ADR-021)
+pika==1.3.2
+
+# Cliente HTTP para invocar SendNotificationFunction a través del RIE
+httpx==0.28.1
+
+# Configuración por variables de entorno
+pydantic==2.14.1
+pydantic-settings==2.16.1
+
+# Pruebas (respx simula las respuestas HTTP de la función)
+pytest==9.1.1
+respx==0.23.1

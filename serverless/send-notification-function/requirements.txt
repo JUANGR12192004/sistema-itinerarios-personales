@@ -1,0 +1,11 @@
+# Dependencias de SendNotificationFunction que van DENTRO de la imagen de Lambda (ADR-029).
+# Las herramientas del equipo (Alembic y pytest) están en requirements-dev.txt.
+# La imagen base ya trae el cliente del runtime de Lambda (awslambdaric): no se instala aquí.
+
+# Validación del evento y configuración por variables de entorno
+pydantic==2.14.1
+pydantic-settings==2.16.1
+
+# ORM y driver de PostgreSQL (psycopg 3, modo síncrono)
+sqlalchemy==2.0.41
+psycopg[binary]==3.2.9

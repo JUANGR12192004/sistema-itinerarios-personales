@@ -16,8 +16,7 @@ from app.application.events import ItineraryCreatedEvent
 from app.config import get_settings
 from app.domain.itinerary import Itinerary
 from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventPublisher
-from app.infrastructure.messaging.topology import QUEUE_NOTIFICATIONS
-from tests.integration.conftest import RABBITMQ_TIMEOUT_SECONDS
+from tests.integration.conftest import QUEUE_NOTIFICATIONS, RABBITMQ_TIMEOUT_SECONDS
 
 
 def test_el_evento_llega_a_la_cola_de_notificaciones(rabbitmq_channel):

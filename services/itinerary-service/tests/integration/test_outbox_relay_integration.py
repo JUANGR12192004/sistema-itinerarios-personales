@@ -18,14 +18,13 @@ from app.application.ports import UnitOfWork
 from app.application.use_cases import CreateItineraryCommand, CreateItineraryUseCase
 from app.config import get_settings
 from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventPublisher
-from app.infrastructure.messaging.topology import QUEUE_NOTIFICATIONS
 from app.infrastructure.persistence.models import OutboxEventORM
 from app.infrastructure.persistence.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRepository
 from app.infrastructure.persistence.repository import SqlAlchemyItineraryRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from tests.fakes import FakeAirportCatalog
-from tests.integration.conftest import RABBITMQ_TIMEOUT_SECONDS
+from tests.integration.conftest import QUEUE_NOTIFICATIONS, RABBITMQ_TIMEOUT_SECONDS
 
 
 class FailingUnitOfWork(UnitOfWork):
@@ -96,3 +95,26 @@ def test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces(db_sess
     second = rabbitmq_channel.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
     assert first[0] is not None and second[0] is not None, "Se esperaban dos copias del evento"
     assert first[1].message_id == second[1].message_id
+
+
+def test_sin_cola_del_consumidor_el_evento_espera_en_la_outbox(db_session, unbound_notification_queue):
+    """ADR-032: si el Event Trigger no ha declarado su cola, RabbitMQ devuelve el mensaje
+    (mandatory=True) y el relay lo deja pendiente; cuando la cola existe, lo publica."""
+    itinerary = _create_itinerary(db_session)
+
+    result = _relay(db_session).run_once()
+
+    assert result == RelayResult(published=0, failed=1)
+    with Session(db_session.get_bind()) as other:
+        row = other.query(OutboxEventORM).filter_by(aggregate_id=itinerary.id).one()
+    assert row.published_at is None
+    assert row.failed_at is None  # fallo temporal: sigue pendiente, no descartado
+    assert row.attempts == 1
+
+    # El trigger arranca y enlaza su cola: el siguiente ciclo del relay publica el evento
+    unbound_notification_queue.queue_bind(
+        queue=QUEUE_NOTIFICATIONS, exchange="itinerary.events", routing_key="itinerary.created"
+    )
+    assert _relay(db_session).run_once() == RelayResult(published=1, failed=0)
+    method, _, _ = unbound_notification_queue.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
+    assert method is not None, "La cola no recibió el evento que esperaba en la outbox"

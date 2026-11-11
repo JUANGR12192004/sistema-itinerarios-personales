@@ -222,11 +222,11 @@ Estas son las reglas que debes seguir tú:
 | Caché | Redis |
 | Frontend | HTML, CSS, JavaScript, Plotly JS |
 | Contenedores | Docker y Docker Compose |
-| Serverless | Ver decisión pendiente en la sección 9 |
+| Serverless | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator (ADR-008) |
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
-| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023) |
+| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` y `serverless` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023) |
 
 No agregues librerías fuera de esta lista sin explicar por qué y pedir aprobación.
 
@@ -329,8 +329,8 @@ sistema-itinerarios-personales/
 │       ├── tests/
 │       └── requirements.txt
 ├── serverless/
-│   ├── send-notification-function/
-│   └── event-trigger/
+│   ├── send-notification-function/ ← Fase 6: app/ hexagonal, handler.py, alembic/, events/, Dockerfile
+│   └── event-trigger/              ← Fase 6: app/ (application, infrastructure), main.py, replay_dlq.py, demo/
 ├── gateway/
 ├── frontend/
 │   ├── index.html
@@ -353,7 +353,7 @@ Si necesitas cambiar esta estructura, explica el cambio y pide aprobación.
 | Airport Service | 8001 |
 | Itinerary Service | 8002 |
 | PostgreSQL (itinerarios) | 5433 |
-| PostgreSQL (notificaciones) | 5434 (si se usa contenedor separado) |
+| PostgreSQL (notificaciones) | 5434 (contenedor `notification-postgres`, ADR-029) |
 | RabbitMQ | 5672 (AMQP) / 15672 (panel) |
 | Redis | 6379 |
 | SendNotificationFunction | 9000 |
@@ -420,8 +420,10 @@ Hallazgos de la verificación real de API Colombia (entrega 1A, 2026-10-26):
 **Itinerary** (raíz de agregado): `id` (UUID), `traveler_name`, `traveler_email` (opcional), `departure_airport_id`,
 `arrival_airport_id`, `travel_date` (con zona horaria), `duration_minutes`, `created_at`, `updated_at`.
 
-**NotificationRecord**: `id`, `event_id` (único, para idempotencia), `itinerary_id`, `recipient`,
-`channel` (`simulated-email`), `message`, `status` (`SENT` / `FAILED`), `processed_at`.
+**NotificationRecord** (tabla `notification_history`, ADR-029 y ADR-030): `id`, `event_id` (único, para
+idempotencia), `itinerary_id`, `recipient` (`None` si no hay correo), `channel` (`simulated-email`), `message`,
+`status` (`SENT` / `SKIPPED`; `SKIPPED` reemplaza a `FAILED` desde la Fase 6), `status_reason` (por qué no se
+envió), `correlation_id`, `processed_at`.
 
 ### 8.4. Reglas del dominio
 
@@ -479,13 +481,19 @@ Confirmadas en la Fase 3 (ADR-015):
 | `traveler_email` opcional (Fase 3, ADR-018) | Campo opcional en `Itinerary`; lo usa la notificación simulada de la Fase 6 |
 | Endpoints de Itinerary Service (Fase 3, ADR-019) | Los de la sección 10.1; un timeout de Airport Service → 504 en Itinerary Service (extiende ADR-012) |
 | Contrato de `ItineraryCreatedEvent` v1 (Fase 4, ADR-020) | El de la sección 11.1, con `data.traveler_email` (texto o `null`). El evento vive en la capa de aplicación (`app/application/events.py`) |
-| Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 6 el publicador declara toda la topología |
+| Topología RabbitMQ y librería (Fase 4, ADR-021) | La de la sección 11.2, con `pika==1.3.2` (síncrono, una conexión por publicación), mensajes persistentes, publisher confirms y `mandatory=True`. Hasta la Fase 5 el publicador declaraba toda la topología; desde la Fase 6 declara solo el exchange (ADR-032) |
 | Publicación directa tras el commit (Fase 4, ADR-022) | **Reemplazada por ADR-026 en la Fase 5.** Puerto `UnitOfWork`; el caso de uso hacía guardar → commit → publicar. Si RabbitMQ fallaba tras el commit: 201 + log `ERROR` "Evento perdido" (double write) |
 | Tabla `outbox_events` (Fase 5, ADR-024) | Columnas `id` (= `event_id`), `aggregate_type`, `aggregate_id`, `event_type`, `event_version`, `payload` (JSONB), `occurred_at`, `published_at`, `attempts`, `last_error`, `failed_at` (ADR-027); pendiente = `published_at IS NULL AND failed_at IS NULL`; índice parcial `ix_outbox_events_pending` sobre `occurred_at` con esa condición. `OutboxMessage` vive en la capa de aplicación (`app/application/outbox.py`). Los eventos publicados se conservan |
 | Outbox Relay (Fase 5, ADR-025) | Proceso aparte (`python -m app.outbox_relay`) con `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2) y `OUTBOX_RELAY_BATCH_SIZE` (10). `SELECT ... FOR UPDATE SKIP LOCKED`, un commit por lote, publicar y después marcar `published_at` (al menos una vez: puede haber duplicados, el consumidor es idempotente con `event_id`). Fallo temporal (`EventPublishError`) → `mark_failed` (`attempts + 1`, `last_error`), sigue pendiente y se detiene el lote, sin límite de intentos. Fallo permanente (ver ADR-027) → `mark_dead` y se continúa |
 | Mensajes venenosos (Fase 5, ADR-027) | Payload ilegible o `event_type` desconocido = fallo permanente: `mark_dead` guarda `failed_at` y `last_error`, el mensaje deja de estar pendiente y no se reintenta (la fila se conserva para revisarla). `RelayResult` separa `failed` (temporales) de `dead` (descartados). Equivale, del lado del productor, a la DLQ de RabbitMQ |
 | Registro del evento en la misma transacción (Fase 5, ADR-026) | Reemplaza a ADR-022. El caso de uso hace guardar → registrar el evento (`OutboxEventPublisher`, misma sesión) → commit. Si el registro falla, no hay commit (500). El relay reutiliza `RabbitMQEventPublisher` sin cambios y reconstruye el evento con `ItineraryCreatedEvent.from_dict`. Contrato y topología sin cambios |
-| SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
+| Plataforma serverless (Fase 6, ADR-008) | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator: solo requiere Docker, funciona en Windows y macOS (Apple Silicon) y se despliega sin cambios en AWS Lambda. API de invocación en `POST http://localhost:9000/2015-03-31/functions/function/invocations`. En local no hay escalado automático ni apagado sin eventos (limitación de la plataforma, no del código) |
+| Modelo de programación de la función (Fase 6, ADR-028) | `handler(event, context)` en `app/handler.py`, sin estado entre invocaciones (solo se reutiliza el engine) y sin código de RabbitMQ. Hexagonal por dentro. Responde `PROCESSED`, `ALREADY_PROCESSED` o `REJECTED` (evento que no cumple el contrato v1). PostgreSQL no disponible → lanza `TransientError` (`translate_database_errors` envuelve toda la ejecución del caso de uso; el RIE lo informa como `errorType`); otros errores no se capturan. Comprobado: el RIE responde **HTTP 200 también en los errores** (solo el cuerpo trae `errorType`), y un cuerpo que no es JSON falla antes del handler con `Runtime.UnmarshalError` |
+| Historial de notificaciones (Fase 6, ADR-029) | Contenedor `notification-postgres` (postgres:16-alpine, puerto 5434, usuario/clave `notification`, base `notification_db`), tabla `notification_history` con `event_id` único. Migraciones con Alembic desde el entorno virtual, no en cada invocación; la imagen no incluye Alembic (`requirements.txt` vs. `requirements-dev.txt`). Red Docker `notification-net` entre la función y su base |
+| Idempotencia y destinatario (Fase 6, ADR-030) | `INSERT ... ON CONFLICT (event_id) DO NOTHING` antes de enviar; si ya existía → `ALREADY_PROCESSED` sin reenviar. Sin `traveler_email` → `status = SKIPPED`, `recipient = NULL` y `status_reason` con el motivo |
+| Fallos en el Event Trigger (Fase 6, ADR-031) | Éxito (`PROCESSED`, `ALREADY_PROCESSED`) → ACK. Permanente (mensaje que no es JSON, `REJECTED`) → `basic_reject(requeue=False)` → DLQ. Infraestructura (sin conexión, timeout de la invocación, HTTP 5xx, `errorType = TransientError`, o timeout de la propia función, que el RIE informa con HTTP 200 y el texto `Task timed out after N seconds`) → reintentos y después `basic_nack(requeue=True)` tras una pausa, sin límite y sin DLQ. Otro `errorType` → reintentos limitados y después a la DLQ, para no bloquear la cola (`prefetch_count=1`). Mismo criterio temporal/permanente de ADR-027. Reprocesamiento (6C): `python -m app.replay_dlq` (uno) o `--all` (los que había al empezar) devuelve los mensajes de la DLQ a la cola principal con el exchange por defecto, confirms y ACK en la DLQ después; quita `x-death` y suma `x-dlq-replays`. La DLQ tiene un segundo binding a la DLX con la routing key `notification.itinerary-created`, para que un mensaje reprocesado que vuelve a fallar no se pierda |
+| Propiedad de la topología (Fase 6, ADR-032) | El publicador de Itinerary Service declara solo el exchange; el Event Trigger declara exchange, cola, binding, DLX y DLQ. Si el trigger no ha arrancado, `mandatory=True` devuelve el mensaje y el evento espera en la outbox |
+| SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties` (desde la 6C analiza también `serverless/`). No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -496,11 +504,10 @@ ADR-020 y ADR-021).
 
 | Decisión | Opciones | Se necesita en |
 |---|---|---|
-| Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
-| Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
 | Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
+| Advertencia de pika en las pruebas del Event Trigger | `pytest` muestra `DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated` desde `pika/data.py` (detectada en la entrega 6B, al leer el header `x-death` de un mensaje de la DLQ). Viene de pika 1.3.2, no del código del proyecto. Por ahora **no se oculta**. Opciones: actualizar pika si una versión la corrige (revisando ADR-021), o filtrarla documentando el motivo | Fase 11 |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
 (explicando el cambio antes de hacerlo).
@@ -669,6 +676,16 @@ Rama `fase-5-transactional-outbox`. Una pausa al final de cada entrega, antes de
 | **5B** | Puerto `OutboxRepository`, `SqlAlchemyOutboxRepository` (`SKIP LOCKED`), `OutboxRelay` en `application`, proceso `app/outbox_relay.py`, variables del relay, pruebas unitarias con fakes e integración (SKIPPED sin PostgreSQL o RabbitMQ) | Pruebas del relay pasan sin PostgreSQL ni RabbitMQ |
 | **5C** | Primer commit: mensajes venenosos (ADR-027, columna `failed_at` con la migración `c4d8e2f6a9b1`, `mark_dead`, índice parcial ajustado, pruebas). Después: `docs/04` (Outbox, duplicados e idempotencia), diagramas de `docs/05`, descripción en AsyncAPI (sin cambiar el contrato), README del servicio con la demostración del double write resuelto, revisión del job de CI, estado de CLAUDE.md | Con RabbitMQ detenido: 201 y evento pendiente; al levantarlo, el relay lo publica en la cola |
 
+### 12.6. Plan de la Fase 6 (entregas)
+
+Rama `fase-6-serverless`. Una pausa al final de cada entrega, antes del commit.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **6A** | ADR-008 (decidida), ADR-028 a ADR-030, `serverless/send-notification-function`: dominio (`NotificationRecord`), caso de uso, puertos, `SimulatedEmailSender`, repositorio del historial, handler de Lambda, esquema del evento, Alembic con la migración de `notification_history`, `Dockerfile`, eventos de ejemplo y pruebas | `pytest -v` pasa; invocación con `curl.exe` contra el RIE en el puerto 9000 (`PROCESSED`, `ALREADY_PROCESSED`, `SKIPPED`, `REJECTED`, `TransientError`) |
+| **6B** | ADR-031 y ADR-032, `serverless/event-trigger` (consumo, invocación, ACK/NACK, reintentos, DLQ, declaración de la topología), cambio de la topología del publicador de Itinerary Service (solo el exchange), pruebas unitarias y de integración (SKIPPED sin RabbitMQ, PostgreSQL o la función) | Pruebas del trigger pasan sin servicios |
+| **6C** | Documentación (FaaS, diagramas, AsyncAPI con la operación `receive` y la DLQ, README de cada componente y README raíz), jobs de CI de la función y del trigger, `serverless` en SonarCloud, demostración de punta a punta (incluye evento duplicado, evento en la DLQ y evento que espera en la outbox mientras el trigger no ha arrancado). Aislar las pruebas de integración del trigger: hoy vacían (purge) la cola `notification.itinerary-created` y su DLQ reales, así que correr `pytest` durante una demostración borra sus mensajes. Deben usar un vhost de pruebas o un exchange y colas de prueba con nombres propios, eliminados al terminar; si alguna prueba no puede aislarse, se omite cuando la cola real tenga mensajes, y se documenta | Registro en `notification_history` tras crear un itinerario; las pruebas del trigger no cambian el contenido de la cola real ni de la DLQ |
+
 ---
 
 ## 13. Estándares de código
@@ -756,7 +773,8 @@ pytest -v
   (`tests/conftest.py`), `connect_timeout` de 2 s en el fixture `pg_engine` (de 4,5 min a ~12 s sin
   PostgreSQL en Windows) y variable `DATABASE_CONNECT_TIMEOUT_SECONDS` (por defecto 5) en el engine.
   Total de Itinerary Service: **100 pruebas pasan, 10 omitidas**.
-- **Fase 5:** en curso en la rama `fase-5-transactional-outbox`.
+- **Fase 5:** completada y **fusionada en `main`** (PR #10, merge `a711afa`) con la **etiqueta `fase-5`**.
+  La rama `fase-5-transactional-outbox` se conserva como archivo de solo lectura.
   - Entrega **5A** completada (commit `599f4e0`): ADR-024 a ADR-026, tabla `outbox_events`
     (migración `b7c2d9e1f4a6`), `OutboxMessage`, `ItineraryCreatedEvent.from_dict`, `OutboxEventPublisher`
     y `CreateItineraryUseCase` con guardar → registrar el evento → commit (desaparece "Evento perdido").
@@ -782,4 +800,61 @@ pytest -v
     - Demostración real hecha el 2026-11-08: con RabbitMQ detenido, `POST /itineraries` → 201 y evento pendiente;
       el relay falló 9 veces sin perderlo y lo publicó al volver RabbitMQ (`message_id` = `event_id`).
     - Total del servicio: **167 pasan** con PostgreSQL y RabbitMQ; **143 pasan, 24 omitidas** sin ellos.
-- **Siguiente:** pull request de la Fase 5 hacia `main` (lo crea el equipo) y, después del merge, la etiqueta `fase-5`.
+- **Fase 6:** en curso en la rama `fase-6-serverless`.
+  - Entrega **6A** completada: ADR-008 (imagen de AWS Lambda con RIE) y ADR-028 a ADR-030.
+    `serverless/send-notification-function` con dominio (`NotificationRecord`, SENT/SKIPPED), caso de uso
+    `NotifyItineraryCreatedUseCase` (insertar con `ON CONFLICT DO NOTHING RETURNING id` → enviar → commit),
+    puertos, `SimulatedEmailSender`, repositorio con `TransientError`, handler de Lambda y esquema del contrato v1,
+    Alembic (migración `d1e5f7a3b9c2`, tabla `notification_history`), `Dockerfile` y eventos de ejemplo en `events/`.
+    Demostración real con `curl.exe` contra el RIE: `PROCESSED`/`SENT`, `ALREADY_PROCESSED`, `SKIPPED`, `REJECTED` y
+    `TransientError` con PostgreSQL detenido. Total: **59 pruebas pasan** con PostgreSQL; **53 pasan, 6 omitidas**
+    sin él.
+  - Entrega **6B** completada:
+    - ADR-031 (política del Event Trigger, relación con ADR-027) y ADR-032 (propiedad de la topología); correcciones
+      en ADR-021, ADR-027, `docs/04` y el README de Itinerary Service.
+    - Itinerary Service: `topology.py` declara solo el exchange (`declare_exchange`); las pruebas con canal falso
+      comprueban que el publicador no declara colas; el fixture `rabbitmq_channel` declara la cola en el papel del
+      consumidor; nueva prueba de integración "sin cola del consumidor, el evento espera en la outbox". El relay no
+      cambió: ya trataba `UnroutableError` como fallo temporal. Total del servicio: **167 pasan** con PostgreSQL y
+      RabbitMQ; **142 pasan, 25 omitidas** sin ellos.
+    - `serverless/event-trigger` (`python -m app.main`): `DeliveryHandler` y `RetryPolicy` en `application`,
+      `LambdaFunctionInvoker` (httpx; lee código HTTP y `errorType`), consumidor pika con ACK manual,
+      `prefetch_count=1`, `connection.sleep` en las esperas, declaración de la topología en cada conexión,
+      reconexión ante pérdida de RabbitMQ y parada con Ctrl+C. Archivos `demo/` para publicar un evento inválido y
+      uno que no es JSON por la API del panel. Total: **62 pasan** con RabbitMQ y la función; **50 pasan, 12
+      omitidas** sin ellos.
+    - Demostración real (2026-11-11): trigger apagado desde el principio (evento en la outbox con `UnroutableError`,
+      publicado al arrancar el trigger), caso normal, duplicado (`ALREADY_PROCESSED`, 1 sola fila), función apagada y
+      `notification-postgres` apagado (reintentos sin límite, nunca a la DLQ), evento inválido y mensaje no JSON
+      (directo a la DLQ, `x-death` con `reason=rejected`) y reconexión tras reiniciar RabbitMQ.
+  - Entrega **6C** completada:
+    - Pruebas de integración del trigger **aisladas**: `QueueTopology` (nombres de la topología) con una copia
+      `test-<id>.` declarada una vez por sesión, vaciada entre pruebas y borrada al final. Ninguna prueba vacía ni
+      consume la cola real ni su DLQ (comprobado con mensajes en la DLQ real y el trigger real encendido); la prueba
+      de compatibilidad con la topología real se omite si la cola real no existe, para no crearla.
+    - Reprocesamiento de la DLQ: `python -m app.replay_dlq [--all]` (`DeadLetterReplayer`), con pruebas unitarias e
+      de integración aisladas. Una prueba detectó que un mensaje reprocesado que volvía a fallar **se perdía**
+      (la DLX no tenía binding para la routing key `notification.itinerary-created`): se agregó ese segundo binding
+      a la DLQ.
+    - El trigger registra solo la primera línea del `errorMessage` de la función (antes copiaba el SQL con sus
+      parámetros, incluido el correo del viajero).
+    - Documentación: FaaS y Event Trigger en `docs/04` (sección 8), diagramas de `docs/05` (general, componentes,
+      secuencia, fallos del consumidor, despliegue), `docs/02` y `docs/03` (NotificationRecord), AsyncAPI 1.1.0
+      (operación `receive` completa y canal de la DLQ, contrato sin cambios) con la prueba
+      `tests/test_asyncapi_topology.py` del trigger, README de la función y del trigger, README raíz (orden de
+      arranque, qué pasa si se omite cada paso y demostración de punta a punta) y orden de arranque en los README
+      de Airport e Itinerary Service.
+    - Jobs de CI `send-notification-function` (pruebas y `docker build` de la imagen) y `event-trigger`;
+      `serverless` en `sonar.sources` y `sonar.tests` (ADR-023).
+    - Demostración real (2026-11-11): caso normal, duplicado, evento en la DLQ por la "migración faltante" (tabla
+      renombrada) y su reprocesamiento, evento inválido y mensaje no JSON.
+    - Totales: SendNotificationFunction **59 pasan** con PostgreSQL (**53 pasan, 6 omitidas** sin él); Event
+      Trigger **84 pasan** con RabbitMQ y la función (**68 pasan, 16 omitidas** sin ellos); Itinerary Service
+      **167 pasan** con servicios (**142 pasan, 25 omitidas** sin ellos).
+- **Siguiente:** pull request de la Fase 6 hacia `main` (lo crea el equipo), merge y etiqueta `fase-6`. Justo
+  después del merge y **antes de la Fase 7**, una rama `fix/` desde `main` para aislar las pruebas de integración de
+  Itinerary Service: hoy vacían (purge) la cola real `notification.itinerary-created` y una la desenlaza un momento
+  (fixtures `rabbitmq_channel` y `unbound_notification_queue` de `tests/integration/conftest.py`), así que correrlas
+  durante una demostración borra los mensajes que esperan en la cola. Mismo criterio que la 6C para el trigger:
+  topología de prueba con nombres propios eliminada al terminar, o, si una prueba no puede aislarse, omitirla
+  cuando la cola real tenga mensajes, documentándolo.

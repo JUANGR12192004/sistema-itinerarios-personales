@@ -1,8 +1,9 @@
 # Integración continua: ejecuta las pruebas de cada servicio en GitHub Actions.
 #
 # Se ejecuta en cada pull request hacia main y en cada push a main.
-# Hay un job por servicio. Para agregar un servicio en una fase siguiente,
-# copiar el job "airport-service" y cambiar su nombre y la carpeta del servicio
+# Hay un job por servicio o componente (Airport Service, Itinerary Service, y desde la
+# Fase 6 SendNotificationFunction y el Event Trigger). Para agregar uno en una fase
+# siguiente, copiar el job "airport-service" y cambiar su nombre y la carpeta
 # (en working-directory y en cache-dependency-path).
 
 name: Pruebas
@@ -77,4 +78,68 @@ jobs:
       - name: Ejecutar pruebas
         env:
           DATABASE_URL: postgresql+psycopg://localhost:5433/itinerary_db
+        run: pytest -v
+
+  send-notification-function:
+    name: SendNotificationFunction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: serverless/send-notification-function
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            serverless/send-notification-function/requirements.txt
+            serverless/send-notification-function/requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Sin PostgreSQL en el runner: las pruebas de integración quedan SKIPPED
+      - name: Ejecutar pruebas
+        env:
+          DATABASE_URL: postgresql+psycopg://localhost:5434/notification_db
+        run: pytest -v
+
+      # Comprueba que la imagen de Lambda se construye (Dockerfile y requirements.txt)
+      - name: Construir la imagen de la función
+        run: docker build -t send-notification-function .
+
+  event-trigger:
+    name: Event Trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: serverless/event-trigger
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: serverless/event-trigger/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Sin RabbitMQ ni la función en el runner: las pruebas de integración quedan SKIPPED
+      - name: Ejecutar pruebas
         run: pytest -v
