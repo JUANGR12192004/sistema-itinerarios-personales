@@ -800,7 +800,8 @@ pytest -v
     - Demostración real hecha el 2026-11-08: con RabbitMQ detenido, `POST /itineraries` → 201 y evento pendiente;
       el relay falló 9 veces sin perderlo y lo publicó al volver RabbitMQ (`message_id` = `event_id`).
     - Total del servicio: **167 pasan** con PostgreSQL y RabbitMQ; **143 pasan, 24 omitidas** sin ellos.
-- **Fase 6:** en curso en la rama `fase-6-serverless`.
+- **Fase 6:** completada y **fusionada en `main`** (PR #11, merge `1f5d8eb`) con la **etiqueta `fase-6`**.
+  La rama `fase-6-serverless` se conserva como archivo de solo lectura.
   - Entrega **6A** completada: ADR-008 (imagen de AWS Lambda con RIE) y ADR-028 a ADR-030.
     `serverless/send-notification-function` con dominio (`NotificationRecord`, SENT/SKIPPED), caso de uso
     `NotifyItineraryCreatedUseCase` (insertar con `ON CONFLICT DO NOTHING RETURNING id` → enviar → commit),
@@ -851,10 +852,19 @@ pytest -v
     - Totales: SendNotificationFunction **59 pasan** con PostgreSQL (**53 pasan, 6 omitidas** sin él); Event
       Trigger **84 pasan** con RabbitMQ y la función (**68 pasan, 16 omitidas** sin ellos); Itinerary Service
       **167 pasan** con servicios (**142 pasan, 25 omitidas** sin ellos).
-- **Siguiente:** pull request de la Fase 6 hacia `main` (lo crea el equipo), merge y etiqueta `fase-6`. Justo
-  después del merge y **antes de la Fase 7**, una rama `fix/` desde `main` para aislar las pruebas de integración de
+  - Corrección del Quality Gate de SonarCloud en el PR #11 (commit `375fb26`): el único problema de Reliability
+    (aserción con la misma expresión a ambos lados en `test_notification_record.py`) y 7 de Maintainability
+    (`with` anidados, comillas en el `Dockerfile`, un solo llamado dentro de `pytest.raises`). Se mantienen 3
+    `logger.error` donde SonarCloud sugiere `logging.exception()` (errores esperados: mensaje que no es JSON y
+    RabbitMQ no disponible o que no acepta el mensaje en `replay_dlq`), con un comentario que explica el motivo.
+    Además, el engine de la función usa `hide_parameters=True`: los errores de SQLAlchemy ya no llevan al log el
+    correo ni el nombre del viajero. SendNotificationFunction: **60 pasan** con PostgreSQL.
+- **Siguiente:** **antes de la Fase 7**, una rama `fix/` desde `main` para aislar las pruebas de integración de
   Itinerary Service: hoy vacían (purge) la cola real `notification.itinerary-created` y una la desenlaza un momento
   (fixtures `rabbitmq_channel` y `unbound_notification_queue` de `tests/integration/conftest.py`), así que correrlas
   durante una demostración borra los mensajes que esperan en la cola. Mismo criterio que la 6C para el trigger:
   topología de prueba con nombres propios eliminada al terminar, o, si una prueba no puede aislarse, omitirla
-  cuando la cola real tenga mensajes, documentándolo.
+  cuando la cola real tenga mensajes, documentándolo. En la misma rama se puede agregar `hide_parameters=True` al
+  engine de Itinerary Service (`app/infrastructure/persistence/database.py`), que hoy deja los parámetros del SQL
+  (nombre y correo del viajero) en los mensajes de error, como ya se hizo en la función. Después, la Fase 7
+  (API Gateway), que necesita decidir la tecnología del gateway (ADR-009, sección 9.3).
