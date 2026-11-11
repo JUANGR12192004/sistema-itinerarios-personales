@@ -222,7 +222,7 @@ Estas son las reglas que debes seguir tú:
 | Caché | Redis |
 | Frontend | HTML, CSS, JavaScript, Plotly JS |
 | Contenedores | Docker y Docker Compose |
-| Serverless | Ver decisión pendiente en la sección 9 |
+| Serverless | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator (ADR-008) |
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
@@ -353,7 +353,7 @@ Si necesitas cambiar esta estructura, explica el cambio y pide aprobación.
 | Airport Service | 8001 |
 | Itinerary Service | 8002 |
 | PostgreSQL (itinerarios) | 5433 |
-| PostgreSQL (notificaciones) | 5434 (si se usa contenedor separado) |
+| PostgreSQL (notificaciones) | 5434 (contenedor `notification-postgres`, ADR-029) |
 | RabbitMQ | 5672 (AMQP) / 15672 (panel) |
 | Redis | 6379 |
 | SendNotificationFunction | 9000 |
@@ -420,8 +420,10 @@ Hallazgos de la verificación real de API Colombia (entrega 1A, 2026-10-26):
 **Itinerary** (raíz de agregado): `id` (UUID), `traveler_name`, `traveler_email` (opcional), `departure_airport_id`,
 `arrival_airport_id`, `travel_date` (con zona horaria), `duration_minutes`, `created_at`, `updated_at`.
 
-**NotificationRecord**: `id`, `event_id` (único, para idempotencia), `itinerary_id`, `recipient`,
-`channel` (`simulated-email`), `message`, `status` (`SENT` / `FAILED`), `processed_at`.
+**NotificationRecord** (tabla `notification_history`, ADR-029 y ADR-030): `id`, `event_id` (único, para
+idempotencia), `itinerary_id`, `recipient` (`None` si no hay correo), `channel` (`simulated-email`), `message`,
+`status` (`SENT` / `SKIPPED`; `SKIPPED` reemplaza a `FAILED` desde la Fase 6), `status_reason` (por qué no se
+envió), `correlation_id`, `processed_at`.
 
 ### 8.4. Reglas del dominio
 
@@ -485,6 +487,12 @@ Confirmadas en la Fase 3 (ADR-015):
 | Outbox Relay (Fase 5, ADR-025) | Proceso aparte (`python -m app.outbox_relay`) con `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2) y `OUTBOX_RELAY_BATCH_SIZE` (10). `SELECT ... FOR UPDATE SKIP LOCKED`, un commit por lote, publicar y después marcar `published_at` (al menos una vez: puede haber duplicados, el consumidor es idempotente con `event_id`). Fallo temporal (`EventPublishError`) → `mark_failed` (`attempts + 1`, `last_error`), sigue pendiente y se detiene el lote, sin límite de intentos. Fallo permanente (ver ADR-027) → `mark_dead` y se continúa |
 | Mensajes venenosos (Fase 5, ADR-027) | Payload ilegible o `event_type` desconocido = fallo permanente: `mark_dead` guarda `failed_at` y `last_error`, el mensaje deja de estar pendiente y no se reintenta (la fila se conserva para revisarla). `RelayResult` separa `failed` (temporales) de `dead` (descartados). Equivale, del lado del productor, a la DLQ de RabbitMQ |
 | Registro del evento en la misma transacción (Fase 5, ADR-026) | Reemplaza a ADR-022. El caso de uso hace guardar → registrar el evento (`OutboxEventPublisher`, misma sesión) → commit. Si el registro falla, no hay commit (500). El relay reutiliza `RabbitMQEventPublisher` sin cambios y reconstruye el evento con `ItineraryCreatedEvent.from_dict`. Contrato y topología sin cambios |
+| Plataforma serverless (Fase 6, ADR-008) | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator: solo requiere Docker, funciona en Windows y macOS (Apple Silicon) y se despliega sin cambios en AWS Lambda. API de invocación en `POST http://localhost:9000/2015-03-31/functions/function/invocations`. En local no hay escalado automático ni apagado sin eventos (limitación de la plataforma, no del código) |
+| Modelo de programación de la función (Fase 6, ADR-028) | `handler(event, context)` en `app/handler.py`, sin estado entre invocaciones (solo se reutiliza el engine) y sin código de RabbitMQ. Hexagonal por dentro. Responde `PROCESSED`, `ALREADY_PROCESSED` o `REJECTED` (evento que no cumple el contrato v1). PostgreSQL no disponible → lanza `TransientError` (`translate_database_errors` envuelve toda la ejecución del caso de uso; el RIE lo informa como `errorType`); otros errores no se capturan. Comprobado: el RIE responde **HTTP 200 también en los errores** (solo el cuerpo trae `errorType`), y un cuerpo que no es JSON falla antes del handler con `Runtime.UnmarshalError` |
+| Historial de notificaciones (Fase 6, ADR-029) | Contenedor `notification-postgres` (postgres:16-alpine, puerto 5434, usuario/clave `notification`, base `notification_db`), tabla `notification_history` con `event_id` único. Migraciones con Alembic desde el entorno virtual, no en cada invocación; la imagen no incluye Alembic (`requirements.txt` vs. `requirements-dev.txt`). Red Docker `notification-net` entre la función y su base |
+| Idempotencia y destinatario (Fase 6, ADR-030) | `INSERT ... ON CONFLICT (event_id) DO NOTHING` antes de enviar; si ya existía → `ALREADY_PROCESSED` sin reenviar. Sin `traveler_email` → `status = SKIPPED`, `recipient = NULL` y `status_reason` con el motivo |
+| Fallos en el Event Trigger (Fase 6, se registra en ADR-031 en la 6B) | Éxito (`PROCESSED`, `ALREADY_PROCESSED`) → ACK. Permanente (mensaje que no es JSON, `REJECTED`) → `basic_reject(requeue=False)` → DLQ. Infraestructura (sin conexión, timeout, HTTP 5xx, `errorType = TransientError`) → reintentos y después `basic_nack(requeue=True)` tras una pausa, sin límite y sin DLQ. Otro `errorType` → reintentos limitados y después a la DLQ, para no bloquear la cola (`prefetch_count=1`). Mismo criterio temporal/permanente de ADR-027 |
+| Propiedad de la topología (Fase 6, se registra en ADR-032 en la 6B) | El publicador de Itinerary Service declara solo el exchange; el Event Trigger declara exchange, cola, binding, DLX y DLQ. Si el trigger no ha arrancado, `mandatory=True` devuelve el mensaje y el evento espera en la outbox |
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties`. No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
@@ -496,8 +504,6 @@ ADR-020 y ADR-021).
 
 | Decisión | Opciones | Se necesita en |
 |---|---|---|
-| Plataforma serverless (ADR-008) | Propuesta: imagen oficial de AWS Lambda para Python con el emulador de runtime (RIE), sin cuenta ni token. LocalStack requiere cuenta y auth token desde marzo de 2026. Knative y OpenFaaS requieren Kubernetes. Preguntar si el profesor exige una plataforma específica | Fase 6 |
-| Almacenamiento del historial de notificaciones | Propuesta: PostgreSQL propio de notificaciones | Fase 6 |
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
 | Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
@@ -669,6 +675,16 @@ Rama `fase-5-transactional-outbox`. Una pausa al final de cada entrega, antes de
 | **5B** | Puerto `OutboxRepository`, `SqlAlchemyOutboxRepository` (`SKIP LOCKED`), `OutboxRelay` en `application`, proceso `app/outbox_relay.py`, variables del relay, pruebas unitarias con fakes e integración (SKIPPED sin PostgreSQL o RabbitMQ) | Pruebas del relay pasan sin PostgreSQL ni RabbitMQ |
 | **5C** | Primer commit: mensajes venenosos (ADR-027, columna `failed_at` con la migración `c4d8e2f6a9b1`, `mark_dead`, índice parcial ajustado, pruebas). Después: `docs/04` (Outbox, duplicados e idempotencia), diagramas de `docs/05`, descripción en AsyncAPI (sin cambiar el contrato), README del servicio con la demostración del double write resuelto, revisión del job de CI, estado de CLAUDE.md | Con RabbitMQ detenido: 201 y evento pendiente; al levantarlo, el relay lo publica en la cola |
 
+### 12.6. Plan de la Fase 6 (entregas)
+
+Rama `fase-6-serverless`. Una pausa al final de cada entrega, antes del commit.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **6A** | ADR-008 (decidida), ADR-028 a ADR-030, `serverless/send-notification-function`: dominio (`NotificationRecord`), caso de uso, puertos, `SimulatedEmailSender`, repositorio del historial, handler de Lambda, esquema del evento, Alembic con la migración de `notification_history`, `Dockerfile`, eventos de ejemplo y pruebas | `pytest -v` pasa; invocación con `curl.exe` contra el RIE en el puerto 9000 (`PROCESSED`, `ALREADY_PROCESSED`, `SKIPPED`, `REJECTED`, `TransientError`) |
+| **6B** | ADR-031 y ADR-032, `serverless/event-trigger` (consumo, invocación, ACK/NACK, reintentos, DLQ, declaración de la topología), cambio de la topología del publicador de Itinerary Service (solo el exchange), pruebas unitarias y de integración (SKIPPED sin RabbitMQ, PostgreSQL o la función) | Pruebas del trigger pasan sin servicios |
+| **6C** | Documentación (FaaS, diagramas, AsyncAPI con la operación `receive` y la DLQ, README de cada componente y README raíz), jobs de CI de la función y del trigger, `serverless` en SonarCloud, demostración de punta a punta (incluye evento duplicado, evento en la DLQ y evento que espera en la outbox mientras el trigger no ha arrancado) | Registro en `notification_history` tras crear un itinerario |
+
 ---
 
 ## 13. Estándares de código
@@ -784,3 +800,11 @@ pytest -v
       el relay falló 9 veces sin perderlo y lo publicó al volver RabbitMQ (`message_id` = `event_id`).
     - Total del servicio: **167 pasan** con PostgreSQL y RabbitMQ; **143 pasan, 24 omitidas** sin ellos.
 - **Fase 6:** en curso en la rama `fase-6-serverless`.
+  - Entrega **6A** completada: ADR-008 (imagen de AWS Lambda con RIE) y ADR-028 a ADR-030.
+    `serverless/send-notification-function` con dominio (`NotificationRecord`, SENT/SKIPPED), caso de uso
+    `NotifyItineraryCreatedUseCase` (insertar con `ON CONFLICT DO NOTHING RETURNING id` → enviar → commit),
+    puertos, `SimulatedEmailSender`, repositorio con `TransientError`, handler de Lambda y esquema del contrato v1,
+    Alembic (migración `d1e5f7a3b9c2`, tabla `notification_history`), `Dockerfile` y eventos de ejemplo en `events/`.
+    Demostración real con `curl.exe` contra el RIE: `PROCESSED`/`SENT`, `ALREADY_PROCESSED`, `SKIPPED`, `REJECTED` y
+    `TransientError` con PostgreSQL detenido. Total: **59 pruebas pasan** con PostgreSQL; **53 pasan, 6 omitidas**
+    sin él.

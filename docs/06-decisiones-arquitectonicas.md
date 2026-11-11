@@ -92,7 +92,7 @@ El servicio controlará su esquema, sus migraciones y las operaciones sobre sus 
 
 Se deberán definir migraciones versionadas y una estrategia de respaldo y configuración.
 
-La tecnología de persistencia del historial de notificaciones se decidirá por separado.
+La tecnología de persistencia del historial de notificaciones se decidió por separado en la Fase 6 (ADR-029).
 
 ## ADR-005 — RabbitMQ para mensajería
 
@@ -166,17 +166,11 @@ Se deberán definir expiración, invalidación y comportamiento ante resultados 
 
 ## ADR-008 — Tecnología serverless local
 
-**Estado:** Pendiente de decisión.
+**Estado:** Aceptada (Fase 6, entrega 6A).
 
 ### Contexto
 
-El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo local.
-
-### Alternativas
-
-- LocalStack con AWS Lambda.
-- Knative.
-- OpenFaaS.
+El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo local. El profesor no exige una plataforma serverless específica. El equipo trabaja en Windows 11 y la solución también debe funcionar en macOS con Apple Silicon.
 
 ### Criterios de selección
 
@@ -186,9 +180,41 @@ El proyecto debe ejecutar SendNotificationFunction en un entorno de desarrollo l
 - Complejidad de configuración.
 - Facilidad para demostrar el modelo FaaS en la sustentación.
 
-### Decisión final
+### Alternativas evaluadas
 
-Se registrará después de comparar las alternativas y comprobar su compatibilidad con el entorno.
+| Alternativa | Qué necesita | Resultado |
+|---|---|---|
+| **Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (RIE)** | Solo Docker | **Elegida** |
+| LocalStack con AWS Lambda | Docker, más una cuenta de LocalStack y un *auth token* (obligatorios desde marzo de 2026) | Descartada: cada integrante dependería de una cuenta externa |
+| Knative | Un clúster de Kubernetes (kind, minikube o el de Docker Desktop) con Knative Serving y Eventing | Descartada: su instalación es mucho más compleja que el resto del proyecto |
+| OpenFaaS | Kubernetes (o faasd, que necesita Linux con containerd) | Descartada: por la misma razón que Knative |
+
+### Decisión
+
+- SendNotificationFunction se empaqueta como una **imagen de contenedor de Lambda** construida desde `public.ecr.aws/lambda/python:3.12`.
+- La imagen trae el cliente del runtime de Lambda (`awslambdaric`) y el **Runtime Interface Emulator**. En local, el RIE hace el papel del servicio AWS Lambda: recibe la invocación, llama al handler y devuelve su resultado.
+- El RIE escucha en el puerto 8080 del contenedor, que se publica como **9000** en el equipo (sección 7.6 de `CLAUDE.md`):
+
+```
+POST http://localhost:9000/2015-03-31/functions/function/invocations
+```
+
+- Es la misma ruta de la API *Invoke* de AWS Lambda. El cuerpo de la solicitud es el `event` que recibe el handler, y la respuesta es lo que el handler devuelve.
+
+### Justificación
+
+- Solo necesita Docker Desktop, que el equipo ya usa desde la Fase 2.
+- Funciona igual en Windows 11 y en macOS con Apple Silicon: la imagen es multiarquitectura (amd64 y arm64).
+- La misma imagen se puede desplegar en AWS Lambda sin cambios (subiéndola a Amazon ECR).
+- Permite demostrar el modelo FaaS sin cuentas externas ni Kubernetes.
+
+### Limitaciones en local (y por qué la función sigue siendo FaaS)
+
+- **No hay escalado automático:** un contenedor es una sola instancia de la función y atiende una invocación a la vez.
+- **No se apaga cuando no hay eventos** (no hay *scale to zero*): el contenedor queda encendido. Sí se puede ver el arranque en frío: la primera invocación inicializa la función y tarda más.
+- **No hay facturación por invocación, límites de concurrencia ni Event Source Mapping.** Por eso existe el Event Trigger (entrega 6B), que cumple el papel del Event Source Mapping.
+
+Lo que hace FaaS a una función es su **modelo de programación y su contrato con la plataforma**: es una función `handler(event, context)` que invoca la plataforma, sin servidor propio y sin estado entre invocaciones (ADR-028). Eso se cumple igual en local y en AWS. Las limitaciones anteriores son de la **operación** de la plataforma local, no del código: la misma imagen, desplegada en AWS Lambda, escalaría y se apagaría sola.
 
 ## ADR-009 — API Gateway / BFF
 
@@ -736,6 +762,150 @@ Un mensaje descartado con `failed_at` **nunca llega a RabbitMQ**, así que tampo
 - Un mensaje descartado no se publica nunca solo. Para reintentarlo después de corregirlo, hay que dejar `failed_at` en `NULL` a mano (`UPDATE outbox_events SET failed_at = NULL WHERE id = ...`).
 - Todo `EventPublishError` se trata como temporal, incluidos rechazos de RabbitMQ que podrían ser permanentes (`UnroutableError` o `NackError`). Son poco probables porque el publicador declara la topología antes de publicar, pero si ocurrieran, ese evento detendría cada lote. Distinguirlos queda como mejora futura.
 - Las consultas para monitorear la outbox deben separar pendientes (`published_at IS NULL AND failed_at IS NULL`), publicados y descartados (`failed_at IS NOT NULL`).
+
+## ADR-028 — Modelo de programación de SendNotificationFunction (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A).
+
+### Contexto
+
+SendNotificationFunction recibe `ItineraryCreatedEvent`, simula la notificación y guarda el historial. Debe seguir el modelo FaaS de la plataforma elegida (ADR-008) sin abandonar la arquitectura hexagonal del proyecto (ADR-002).
+
+### Decisión
+
+- **Modelo de Lambda:** la función es `handler(event, context)` en `app/handler.py`. La imagen la declara con `CMD ["app.handler.handler"]`.
+- **Sin estado entre invocaciones:** no guarda datos de negocio en memoria. Lo único que se reutiliza es el *engine* de SQLAlchemy (el administrador de conexiones), creado la primera vez y conservado mientras el contenedor siga "caliente". Es la práctica que recomienda AWS para no abrir una conexión nueva en cada invocación.
+- **Sin código de RabbitMQ:** la función recibe el evento ya extraído del mensaje. Leer la cola, confirmar (ACK) y reintentar es trabajo del Event Trigger (entrega 6B).
+- **Arquitectura hexagonal dentro de la función:**
+
+| Capa | Contenido |
+|---|---|
+| `domain` | `NotificationRecord`, `NotificationStatus` y la regla del destinatario (ADR-030) |
+| `application` | `ItineraryCreatedEvent` (el evento tal como lo lee este consumidor), puertos `NotificationHistoryRepository`, `NotificationSender` y `UnitOfWork`, caso de uso `NotifyItineraryCreatedUseCase`, excepciones `InvalidEventError` y `TransientError` |
+| `infrastructure` | `SimulatedEmailSender` (simula el correo con un log) y la persistencia con SQLAlchemy (ADR-029) |
+| Adaptador de entrada | `app/handler.py` (el handler de Lambda) y `app/event_schema.py` (esquema Pydantic del contrato v1). Cumplen el papel de las rutas FastAPI en los servicios |
+
+- **Validación del evento:** el esquema Pydantic comprueba el contrato v1 (ADR-020): `event_type = itinerary.created`, `event_version = 1`, UUID válidos, fechas con zona horaria, ids de aeropuerto y duración mayores que 0. Ignora los campos que no conoce (*Tolerant Reader*, igual que el Adapter de la Fase 1), para que un campo nuevo compatible no rompa al consumidor. La función **no importa código de Itinerary Service**: son contextos distintos y solo comparten el contrato publicado.
+- **Respuesta de la función** (lo que recibe quien la invoca):
+
+| `status` | Cuándo | Campos adicionales |
+|---|---|---|
+| `PROCESSED` | Se registró la notificación | `event_id`, `notification_id`, `notification_status` (`SENT` o `SKIPPED`) |
+| `ALREADY_PROCESSED` | El `event_id` ya estaba en el historial (ADR-030) | `event_id` |
+| `REJECTED` | El evento no cumple el contrato v1 (fallo permanente) | `event_id` (si se pudo leer) y `reason` |
+
+- **Errores que lanza la función:** el RIE, igual que AWS Lambda, informa una excepción no capturada con un cuerpo `{"errorType": "<nombre de la clase>", "errorMessage": "..."}`.
+
+| Situación | Qué hace la función | `errorType` |
+|---|---|---|
+| Evento inválido | No lanza excepción: responde `REJECTED` | — |
+| PostgreSQL no disponible (sin conexión, timeout, conexión cortada) | Captura el error de SQLAlchemy y lanza `TransientError` | `TransientError` |
+| Cualquier otro error (por ejemplo, un error de programación) | No lo captura | El nombre de su clase |
+
+El Event Trigger (entrega 6B) usa ese `errorType` para distinguir un fallo de infraestructura de uno de otro tipo.
+
+**Comportamiento comprobado del RIE (demostración de la 6A, 2026-11-10):**
+
+- Un error de la función responde **HTTP 200**, igual que un éxito. El error solo se reconoce porque el cuerpo trae `errorType` (además de `errorMessage`, `requestId` y `stackTrace`); el RIE no agrega un header que lo marque. Por eso el trigger debe revisar el cuerpo y no solo el código HTTP.
+- Con PostgreSQL detenido, la invocación responde en unos 2,6 s con `"errorType": "TransientError"`, dentro del timeout de la función (10 s).
+- Si el cuerpo no es JSON, el runtime falla **antes** de llamar al handler con `"errorType": "Runtime.UnmarshalError"`. Por eso el trigger comprueba que el mensaje sea JSON antes de invocar la función.
+- Al volver PostgreSQL, el mismo contenedor caliente se reconecta solo gracias a `pool_pre_ping` (ADR-029).
+
+### Justificación
+
+- El handler es delgado, como una ruta FastAPI: valida, llama al caso de uso y traduce el resultado. El caso de uso se prueba con *fakes* sin Lambda ni PostgreSQL.
+- Responder `REJECTED` en lugar de lanzar una excepción hace explícito que el evento no sirve y que reintentarlo no lo arreglará.
+- `TransientError` le da al trigger una señal estable para reconocer el fallo de infraestructura, sin que tenga que interpretar mensajes de error de PostgreSQL.
+
+### Consecuencias
+
+- Cambiar los nombres `PROCESSED`, `ALREADY_PROCESSED`, `REJECTED` o `TransientError` es un cambio de contrato con el Event Trigger.
+- Si se olvida aplicar la migración, PostgreSQL responde "la tabla no existe". No es un error de conexión, así que **no** se informa como `TransientError` (ver ADR-029).
+
+## ADR-029 — Historial de notificaciones en PostgreSQL propio (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A). Resuelve la decisión pendiente sobre el almacenamiento del historial (ADR-004).
+
+### Contexto
+
+El historial de notificaciones necesita persistencia propia, separada de la base de itinerarios. También necesita una restricción de unicidad sobre `event_id` para la idempotencia (ADR-030).
+
+### Decisión
+
+- **Contenedor propio**, con el mismo patrón de ADR-016: `notification-postgres` (postgres:16-alpine) en el puerto **5434**, usuario y clave `notification` y base `notification_db`. Itinerary Service no lo conoce y la función no conoce la base de itinerarios.
+- **Tabla `notification_history`** (una fila por `NotificationRecord`):
+
+| Columna | Tipo | Significado |
+|---|---|---|
+| `id` | UUID, clave primaria | Identificador de la notificación |
+| `event_id` | UUID, **único** (`uq_notification_history_event_id`) | `event_id` del evento recibido: clave de idempotencia |
+| `itinerary_id` | UUID | Itinerario notificado (referencia por id, sin clave foránea: está en otra base) |
+| `recipient` | VARCHAR(255), nulo | Correo del viajero; `NULL` si el itinerario no tiene correo |
+| `channel` | VARCHAR(50) | `simulated-email` |
+| `message` | TEXT | Texto de la notificación |
+| `status` | VARCHAR(20), `CHECK` `SENT` o `SKIPPED` | Resultado (ADR-030) |
+| `status_reason` | TEXT, nulo | Por qué no se envió (solo en `SKIPPED`) |
+| `correlation_id` | VARCHAR(255), nulo | Correlation ID del evento, para seguir el flujo (Fase 9) |
+| `processed_at` | TIMESTAMPTZ | Cuándo se procesó el evento |
+
+- **Migraciones aparte, no en cada invocación:** Alembic vive en la carpeta de la función y se ejecuta desde su entorno virtual (`alembic upgrade head`), igual que en Itinerary Service. La imagen de la función **no incluye Alembic**:
+  - `requirements.txt` tiene solo lo que va dentro de la función.
+  - `requirements-dev.txt` agrega Alembic y pytest para el equipo.
+  - En la Fase 10 la migración podrá correr como un contenedor de una sola ejecución.
+- **Red Docker `notification-net`:** la función y `notification-postgres` se conectan por esta red. Dentro de un contenedor, `localhost` es el propio contenedor, así que la función usa `notification-postgres:5432`. Desde el equipo (Alembic y pruebas) se usa `localhost:5434`.
+- **Conexión:** `connect_timeout` de 3 s (`DATABASE_CONNECT_TIMEOUT_SECONDS`) y `pool_pre_ping`. Este último comprueba la conexión guardada antes de usarla: si PostgreSQL se reinició mientras el contenedor estaba caliente, abre una nueva en lugar de fallar.
+
+### Justificación
+
+- PostgreSQL ya es conocido por el equipo y garantiza la unicidad de `event_id` con una restricción, que es la base de la idempotencia.
+- Aplicar las migraciones en cada invocación haría más lenta cada ejecución y podría correr migraciones en paralelo si hubiera varias instancias. Las migraciones son una tarea de despliegue, no de la función.
+- Una imagen sin herramientas de desarrollo es más pequeña y arranca más rápido (arranque en frío).
+
+### Consecuencias
+
+- Hay que aplicar la migración antes de la primera invocación. Si no se aplica, la función falla con un error que no es `TransientError` (ADR-028).
+- Hasta la Fase 10 el contenedor y la red se crean a mano.
+
+## ADR-030 — Idempotencia y destinatario de la notificación (Fase 6)
+
+**Estado:** Aceptada (Fase 6, entrega 6A). Cambia los estados de `NotificationRecord` (sección 8.3 de `CLAUDE.md`).
+
+### Contexto
+
+La entrega es **al menos una vez** (ADR-025): el mismo evento puede llegar más de una vez. Además, `traveler_email` es opcional (ADR-018), así que hay itinerarios sin destinatario.
+
+### Decisión
+
+**Idempotencia.** *Idempotente* significa que procesar el mismo evento dos veces deja el mismo resultado que procesarlo una. El caso de uso sigue este orden dentro de una transacción:
+
+1. Construye el `NotificationRecord`.
+2. Lo inserta con `INSERT ... ON CONFLICT (event_id) DO NOTHING`. Si no se insertó, el evento ya estaba procesado: responde `ALREADY_PROCESSED` **sin volver a enviar** y sin duplicar el registro.
+3. Si se insertó y hay destinatario, envía la notificación (simulada).
+4. Hace `COMMIT` y responde `PROCESSED`.
+
+**Por qué se inserta antes de enviar:** la restricción única "reserva" el `event_id`.
+
+- Si llegan dos copias a la vez, la segunda espera a que termine la transacción de la primera, ve el conflicto y no envía nada.
+- Si el envío falla, se hace rollback: no queda registro y el evento se puede reintentar.
+
+**Destinatario** (regla del dominio, en `NotificationRecord.create`):
+
+| Caso | `recipient` | `status` | `status_reason` |
+|---|---|---|---|
+| El evento trae `traveler_email` | El correo | `SENT` | `NULL` |
+| `traveler_email` es `null` o vacío | `NULL` | `SKIPPED` | "El itinerario no tiene traveler_email: no hay destinatario para la notificación" |
+
+`SKIPPED` **reemplaza a `FAILED`** de la sección 8.3. No tener correo no es un fallo, porque el correo es opcional por diseño. Y en esta fase nada produce `FAILED`: un envío que falla deshace la transacción y se reintenta, no se registra.
+
+### Justificación
+
+- La restricción única de PostgreSQL resuelve la idempotencia incluso con varias invocaciones en paralelo, sin bloqueos programados a mano.
+- Registrar el caso sin correo deja constancia de que el evento sí se procesó y explica por qué no hubo envío.
+
+### Consecuencias
+
+- **Queda una ventana pequeña:** si el envío sale bien pero el `COMMIT` falla, el reintento envía otra vez. La notificación también es "al menos una vez". Para un correo simulado es aceptable; un proveedor real de correo se protegería enviando el `event_id` como su propia clave de idempotencia.
+- Un `ALREADY_PROCESSED` es un éxito para quien invoca: el trigger debe confirmar (ACK) el mensaje.
 
 ## 2. Revisión de decisiones
 
