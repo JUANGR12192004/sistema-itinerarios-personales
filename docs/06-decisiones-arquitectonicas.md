@@ -592,9 +592,9 @@ Las pruebas (pytest y la integración continua de `.github/workflows/tests.yml`)
 | Propiedad | Valor | Efecto |
 |---|---|---|
 | `sonar.python.version` | `3.12` | Aplica las reglas de Python 3.12 (sin ella, SonarCloud asume compatibilidad con varias versiones de 3.x) |
-| `sonar.sources` | `services` | Código de producción: todo lo que está dentro de `services/` |
+| `sonar.sources` | `services,serverless` | Código de producción: todo lo que está dentro de `services/` y, desde la Fase 6, de `serverless/` |
 | `sonar.exclusions` | `**/tests/**,**/alembic/versions/**` | Las pruebas y las migraciones generadas por Alembic no cuentan como código de producción |
-| `sonar.tests` | `services` | Las pruebas se buscan dentro de `services/` |
+| `sonar.tests` | `services,serverless` | Las pruebas se buscan dentro de `services/` y `serverless/` |
 | `sonar.test.inclusions` | `**/tests/**` | Solo las carpetas `tests/` se tratan como código de pruebas |
 
 ### Qué analiza
@@ -608,7 +608,7 @@ Automatic Analysis no necesita configurar un *workflow* ni guardar un token como
 ### Consecuencias
 
 - Automatic Analysis **no importa reportes de cobertura**: SonarCloud no muestra el porcentaje de cobertura de pytest. Si se quisiera, habría que cambiar a análisis desde GitHub Actions (con token).
-- Solo se analiza `services/`. Cuando existan `serverless/`, `gateway/` y `frontend/` (Fases 6 a 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
+- Se analizan `services/` y, desde la entrega 6C, `serverless/` (SendNotificationFunction y el Event Trigger). Cuando existan `gateway/` y `frontend/` (Fases 7 y 8), hay que agregarlos a `sonar.sources` si se quiere analizarlos.
 - El acuerdo del equipo para fusionar exige el check "Pruebas" y una aprobación; el resultado de SonarCloud (su *Quality Gate*) no forma parte de ese acuerdo por ahora.
 
 ## ADR-024 — Tabla `outbox_events` y `OutboxMessage` (Fase 5)
@@ -978,9 +978,48 @@ Hay un caso que el relay no tiene: un **error de la función que no es de infrae
 ### Consecuencias
 
 - Mientras la función o su base de datos estén caídas, el mensaje vuelve una y otra vez al **inicio** de la cola y los que vienen detrás esperan. Es aceptable, porque fallarían igual por la misma causa.
-- Un error de programación en la función manda a la DLQ cada mensaje que lo provoque, después de 3 intentos. Corregida la función, hay que reenviar esos mensajes desde la DLQ a mano (por ejemplo, con *Move messages* del panel de RabbitMQ).
+- Un error de programación en la función manda a la DLQ cada mensaje que lo provoque, después de 3 intentos. Corregida la función, esos mensajes se devuelven a la cola con el comando de reprocesamiento (ver más abajo).
 - El nombre `TransientError` y los estados de la respuesta son parte del contrato entre la función y el trigger (ADR-028).
 - En AWS, el Event Source Mapping de Amazon MQ cumpliría este papel y no haría falta el trigger. Su política de reintentos se configura en la plataforma, no en código.
+
+### Reprocesamiento de la DLQ (agregado en la entrega 6C)
+
+Un mensaje **válido** también puede terminar en la DLQ por un problema de despliegue. Por ejemplo, si falta la migración del historial, PostgreSQL responde "la tabla no existe": no es un `TransientError` (ADR-028), así que es un error de la función y va a la DLQ tras 3 intentos. Lo mismo pasa con una imagen de la función rota. Corregido el problema, esos mensajes deben volver a procesarse.
+
+**Comando** (desde `serverless/event-trigger`):
+
+```
+python -m app.replay_dlq          # mueve UN mensaje (el más antiguo)
+python -m app.replay_dlq --all    # mueve todos los que hay en la DLQ al empezar
+```
+
+**Cómo mueve cada mensaje (`DeadLetterReplayer`), de uno en uno:**
+
+1. Lo toma de la DLQ sin confirmarlo (`basic_get` con ACK manual).
+2. Lo publica **directamente en la cola principal**: exchange por defecto (`""`) con la routing key igual al nombre de la cola. Así llega solo a `notification.itinerary-created`, aunque en el futuro haya otros consumidores enlazados a `itinerary.events`. Si se publicara en el exchange, les llegaría una copia repetida a todos.
+3. Espera la confirmación de RabbitMQ (publisher confirms y `mandatory=True`).
+4. Recién entonces lo confirma (ACK) en la DLQ.
+
+Si los pasos 2 o 3 fallan, devuelve el mensaje a la DLQ (`nack` con `requeue`): no se pierde. Si el proceso se cae entre los pasos 3 y 4, el mensaje queda en las dos colas; la función es idempotente, así que la segunda copia responde `ALREADY_PROCESSED`.
+
+**Otros detalles:**
+
+- Conserva `message_id`, `correlation_id`, `content_type` y el modo persistente.
+- Quita los headers que RabbitMQ agregó al rechazarlo (`x-death`, `x-first-death-*`, `x-last-death-*`) y suma 1 al header `x-dlq-replays`, para saber cuántas veces se reprocesó.
+- Registra en el log cada mensaje movido: `message_id`, motivo del rechazo y veces rechazado.
+- Solo mueve los mensajes que había **al empezar**. Si el problema sigue y el trigger los vuelve a rechazar, regresan a la DLQ y el comando termina, sin un ciclo infinito.
+- Declara la topología antes de empezar, así funciona aunque el trigger nunca haya arrancado. El trigger puede estar encendido (procesa los mensajes en cuanto llegan) o apagado (esperan en la cola).
+
+**Binding adicional de la DLQ.** Un mensaje devuelto así que se rechaza otra vez llega a la DLX con la routing key `notification.itinerary-created`, no con `itinerary.created`. Por eso la DLQ tiene un **segundo binding** a la DLX con esa clave. Sin él, la DLX no tendría a dónde enviarlo y el mensaje **se perdería**: lo detectó una prueba de integración de la 6C. Agregar un binding no cambia los argumentos de la cola, así que no causa `PRECONDITION_FAILED` con la cola existente.
+
+**Procedimiento.** Está en `serverless/event-trigger/README.md`:
+
+1. Revisar el motivo en la DLQ (panel de RabbitMQ, header `x-death` y log del trigger).
+2. Corregir la causa.
+3. Mover **un** mensaje y comprobar que se procesa.
+4. Mover el resto con `--all`.
+
+Los mensajes que no cumplen el contrato (`REJECTED`) **no** deben reprocesarse: volverían a la DLQ.
 
 ## ADR-032 — Propiedad de la topología de RabbitMQ (Fase 6)
 
@@ -998,7 +1037,7 @@ Cada lado declara **lo que le pertenece**:
 |---|---|---|
 | Exchange `itinerary.events` (topic, durable) | El publicador de Itinerary Service **y** el Event Trigger | Es el contrato público del productor. El trigger también lo declara porque necesita que exista para enlazar su cola |
 | Cola `notification.itinerary-created` (durable, `x-dead-letter-exchange: itinerary.events.dlx`) y su binding con `itinerary.created` | El Event Trigger | Es la cola de **este** consumidor |
-| DLX `itinerary.events.dlx` (direct, durable) y DLQ `notification.itinerary-created.dlq` (durable) con su binding | El Event Trigger | Reciben lo que **este** consumidor rechaza (ADR-031) |
+| DLX `itinerary.events.dlx` (direct, durable) y DLQ `notification.itinerary-created.dlq` (durable) con sus bindings (`itinerary.created` y, desde la 6C, `notification.itinerary-created` para los mensajes reprocesados) | El Event Trigger | Reciben lo que **este** consumidor rechaza (ADR-031) |
 
 - Las declaraciones son idempotentes y usan **los mismos argumentos de ADR-021**. Así no hay `PRECONDITION_FAILED` contra una cola que ya exista desde las fases anteriores.
 - El trigger las declara cada vez que se conecta o reconecta, así no depende de que Itinerary Service haya arrancado antes.

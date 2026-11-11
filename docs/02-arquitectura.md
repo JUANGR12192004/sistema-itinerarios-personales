@@ -46,28 +46,37 @@ Responsabilidades:
 
 ### 2.3. Sistema de notificaciones
 
+Formado por **Event Trigger + SendNotificationFunction + su base de datos** (Fase 6). No hay un microservicio de notificaciones adicional.
+
 Responsabilidades:
 
 - Recibir el evento de integración de creación de itinerarios.
 - Procesar el evento de forma asíncrona.
-- Invocar o activar SendNotificationFunction según la integración elegida.
+- Activar SendNotificationFunction con cada evento.
 - Simular el envío de una notificación.
 - Registrar el historial de procesamiento.
 - Gestionar fallos de procesamiento.
 
-La tecnología concreta de persistencia del historial y el mecanismo exacto de activación de la función se definirán antes de su implementación.
+**Event Trigger** (`serverless/event-trigger`, ADR-031). Proceso que cumple el papel del *Event Source Mapping* de AWS Lambda:
+
+- Consume la cola `notification.itinerary-created` con ACK manual y `prefetch_count=1`.
+- Invoca la función por HTTP y decide según la respuesta: ACK, reintentar o enviar a la DLQ.
+- Declara su cola, la DLX y la DLQ (ADR-032).
+- Incluye el comando `python -m app.replay_dlq`, que devuelve a la cola los mensajes de la DLQ una vez corregida la causa del fallo.
+
+**Persistencia:** PostgreSQL propio, `notification_db`, en el contenedor `notification-postgres` (ADR-029).
 
 ### 2.4. SendNotificationFunction
 
-Será la función serverless responsable de:
+Función serverless (FaaS) en `serverless/send-notification-function` (ADR-008 y ADR-028). Se ejecuta con la imagen oficial de AWS Lambda para Python 3.12 y el Runtime Interface Emulator. Es responsable de:
 
-- Recibir el evento correspondiente.
-- Validar y procesar su contenido.
-- Simular el envío de la notificación.
-- Registrar el resultado del procesamiento.
-- Manejar errores.
+- Recibir el evento como `handler(event, context)`.
+- Validar su contenido contra el contrato v1 (si no lo cumple, responde `REJECTED`).
+- Simular el envío de la notificación (`SimulatedEmailSender`).
+- Registrar el resultado en `notification_history`, de forma **idempotente** con `event_id` (ADR-030).
+- Manejar errores: si su base de datos no está disponible, lanza `TransientError` para que el trigger reintente.
 
-La función no será responsable de administrar itinerarios ni de implementar sus reglas de negocio.
+No guarda estado entre invocaciones y no conoce RabbitMQ. La función no es responsable de administrar itinerarios ni de implementar sus reglas de negocio.
 
 ### 2.5. API Gateway / BFF
 
@@ -109,11 +118,17 @@ Se utilizará RabbitMQ para transportar eventos de integración.
 
 Ejemplo:
 
-Itinerary Service → RabbitMQ → Sistema de notificaciones
+Itinerary Service → outbox → Outbox Relay → RabbitMQ → Event Trigger → SendNotificationFunction
 
-El emisor no tendrá que esperar a que termine la simulación de la notificación para completar el procesamiento normal de su solicitud.
+El emisor no espera a que termine la simulación de la notificación: responde 201 en cuanto el itinerario y su evento quedan guardados en la misma transacción.
 
-La entrega del evento requerirá mecanismos de confiabilidad y recuperación que se definirán en las fases de mensajería y Transactional Outbox.
+Confiabilidad de la entrega:
+
+- Transactional Outbox y Outbox Relay (Fase 5): el evento no se pierde aunque RabbitMQ esté caído.
+- Entrega "al menos una vez" con consumidor idempotente (Fase 6).
+- Reintentos y DLQ en el Event Trigger (ADR-031).
+
+El detalle está en `04-comunicacion-y-eventos.md`.
 
 ## 4. Persistencia y propiedad de datos
 
@@ -123,7 +138,7 @@ Itinerary Service será propietario de los itinerarios almacenados en su Postgre
 
 ### Base de datos o almacenamiento de notificaciones
 
-El historial de notificaciones tendrá persistencia propia, separada de los datos de itinerarios. La tecnología concreta se decidirá durante la planificación de la fase de notificaciones.
+El historial de notificaciones tiene persistencia propia, separada de los datos de itinerarios: PostgreSQL `notification_db` en el contenedor `notification-postgres` (puerto 5434), tabla `notification_history` (ADR-029). Sus migraciones se aplican aparte con Alembic, no en cada invocación de la función.
 
 ### Aeropuertos
 

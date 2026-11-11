@@ -123,6 +123,19 @@ Comprobar que responde: `docker exec airport-redis redis-cli ping` (debe mostrar
 
 En la Fase 10, Redis se levantará con Docker Compose junto con el resto del sistema.
 
+## Orden de arranque del sistema completo
+
+Airport Service es el paso **4** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+contenedores → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
+Event Trigger. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
+crear itinerarios.
+
+| Situación | Consecuencia |
+|---|---|
+| Airport Service apagado | Itinerary Service responde 503 `AIRPORT_SERVICE_UNAVAILABLE` al crear un itinerario y no guarda nada |
+| `airport-redis` apagado | El servicio funciona sin caché y registra un warning |
+| Sin internet | Responde 503, o la copia de respaldo de la caché (`X-Cache: STALE`) si existe |
+
 ## Ejecución
 
 Con el entorno virtual activado y Redis en ejecución (el comando es igual en PowerShell y en CMD):

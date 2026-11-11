@@ -1,17 +1,20 @@
-# Contrato de eventos del Sistema de Itinerarios Personales (Fase 4; sin cambios en la Fase 5).
+# Contrato de eventos del Sistema de Itinerarios Personales (Fase 4; contrato sin cambios en las Fases 5 y 6).
 #
 # Describe el evento de integración ItineraryCreatedEvent tal como lo publica
 # RabbitMQEventPublisher (services/itinerary-service/app/infrastructure/messaging),
-# que desde la Fase 5 usa el Outbox Relay.
-# Decisiones: ADR-020 (contrato v1), ADR-021 (topología de RabbitMQ) y ADR-024 a ADR-027 (Outbox).
+# que desde la Fase 5 usa el Outbox Relay, y cómo lo consume el Event Trigger
+# (serverless/event-trigger) desde la Fase 6.
+# Decisiones: ADR-020 (contrato v1), ADR-021 (topología de RabbitMQ), ADR-024 a ADR-027 (Outbox),
+# ADR-031 (Event Trigger) y ADR-032 (propiedad de la topología).
 # Se puede visualizar pegando este archivo en https://studio.asyncapi.com
 asyncapi: 3.0.0
 
 info:
   title: Eventos de Itinerary Service
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Eventos de integración que Itinerary Service publica en RabbitMQ.
+    Eventos de integración que Itinerary Service publica en RabbitMQ y que consume el
+    sistema de notificaciones (Event Trigger + SendNotificationFunction).
 
     - Entrega **al menos una vez**: un mismo evento puede llegar más de una vez.
       Los consumidores deben ser **idempotentes** usando `event_id` (también en la
@@ -19,6 +22,9 @@ info:
     - El consumidor confirma (ACK) solo después de procesar el mensaje. Si lo
       rechaza sin reencolar, RabbitMQ lo envía a la cola de mensajes fallidos (DLQ).
     - Un cambio incompatible del contrato exige una nueva `event_version`.
+
+    Versión 1.1.0 de este documento: se completa la operación de recepción y se agrega
+    el canal de la DLQ. El contrato del evento (versión 1) no cambia.
 
 defaultContentType: application/json
 
@@ -35,7 +41,7 @@ channels:
     title: Itinerario creado
     description: |
       Routing key `itinerary.created` en el exchange `itinerary.events` (topic, durable).
-      La cola `notification.itinerary-created` recibe estos mensajes para el sistema de notificaciones.
+      El exchange lo declaran el productor y el Event Trigger (ADR-032).
     messages:
       itineraryCreated:
         $ref: '#/components/messages/ItineraryCreatedEvent'
@@ -54,9 +60,10 @@ channels:
     address: notification.itinerary-created
     title: Cola de notificaciones
     description: |
-      Cola durable enlazada al exchange `itinerary.events` con la routing key `itinerary.created`.
-      Argumento `x-dead-letter-exchange: itinerary.events.dlx`: los mensajes rechazados van a la
-      cola `notification.itinerary-created.dlq` (exchange `itinerary.events.dlx`, tipo direct).
+      Cola durable del Event Trigger, enlazada al exchange `itinerary.events` con la routing key
+      `itinerary.created`. La declara el Event Trigger (ADR-032); el productor no la conoce.
+      Argumento `x-dead-letter-exchange: itinerary.events.dlx`: los mensajes rechazados sin
+      reencolar van a la DLQ.
     messages:
       itineraryCreated:
         $ref: '#/components/messages/ItineraryCreatedEvent'
@@ -65,6 +72,32 @@ channels:
         is: queue
         queue:
           name: notification.itinerary-created
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+
+  notificationDeadLetterQueue:
+    address: notification.itinerary-created.dlq
+    title: Cola de mensajes fallidos (DLQ)
+    description: |
+      Cola durable enlazada al dead letter exchange `itinerary.events.dlx` (direct, durable) con dos
+      routing keys: `itinerary.created` (mensajes originales) y `notification.itinerary-created`
+      (mensajes reprocesados que vuelven a fallar). Recibe lo que el Event Trigger rechaza por un fallo
+      permanente o por un error de la función que se repite (ADR-031). RabbitMQ agrega el header
+      `x-death` con la cola de origen y el motivo (`rejected`).
+
+      Reprocesamiento: `python -m app.replay_dlq` (uno) o `python -m app.replay_dlq --all` (todos)
+      devuelve los mensajes a `notification.itinerary-created` una vez corregida la causa.
+    messages:
+      itineraryCreated:
+        $ref: '#/components/messages/ItineraryCreatedEvent'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: notification.itinerary-created.dlq
           durable: true
           exclusive: false
           autoDelete: false
@@ -82,7 +115,8 @@ operations:
       Productor: `itinerary-service`. Fase 5: Transactional Outbox (ADR-024 a ADR-027).
       El itinerario y su evento se guardan en la misma transacción de PostgreSQL; el Outbox Relay
       (`python -m app.outbox_relay`) publica después los pendientes con publisher confirms y
-      `mandatory=true`. Si RabbitMQ falla, el evento sigue pendiente y se reintenta: no se pierde.
+      `mandatory=true`. Si RabbitMQ falla, o si ninguna cola está enlazada todavía (el Event Trigger
+      no ha arrancado, ADR-032), el evento sigue pendiente y se reintenta: no se pierde.
       El relay publica y después marca el evento como publicado, así que puede enviarlo más de una
       vez (entrega al menos una vez, ver `info.description`).
     bindings:
@@ -99,6 +133,24 @@ operations:
       $ref: '#/channels/notificationQueue'
     title: Consumir ItineraryCreatedEvent
     summary: El Event Trigger consume la cola e invoca SendNotificationFunction (Fase 6).
+    description: |
+      Consumidor: Event Trigger (`serverless/event-trigger`, `python -m app.main`), que cumple el papel
+      del Event Source Mapping de AWS Lambda (ADR-031).
+
+      - ACK manual y `prefetch_count=1`: un mensaje a la vez.
+      - Por cada mensaje invoca SendNotificationFunction (API de invocación de Lambda del RIE,
+        `POST /2015-03-31/functions/function/invocations`) con el evento como cuerpo.
+      - Idempotencia: la función guarda el `event_id` con una restricción única; un duplicado responde
+        `ALREADY_PROCESSED` y también se confirma (ADR-030).
+
+      | Respuesta de la función | Acción |
+      |---|---|
+      | `PROCESSED` / `ALREADY_PROCESSED` | `basic_ack` |
+      | `REJECTED`, o el mensaje no es JSON (fallo permanente) | `basic_reject(requeue=false)` → DLQ, sin reintentos |
+      | Sin conexión, timeout, HTTP 5xx, `errorType` `TransientError` o timeout de la función | Reintentos con espera; después `basic_nack(requeue=true)`. Sin límite y nunca a la DLQ |
+      | Otro `errorType` o respuesta desconocida | Reintentos limitados; después `basic_reject(requeue=false)` → DLQ |
+
+      Los mensajes que no cumplen el contrato de abajo terminan en el canal `notificationDeadLetterQueue`.
     bindings:
       amqp:
         ack: true

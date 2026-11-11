@@ -72,16 +72,18 @@ header `event_version`), para que un consumidor pueda leerlos sin abrir el cuerp
 | **Queue** | Guarda los mensajes hasta que un consumidor los procese | `notification.itinerary-created` (durable) |
 | **Dead letter exchange** | Recibe los mensajes que el consumidor rechazó | `itinerary.events.dlx` (direct, durable) |
 | **Dead letter queue** | Guarda los mensajes fallidos para revisarlos | `notification.itinerary-created.dlq` (durable) |
-| **Consumer** | Recibe y procesa mensajes | Event Trigger + `SendNotificationFunction` (Fase 6) |
+| **Consumer** | Recibe y procesa mensajes | Event Trigger + `SendNotificationFunction` (Fase 6, sección 8) |
 | **Acknowledgement** | El consumidor confirma que terminó de procesar | ACK manual, solo al terminar |
 
 ```mermaid
 flowchart LR
-    IS[Itinerary Service] -->|"itinerary.created"| EX[[itinerary.events<br/>topic]]
+    IS[Outbox Relay de<br/>Itinerary Service] -->|"itinerary.created"| EX[[itinerary.events<br/>topic]]
     EX -->|"binding itinerary.created"| Q[(notification.itinerary-created)]
-    Q --> C[Event Trigger<br/>Fase 6]
+    Q --> C[Event Trigger]
+    C -->|HTTP| F[SendNotificationFunction]
     Q -.rechazado.-> DLX[[itinerary.events.dlx<br/>direct]]
-    DLX --> DLQ[(notification.itinerary-created.dlq)]
+    DLX -->|"bindings itinerary.created y<br/>notification.itinerary-created"| DLQ[(notification.itinerary-created.dlq)]
+    DLQ -.python -m app.replay_dlq.-> Q
 ```
 
 Garantías del lado del productor (`RabbitMQEventPublisher`, librería `pika`):
@@ -99,9 +101,10 @@ Garantías del lado del productor (`RabbitMQEventPublisher`, librería `pika`):
   en la misma transacción (tabla `outbox_events`) y responde **201**. El Outbox Relay publica el evento después: si
   RabbitMQ falla, el evento sigue pendiente y se reintenta, sin perderse (sección 7). En la Fase 4 un fallo de
   RabbitMQ perdía el evento (sección 6).
-- **Del lado del consumidor (Fase 6):** confirmará (ACK) solo después de procesar. La entrega es
-  **al menos una vez**, así que un mensaje puede repetirse: el consumidor será **idempotente** usando `event_id`.
-  Un mensaje que no se pueda procesar se rechazará sin reencolar y RabbitMQ lo moverá a la DLQ.
+- **Del lado del consumidor (Fase 6):** el Event Trigger confirma (ACK) solo después de que la función procesó
+  el evento. La entrega es **al menos una vez**, así que un mensaje puede repetirse: la función es **idempotente**
+  con `event_id`. Un mensaje que no se puede procesar (fallo permanente) se rechaza sin reencolar y RabbitMQ lo
+  mueve a la DLQ; un fallo de infraestructura se reintenta sin límite (sección 8.4).
 
 ## 4. Llamada HTTP, evento, evento de dominio y evento de integración
 
@@ -336,27 +339,145 @@ pero en el otro extremo del flujo:
 
 Un mensaje descartado con `failed_at` nunca llega a RabbitMQ, así que tampoco llega a la DLQ.
 
-## 8. Integración serverless
+## 8. Integración serverless (Fase 6)
 
-El evento publicado en RabbitMQ deberá llegar al componente responsable de ejecutar SendNotificationFunction.
+### 8.1. ¿Qué es Serverless / FaaS?
 
-El mecanismo de integración dependerá de la plataforma serverless elegida.
+**Serverless** no significa que no haya servidores: significa que **el equipo no los administra**. La plataforma
+se encarga de las máquinas, del proceso, de escalar y de apagar. **FaaS** (*Function as a Service*) es su forma más
+común: se despliega una **función** (no una aplicación), la plataforma la ejecuta **solo cuando llega un evento** y
+cobra por invocación.
 
-No se asumirá que RabbitMQ puede activar directamente cualquier función sin un adaptador, consumidor o integración compatible.
+| | Microservicio (Itinerary Service) | Función FaaS (SendNotificationFunction) |
+|---|---|---|
+| Quién abre el puerto y maneja el proceso | Nuestro código (uvicorn + FastAPI) | La plataforma |
+| Qué escribimos | Una aplicación con rutas | Una función `handler(event, context)` |
+| Cuándo corre | Siempre encendido | Cuando la plataforma recibe un evento |
+| Estado en memoria | Puede tenerlo | No: cada invocación es independiente |
+| Escalado | Lo decidimos nosotros (réplicas) | Lo decide la plataforma |
+
+**¿Por qué SendNotificationFunction es FaaS aunque corra en Docker?** Lo que hace FaaS a una función es su
+**modelo de programación y su contrato con la plataforma**, no el lugar donde corre (ADR-008, ADR-028):
+
+- La imagen `public.ecr.aws/lambda/python:3.12` trae el runtime real de AWS Lambda y el **Runtime Interface Emulator
+  (RIE)**, que en local hace el papel del servicio Lambda: recibe la invocación en
+  `POST /2015-03-31/functions/function/invocations` (la misma ruta de la API *Invoke* de AWS), llama a
+  `handler(event, context)` y devuelve su resultado.
+- Nuestro código no abre puertos, no tiene servidor web, no conoce RabbitMQ y no guarda estado.
+- La misma imagen se despliega en AWS Lambda sin cambiar una línea.
+
+En local no hay escalado automático ni apagado sin eventos: un contenedor es una instancia encendida que atiende
+una invocación a la vez. Son límites de la **operación** de la plataforma local, no del código. Es como una app
+de Android probada en el emulador: sigue siendo una app de Android.
+
+### 8.2. El Event Trigger
+
+RabbitMQ no sabe invocar una función, y la función no lee colas. El **Event Trigger** (`serverless/event-trigger`)
+es el puente: consume la cola `notification.itinerary-created` (ACK manual, `prefetch_count=1`), invoca la función
+por HTTP con cada evento y, según la respuesta, confirma el mensaje, lo reintenta o lo envía a la DLQ (ADR-031).
+Declara su propia topología: la cola, su binding, la DLX y la DLQ (ADR-032).
+
+Equivalentes en las plataformas reales:
+
+| Plataforma | Componente equivalente | Cómo funciona |
+|---|---|---|
+| AWS Lambda | **Event Source Mapping (ESM)** | Componente del servicio Lambda que lee de SQS, Kinesis, Kafka o Amazon MQ (incluido RabbitMQ), invoca la función con lotes de mensajes y solo los da por procesados si la función tuvo éxito; si falla, reintenta y puede enviarlos a una DLQ o destino de fallos |
+| OpenFaaS | **Conectores** (connector-sdk: Kafka, NATS, RabbitMQ…) | Proceso suscrito a un tema que llama, a través del gateway, a las funciones que declararon ese tema con la anotación `topic` |
+| Knative Eventing | **Sources** (`RabbitmqSource`, `KafkaSource`…) | Convierten cada mensaje en un CloudEvent y lo envían por HTTP a un *sink* (la función), con reintentos, backoff y `deadLetterSink` |
+
+Nuestro trigger es un ESM simplificado con lotes de un mensaje: envía el JSON del evento tal cual.
+
+### 8.3. Flujo completo
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Cliente
+    participant IS as Itinerary Service (API :8002)
+    participant DB as PostgreSQL itinerarios (:5433)
+    participant R as Outbox Relay
+    participant MQ as RabbitMQ
+    participant T as Event Trigger
+    participant F as SendNotificationFunction (RIE :9000)
+    participant H as PostgreSQL notificaciones (:5434)
+
+    C->>IS: POST /itineraries
+    IS->>DB: BEGIN · INSERT itineraries · INSERT outbox_events · COMMIT
+    IS-->>C: 201 Created
+    loop cada 2 s
+        R->>DB: SELECT pendientes FOR UPDATE SKIP LOCKED
+        R->>MQ: publish itinerary.events / itinerary.created (mandatory)
+        MQ-->>R: confirm (llegó a la cola)
+        R->>DB: UPDATE published_at · COMMIT
+    end
+    MQ->>T: entrega el mensaje (prefetch 1, sin ACK todavía)
+    T->>F: POST /2015-03-31/functions/function/invocations
+    F->>H: INSERT notification_history ON CONFLICT (event_id) DO NOTHING RETURNING id
+    alt event_id nuevo
+        F->>F: simula el correo (log)
+        F->>H: COMMIT
+        F-->>T: {"status": "PROCESSED"}
+    else event_id repetido
+        F-->>T: {"status": "ALREADY_PROCESSED"}
+    end
+    T->>MQ: basic_ack
+```
+
+### 8.4. Fallo temporal vs. permanente en el consumidor (ADR-031)
+
+Es el mismo criterio del Outbox Relay (sección 7.4, ADR-027), aplicado al consumidor. El RIE responde HTTP 200 también
+cuando la función falla, así que el trigger lee el código HTTP **y** el cuerpo:
+
+```mermaid
+flowchart TD
+    M[Mensaje de la cola] --> J{¿Es JSON?}
+    J -- No --> DLQ[basic_reject sin reencolar → DLQ]
+    J -- Sí --> I[Invocar la función]
+    I --> R{Respuesta}
+    R -- "PROCESSED / ALREADY_PROCESSED" --> ACK[basic_ack]
+    R -- REJECTED --> DLQ
+    R -- "sin conexión, timeout, 5xx,<br/>TransientError, Task timed out" --> INF{¿Quedan intentos<br/>de infraestructura?}
+    INF -- Sí --> W1[Esperar con backoff] --> I
+    INF -- No --> NACK["Pausa y basic_nack(requeue=True)<br/>vuelve a la cola, sin límite"]
+    R -- "otro errorType o<br/>respuesta desconocida" --> FN{¿Quedan intentos<br/>de la función?}
+    FN -- Sí --> W2[Esperar con backoff] --> I
+    FN -- No --> DLQ
+```
+
+| Respuesta | Tipo | Acción |
+|---|---|---|
+| `PROCESSED` o `ALREADY_PROCESSED` | Éxito | ACK |
+| `REJECTED`, o el mensaje no es JSON | Permanente | A la DLQ sin reintentar |
+| Sin conexión, timeout, HTTP 5xx, `TransientError` o timeout de la función | Infraestructura | 3 intentos con espera; después vuelve a la cola tras 10 s. **Sin límite y nunca a la DLQ** |
+| Otro `errorType` | Error de la función | 3 intentos con espera; después a la DLQ, para no bloquear la cola |
+
+### 8.5. Reprocesamiento de la DLQ
+
+Un mensaje **válido** puede terminar en la DLQ por un problema de despliegue: por ejemplo, la migración del historial
+sin aplicar ("la tabla no existe" no es un `TransientError`). Corregido el problema, `python -m app.replay_dlq`
+(uno) o `python -m app.replay_dlq --all` (todos) lo devuelve a la cola principal:
+
+- Lo publica directamente en la cola, con el exchange por defecto, para que no llegue a otros consumidores.
+- Espera la confirmación de RabbitMQ antes de borrarlo de la DLQ.
+- Quita los headers `x-death` del rechazo anterior y registra cada mensaje movido.
+
+Detalles en ADR-031 y en `serverless/event-trigger/README.md`.
 
 ## 9. AsyncAPI
 
 La especificación está en [`asyncapi/asyncapi.yaml`](asyncapi/asyncapi.yaml) (AsyncAPI 3.0) y documenta:
 
-- Canales de comunicación.
-- Mensajes.
-- Contratos de eventos.
-- Productores y consumidores.
+- Canales: el exchange y la routing key, la cola de notificaciones y la DLQ.
+- Mensajes y el contrato del evento.
+- Productor (`send`, Outbox Relay) y consumidor (`receive`, Event Trigger): ACK, rechazo a la DLQ, reintentos e idempotencia.
 - Protocolos y mecanismos de transporte.
 
-La especificación corresponde al contrato implementado: la prueba
-`services/itinerary-service/tests/application/test_asyncapi_contract.py` falla si el evento del código y el de
-AsyncAPI dejan de coincidir. Para verla de forma gráfica, pegar el archivo en https://studio.asyncapi.com.
+La especificación corresponde al contrato implementado. Dos pruebas fallan si dejan de coincidir:
+
+- `services/itinerary-service/tests/application/test_asyncapi_contract.py`: el evento y la parte del productor.
+- `serverless/event-trigger/tests/test_asyncapi_topology.py`: los nombres de la cola, la DLX y la DLQ del consumidor (compara el texto del archivo, sin agregar una librería de YAML al trigger).
+
+Para verla de forma gráfica, pegar el archivo en https://studio.asyncapi.com.
 
 ## 10. Evolución del contrato
 

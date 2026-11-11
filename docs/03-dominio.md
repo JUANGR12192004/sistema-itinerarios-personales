@@ -75,16 +75,16 @@ Este contexto es propietario de los itinerarios y sus reglas de negocio.
 
 ### 4.3. Contexto de notificaciones
 
-**Componentes:** sistema de notificaciones y SendNotificationFunction.
+**Componentes:** Event Trigger, SendNotificationFunction y su base de datos `notification_db` (Fase 6).
 
 Responsabilidades:
 
-- Interpretar el evento recibido.
+- Interpretar el evento recibido (la función valida el contrato v1 con su propio esquema: no importa código de Itinerary Service).
 - Procesar la solicitud de notificación.
 - Simular el envío.
 - Registrar el historial.
 
-No es propietario de los itinerarios ni debe modificar directamente su base de datos.
+No es propietario de los itinerarios ni debe modificar directamente su base de datos. Referencia el itinerario solo por su `itinerary_id`.
 
 ## 5. Entidades y modelos principales
 
@@ -122,9 +122,22 @@ El contrato de integración se especificará en la documentación de eventos.
 
 ### 5.4. NotificationRecord
 
-Concepto que representa el historial de una notificación procesada.
+Registro de una notificación procesada (Fase 6, ADR-029 y ADR-030). Se guarda en la tabla `notification_history`.
 
-Sus campos definitivos se establecerán al diseñar el procesamiento, la persistencia y el manejo de errores.
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | UUID | Identificador de la notificación. |
+| `event_id` | UUID | `event_id` del evento recibido. Es **único**: clave de idempotencia. |
+| `itinerary_id` | UUID | Itinerario notificado (referencia por id a otro contexto). |
+| `recipient` | str \| None | Correo del viajero; `None` si el itinerario no tiene correo. |
+| `channel` | str | `simulated-email`. |
+| `message` | str | Texto de la notificación; no puede estar vacío. |
+| `status` | `SENT` \| `SKIPPED` | `SENT` si se envió; `SKIPPED` si no había destinatario. |
+| `status_reason` | str \| None | Motivo cuando el estado es `SKIPPED`. |
+| `correlation_id` | str \| None | Correlation ID del evento. |
+| `processed_at` | datetime (con tz) | Cuándo se procesó. |
+
+Regla del destinatario (`NotificationRecord.create`): con correo → `SENT`; sin correo (nulo o vacío) → `SKIPPED`, sin destinatario y con el motivo. Un registro `SENT` necesita destinatario; uno `SKIPPED` no lo tiene y debe explicar el motivo.
 
 ## 6. Reglas del dominio
 
@@ -139,6 +152,8 @@ Todas las reglas siguientes están confirmadas (ADR-015):
 - "Aeropuerto no existe" (404 de Airport Service) y "Airport Service no disponible" (503 o 504) se tratan de forma distinta en la capa de aplicación.
 - La creación de un itinerario origina el evento `ItineraryCreatedEvent`.
 - El historial de notificaciones se mantiene separado de los datos de itinerarios.
+- Un evento se notifica una sola vez: si su `event_id` ya está en el historial, no se vuelve a notificar (ADR-030).
+- Sin `traveler_email` no se envía la notificación: se registra como `SKIPPED` con el motivo (ADR-030).
 
 ## 7. Relación entre DDD y arquitectura hexagonal
 
