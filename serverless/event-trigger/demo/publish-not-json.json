@@ -1,0 +1,9 @@
+{
+  "routing_key": "itinerary.created",
+  "properties": {
+    "message_id": "demo-6b-no-es-json",
+    "delivery_mode": 2
+  },
+  "payload_encoding": "string",
+  "payload": "esto no es JSON"
+}
