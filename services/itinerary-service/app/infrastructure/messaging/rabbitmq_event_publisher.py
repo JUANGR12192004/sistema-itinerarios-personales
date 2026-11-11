@@ -4,9 +4,11 @@ Cada publicación:
 1. Abre una conexión (BlockingConnection no es segura entre hilos y FastAPI ejecuta
    las rutas `def` en varios hilos; una conexión por publicación evita compartirla).
 2. Activa los publisher confirms: RabbitMQ confirma que recibió y enrutó el mensaje.
-3. Declara la topología (idempotente).
+3. Declara el exchange (idempotente). Las colas las declara cada consumidor (ADR-032).
 4. Publica el evento como JSON persistente, con `mandatory=True`: si ninguna cola
-   lo recibe, RabbitMQ lo devuelve y la publicación falla en lugar de perderse en silencio.
+   lo recibe (por ejemplo, el Event Trigger todavía no declaró la suya), RabbitMQ lo
+   devuelve y la publicación falla en lugar de perderse en silencio; el Outbox Relay
+   deja el evento pendiente y lo reintenta.
 5. Cierra la conexión, haya error o no.
 
 Cualquier error técnico de pika se envuelve en EventPublishError: el caso de uso
@@ -27,7 +29,7 @@ from app.application.ports import EventPublisher
 from app.infrastructure.messaging.topology import (
     EXCHANGE,
     ROUTING_KEY_ITINERARY_CREATED,
-    declare_topology,
+    declare_exchange,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,7 +71,7 @@ class RabbitMQEventPublisher(EventPublisher):
         try:
             channel = connection.channel()
             channel.confirm_delivery()
-            declare_topology(channel)
+            declare_exchange(channel)
             channel.basic_publish(
                 exchange=EXCHANGE,
                 routing_key=ROUTING_KEY_ITINERARY_CREATED,

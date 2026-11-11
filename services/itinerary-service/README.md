@@ -108,7 +108,10 @@ docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.1
 
 - Puerto `5672`: protocolo AMQP (lo usa el Outbox Relay).
 - Puerto `15672`: panel web en http://localhost:15672 (usuario y clave `guest`, solo para desarrollo local).
-- No hace falta crear nada a mano: el publicador declara el exchange, las colas y los enlaces al publicar.
+- No hace falta crear nada a mano. Desde la Fase 6 (ADR-032) cada lado declara lo suyo: el publicador
+  declara el exchange `itinerary.events` y el Event Trigger (`serverless/event-trigger`) declara la cola,
+  su enlace, la DLX y la DLQ. Si el trigger todavía no ha arrancado, la cola no existe: el relay registra
+  un fallo temporal y el evento **espera en la outbox** hasta que el trigger arranque.
 - RabbitMQ tarda unos segundos en arrancar. Está listo cuando `docker logs itinerary-rabbitmq` muestra
   `Server startup complete`. No uses `docker exec ... rabbitmq-diagnostics` mientras arranca: puede crear el
   archivo `.erlang.cookie` con el dueño equivocado y el contenedor se detiene con el error `eacces`.

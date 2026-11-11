@@ -16,12 +16,9 @@ from app.application.exceptions import EventPublishError
 from app.domain.itinerary import Itinerary
 from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventPublisher
 from app.infrastructure.messaging.topology import (
-    DEAD_LETTER_EXCHANGE,
-    DEAD_LETTER_QUEUE,
     EXCHANGE,
-    QUEUE_NOTIFICATIONS,
     ROUTING_KEY_ITINERARY_CREATED,
-    declare_topology,
+    declare_exchange,
 )
 
 URL = "amqp://guest:guest@rabbitmq.local:5672/%2F"
@@ -138,16 +135,13 @@ def test_propiedades_del_mensaje():
     assert properties.headers == {"event_version": 1}
 
 
-def test_activa_confirms_y_declara_topologia_antes_de_publicar():
+def test_activa_confirms_y_declara_el_exchange_antes_de_publicar():
     channel = FakeChannel()
     publisher, _, _ = _publisher(channel)
 
     publisher.publish(_event())
 
-    names = channel.names()
-    assert names[0] == "confirm_delivery"
-    assert names[-1] == "basic_publish"
-    assert "queue_declare" in names[:-1]
+    assert channel.names() == ["confirm_delivery", "exchange_declare", "basic_publish"]
 
 
 def test_cierra_la_conexion_despues_de_publicar():
@@ -219,40 +213,27 @@ def test_canal_cerrado_por_rabbitmq_lanza_event_publish_error():
     assert connection.closed is True
 
 
-# ——— Topología ———
+# ——— Topología (ADR-032: el productor declara solo su exchange) ———
 
-def test_topologia_declara_exchanges_durables():
+def test_declara_el_exchange_topic_durable():
     channel = FakeChannel()
 
-    declare_topology(channel)
+    declare_exchange(channel)
 
-    exchanges = {kw["exchange"]: kw for name, kw in channel.calls if name == "exchange_declare"}
-    assert exchanges[EXCHANGE] == {"exchange": "itinerary.events", "exchange_type": "topic", "durable": True}
-    assert exchanges[DEAD_LETTER_EXCHANGE] == {
-        "exchange": "itinerary.events.dlx", "exchange_type": "direct", "durable": True,
-    }
+    assert channel.calls == [
+        ("exchange_declare", {"exchange": "itinerary.events", "exchange_type": "topic", "durable": True}),
+    ]
 
 
-def test_topologia_cola_principal_envia_fallidos_al_dlx():
+def test_el_publicador_no_declara_colas_ni_la_dlx():
+    """La cola, su binding, la DLX y la DLQ son del Event Trigger (el consumidor)."""
     channel = FakeChannel()
+    publisher, _, _ = _publisher(channel)
 
-    declare_topology(channel)
+    publisher.publish(_event())
 
-    queues = {kw["queue"]: kw for name, kw in channel.calls if name == "queue_declare"}
-    assert queues[QUEUE_NOTIFICATIONS]["durable"] is True
-    assert queues[QUEUE_NOTIFICATIONS]["arguments"] == {"x-dead-letter-exchange": "itinerary.events.dlx"}
-    assert queues[DEAD_LETTER_QUEUE] == {"queue": "notification.itinerary-created.dlq", "durable": True}
-
-
-def test_topologia_enlaza_las_colas_con_la_routing_key():
-    channel = FakeChannel()
-
-    declare_topology(channel)
-
-    bindings = [kw for name, kw in channel.calls if name == "queue_bind"]
-    assert {
-        "queue": QUEUE_NOTIFICATIONS, "exchange": EXCHANGE, "routing_key": "itinerary.created",
-    } in bindings
-    assert {
-        "queue": DEAD_LETTER_QUEUE, "exchange": DEAD_LETTER_EXCHANGE, "routing_key": "itinerary.created",
-    } in bindings
+    names = channel.names()
+    assert "queue_declare" not in names
+    assert "queue_bind" not in names
+    declared_exchanges = [kw["exchange"] for name, kw in channel.calls if name == "exchange_declare"]
+    assert declared_exchanges == [EXCHANGE]
