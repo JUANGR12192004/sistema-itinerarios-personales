@@ -50,10 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     parameters.socket_timeout = settings.rabbitmq_timeout_seconds
     parameters.stack_timeout = settings.rabbitmq_timeout_seconds
     parameters.connection_attempts = 1
+    # En los dos except se usa logger.error y no logger.exception: son fallos esperados (RabbitMQ
+    # apagado, mensaje que RabbitMQ no acepta) y el mensaje ya dice qué pasó; el traceback de pika
+    # solo agregaría ruido a la salida de un comando que el equipo ejecuta a mano.
     try:
         connection = pika.BlockingConnection(parameters)
     except (AMQPError, OSError) as exc:
-        logger.error("No se pudo conectar con RabbitMQ en %s:%s (%s)", parameters.host, parameters.port, type(exc).__name__)
+        logger.error(
+            "No se pudo conectar con RabbitMQ en %s:%s (%s)", parameters.host, parameters.port, type(exc).__name__
+        )
         return 1
 
     try:

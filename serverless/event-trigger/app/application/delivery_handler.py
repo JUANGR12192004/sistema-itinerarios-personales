@@ -79,7 +79,9 @@ class DeliveryHandler:
         try:
             event = json.loads(body.decode("utf-8"))
         except ValueError as exc:  # incluye UnicodeDecodeError y JSONDecodeError
-            # Fallo PERMANENTE: no se invoca la función (el RIE fallaría con Runtime.UnmarshalError)
+            # Fallo PERMANENTE: no se invoca la función (el RIE fallaría con Runtime.UnmarshalError).
+            # logger.error y no logger.exception: es un caso esperado y el traceback de json.loads no
+            # ayuda a diagnosticar; el motivo ya va en el mensaje (sin el contenido del mensaje).
             logger.error(
                 "Mensaje rechazado sin invocar la función (no es JSON): message_id=%s error=%s. Va a la DLQ",
                 message_id,

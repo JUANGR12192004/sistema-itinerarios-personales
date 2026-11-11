@@ -139,9 +139,10 @@ def test_cuenta_las_veces_que_se_reproceso_y_el_motivo_anterior():
 
 def test_si_rabbitmq_no_acepta_el_mensaje_vuelve_a_la_dlq():
     channel = FakeChannel([dead_letter(1, "m-1")], publish_error=UnroutableError([]))
+    replayer = DeadLetterReplayer(channel)
 
     with pytest.raises(DlqReplayError):
-        DeadLetterReplayer(channel).replay()
+        replayer.replay()
 
     assert ("basic_nack", {"delivery_tag": 1, "requeue": True}) in channel.calls
     assert ("basic_ack", {"delivery_tag": 1}) not in channel.calls

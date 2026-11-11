@@ -87,9 +87,9 @@ def run_use_case(
     Al salir del `with` la sesión se cierra; si no hubo commit, sus cambios se deshacen.
     """
     factory = session_factory or get_session_factory()
-    with translate_database_errors():
-        with factory() as session:
-            return build_use_case(session).execute(event)
+    # translate_database_errors va primero (por fuera): también cubre los errores al cerrar la sesión
+    with translate_database_errors(), factory() as session:
+        return build_use_case(session).execute(event)
 
 
 def build_use_case(session: Session) -> NotifyItineraryCreatedUseCase:

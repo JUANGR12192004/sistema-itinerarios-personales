@@ -53,7 +53,10 @@ def test_sin_correo_queda_omitida_y_explica_el_motivo(recipient):
 
 
 def test_cada_registro_tiene_un_id_distinto():
-    assert create("ana@example.com").id != create("ana@example.com").id
+    first = create("ana@example.com")
+    second = create("ana@example.com")
+
+    assert first.id != second.id
 
 
 def test_una_notificacion_enviada_necesita_destinatario():
@@ -75,10 +78,13 @@ def test_una_notificacion_omitida_debe_explicar_el_motivo():
 
 
 def test_el_mensaje_no_puede_estar_vacio():
+    record = create("ana@example.com")
     with pytest.raises(InvalidNotificationError):
-        replace(create("ana@example.com"), message="   ")
+        replace(record, message="   ")
 
 
 def test_la_fecha_de_procesamiento_debe_tener_zona_horaria():
+    record = create("ana@example.com")
+    naive_date = datetime(2026, 11, 10, 15, 30)
     with pytest.raises(InvalidNotificationError):
-        replace(create("ana@example.com"), processed_at=datetime(2026, 11, 10, 15, 30))
+        replace(record, processed_at=naive_date)

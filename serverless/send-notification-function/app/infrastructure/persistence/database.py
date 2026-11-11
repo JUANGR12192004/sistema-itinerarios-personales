@@ -22,12 +22,15 @@ def get_engine() -> Engine:
       apagado se informe como TransientError antes del timeout de la función.
     - pool_pre_ping: comprueba la conexión guardada antes de usarla; si PostgreSQL se
       reinició mientras el contenedor estaba caliente, abre una nueva en lugar de fallar.
+    - hide_parameters: los mensajes de error de SQLAlchemy no incluyen los valores del SQL
+      (el correo y el nombre del viajero). Esos mensajes llegan al log de la función.
     """
     settings = get_settings()
     return create_engine(
         settings.database_url,
         connect_args={"connect_timeout": settings.database_connect_timeout_seconds},
         pool_pre_ping=True,
+        hide_parameters=True,
     )
 
 

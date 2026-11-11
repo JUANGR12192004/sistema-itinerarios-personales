@@ -10,7 +10,7 @@ FROM public.ecr.aws/lambda/python:3.12
 # Dependencias de la función (solo requirements.txt: Alembic y pytest no van en la imagen).
 # psycopg[binary] incluye libpq, que la imagen de Lambda no trae (x86_64 y arm64).
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/
-RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt --target ${LAMBDA_TASK_ROOT}
+RUN pip install --no-cache-dir -r "${LAMBDA_TASK_ROOT}/requirements.txt" --target "${LAMBDA_TASK_ROOT}"
 
 # Código de la función
 COPY app ${LAMBDA_TASK_ROOT}/app
