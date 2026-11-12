@@ -6,7 +6,7 @@ Cada itinerario creado origina un `ItineraryCreatedEvent`. El servicio lo guarda
 
 ## Requisitos previos
 
-- Python 3.12
+- Python 3.12 (`py -3.12` en Windows, `python3.12` en macOS)
 - Docker Desktop (para PostgreSQL y RabbitMQ)
 - Airport Service corriendo en `http://localhost:8001`
 - RabbitMQ (Docker) para que el Outbox Relay publique los eventos. Sin RabbitMQ la API funciona igual: los eventos quedan pendientes en `outbox_events` y se publican cuando RabbitMQ vuelve
@@ -14,7 +14,7 @@ Cada itinerario creado origina un `ItineraryCreatedEvent`. El servicio lo guarda
 ## Configuración inicial (una vez por equipo)
 
 ```powershell
-# Permitir activar entornos virtuales (solo PowerShell)
+# Permitir activar entornos virtuales (solo PowerShell; no aplica en CMD ni en macOS)
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
@@ -40,6 +40,16 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+**macOS (zsh):**
+
+```bash
+cd services/itinerary-service
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 ## Base de datos PostgreSQL
 
 Levantar el contenedor (solo la primera vez; después basta con `docker start itinerary-postgres`).
@@ -55,13 +65,13 @@ docker run -d --name itinerary-postgres `
   postgres:16-alpine
 ```
 
-**CMD:**
+**CMD y macOS (zsh):**
 
 ```cmd
 docker run -d --name itinerary-postgres -e POSTGRES_USER=itinerary -e POSTGRES_PASSWORD=itinerary -e POSTGRES_DB=itinerary_db -p 5433:5432 postgres:16-alpine
 ```
 
-Aplicar las migraciones (con el entorno virtual activado; igual en PowerShell y CMD):
+Aplicar las migraciones (con el entorno virtual activado; igual en PowerShell, CMD y zsh):
 
 ```powershell
 alembic upgrade head
@@ -86,6 +96,8 @@ Copia `.env.example` a `.env` y ajusta los valores si es necesario (igual en Pow
 copy .env.example .env
 ```
 
+En macOS (zsh): `cp .env.example .env`.
+
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
 | `DATABASE_URL` | Sin valor por defecto (**obligatoria**). En `.env.example`: `postgresql+psycopg://itinerary:itinerary@localhost:5433/itinerary_db` | Conexión a PostgreSQL. Las pruebas no la necesitan: `tests/conftest.py` usa una URL de prueba si no está definida |
@@ -100,7 +112,7 @@ copy .env.example .env
 
 ## RabbitMQ
 
-Hasta la Fase 10 (Docker Compose), RabbitMQ se ejecuta con un contenedor (igual en PowerShell y CMD):
+Hasta la Fase 10 (Docker Compose), RabbitMQ se ejecuta con un contenedor (igual en PowerShell, CMD y zsh):
 
 ```powershell
 docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
@@ -166,6 +178,12 @@ cd services\itinerary-service
 uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
+```bash
+cd services/itinerary-service
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+```
+
 Swagger UI disponible en: `http://localhost:8002/docs`
 
 **2. Outbox Relay** (publica en RabbitMQ los eventos pendientes):
@@ -182,13 +200,20 @@ cd services\itinerary-service
 python -m app.outbox_relay
 ```
 
+```bash
+cd services/itinerary-service
+source .venv/bin/activate
+python -m app.outbox_relay
+```
+
 Muestra `Outbox Relay iniciado: revisa cada 2.0 s, lotes de hasta 10 eventos` y se detiene con **Ctrl+C**.
 Si PostgreSQL o RabbitMQ no están disponibles, registra el error y lo vuelve a intentar en el siguiente ciclo:
 el proceso no se detiene.
 
 ## Pruebas
 
-Con el entorno virtual activado (igual en PowerShell y CMD):
+Con el entorno virtual activado (igual en PowerShell y CMD; en zsh, las carpetas con `/`, por ejemplo
+`pytest -v tests/integration`):
 
 ```powershell
 # Todas las pruebas (las de integración se omiten si PostgreSQL o RabbitMQ no están disponibles)
@@ -201,11 +226,18 @@ pytest -v tests\domain tests\application tests\infrastructure tests\api tests\te
 pytest -v tests\integration
 ```
 
-Resultado esperado: **167 passed** con PostgreSQL y RabbitMQ; **142 passed, 25 skipped** sin ellos.
+Resultado esperado: **169 passed** con PostgreSQL y RabbitMQ; **144 passed, 25 skipped** sin ellos.
 
-> Las pruebas de integración **borran** las filas de `itineraries` y `outbox_events`, **vacían** la cola
-> `notification.itinerary-created` y la **desenlazan** durante una prueba (escenario "el trigger no ha arrancado").
-> No las ejecutes contra datos que quieras conservar ni mientras el Event Trigger esté procesando una demostración.
+**RabbitMQ:** las pruebas de integración **no tocan** la cola real `notification.itinerary-created` ni su DLQ.
+Usan una topología propia con nombres únicos (`test-<id>.itinerary.events`, `test-<id>.notification.itinerary-created`,
+etc.), declarada una vez por sesión de pytest y **borrada al terminar** (mismo criterio que las pruebas del Event
+Trigger). Se pueden correr durante una demostración sin perder los mensajes que esperan en la cola o en la DLQ.
+
+> **Limitación (base de datos):** las pruebas de integración usan la base real `itinerary_db` y **borran** las filas
+> de `itineraries` y `outbox_events` antes y después de cada prueba. Además, si el **Outbox Relay** está encendido,
+> puede publicar en la cola real los eventos que crean las pruebas. Antes de correrlas, detén el Outbox Relay y no
+> las ejecutes contra datos de demostración que quieras conservar. Está registrado como pendiente en `CLAUDE.md`
+> (sección 9.3).
 
 ## Endpoints
 
@@ -255,6 +287,13 @@ chcp 65001
 curl.exe -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-fase-5" -d "{\"traveler_name\":\"Ana Perez\",\"traveler_email\":\"ana@example.com\",\"departure_airport_id\":1,\"arrival_airport_id\":5,\"travel_date\":\"2026-12-15T08:00:00-05:00\",\"duration_minutes\":75}"
 ```
 
+**macOS (zsh):**
+
+```bash
+docker stop itinerary-rabbitmq
+curl -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-fase-5" -d '{"traveler_name":"Ana Perez","traveler_email":"ana@example.com","departure_airport_id":1,"arrival_airport_id":5,"travel_date":"2026-12-15T08:00:00-05:00","duration_minutes":75}'
+```
+
 Resultado esperado:
 
 - La API responde **201** con el itinerario, aunque RabbitMQ esté detenido: la API ya no habla con RabbitMQ.
@@ -263,7 +302,7 @@ Resultado esperado:
 
 ### 2. Ver el evento pendiente en la outbox
 
-Igual en PowerShell y CMD:
+Igual en PowerShell, CMD y zsh:
 
 ```powershell
 docker exec itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id, event_type, published_at, attempts, failed_at FROM outbox_events"
@@ -274,7 +313,7 @@ Resultado esperado: una fila con `event_type = itinerary.created`, `published_at
 
 ### 3. Arrancar el Outbox Relay con RabbitMQ todavía detenido
 
-En otra terminal, con el entorno virtual activado (igual en PowerShell y CMD):
+En otra terminal, con el entorno virtual activado (igual en PowerShell, CMD y zsh):
 
 ```powershell
 python -m app.outbox_relay
@@ -292,7 +331,7 @@ sigue vacío: el evento sigue pendiente.
 
 ### 4. Volver a levantar RabbitMQ
 
-En la primera terminal (igual en PowerShell y CMD):
+En la primera terminal (igual en PowerShell, CMD y zsh):
 
 ```powershell
 docker start itinerary-rabbitmq
@@ -327,6 +366,14 @@ curl.exe -s -u guest:guest -H "Content-Type: application/json" `
 
 ```cmd
 curl.exe -s -u guest:guest -H "Content-Type: application/json" -X POST http://localhost:15672/api/queues/%2F/notification.itinerary-created/get -d "{\"count\":1,\"ackmode\":\"ack_requeue_true\",\"encoding\":\"auto\"}"
+```
+
+**macOS (zsh):**
+
+```bash
+curl -s -u guest:guest -H "Content-Type: application/json" \
+  -X POST http://localhost:15672/api/queues/%2F/notification.itinerary-created/get \
+  -d '{"count":1,"ackmode":"ack_requeue_true","encoding":"auto"}'
 ```
 
 Resultado esperado:

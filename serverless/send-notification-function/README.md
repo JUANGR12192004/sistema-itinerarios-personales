@@ -69,7 +69,7 @@ Qué pasa si se omite un paso que depende de esta función:
 
 ## Instalación (una vez)
 
-Desde `serverless\send-notification-function`.
+Desde `serverless\send-notification-function` (`serverless/send-notification-function` en macOS).
 
 **PowerShell:**
 
@@ -91,12 +91,22 @@ pip install -r requirements-dev.txt
 copy .env.example .env
 ```
 
+**macOS (zsh):**
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
 `requirements.txt` tiene solo lo que va **dentro** de la imagen. `requirements-dev.txt` agrega Alembic y pytest, que
 usa el equipo y no van en la imagen (ADR-029).
 
 ## Base de datos del historial
 
-Igual en PowerShell y CMD. La red y el contenedor se crean **una sola vez**:
+Igual en PowerShell, CMD y zsh. La red y el contenedor se crean **una sola vez**:
 
 ```
 docker network create notification-net
@@ -116,7 +126,7 @@ alembic current
 
 ## Imagen y ejecución
 
-Igual en PowerShell y CMD. Construir la imagen (otra vez después de **cada** cambio en `app/`):
+Igual en PowerShell, CMD y zsh. Construir la imagen (otra vez después de **cada** cambio en `app/`):
 
 ```
 docker build -t send-notification-function .
@@ -129,6 +139,10 @@ contenedor, `localhost` es el propio contenedor):
 docker run -d --name send-notification-function --network notification-net -p 9000:8080 -e DATABASE_URL=postgresql+psycopg://notification:notification@notification-postgres:5432/notification_db send-notification-function
 ```
 
+En Apple Silicon la imagen se construye para `arm64` (la imagen base de Lambda trae las dos arquitecturas). Para
+desplegarla en AWS Lambda habría que crear la función con arquitectura `arm64`, o construirla con
+`docker build --platform linux/amd64 -t send-notification-function .`.
+
 Las veces siguientes basta con `docker start send-notification-function`. Para usar una imagen nueva:
 `docker rm -f send-notification-function` y repetir el `docker run`. Los logs (incluido el correo simulado) se ven con
 `docker logs -f send-notification-function`.
@@ -140,6 +154,12 @@ Los eventos de ejemplo están en `events\`, porque escribir JSON en la línea de
 
 ```
 curl.exe -s -X POST http://localhost:9000/2015-03-31/functions/function/invocations --data-binary "@events\itinerary-created.json"
+```
+
+**macOS (zsh):** `curl` en lugar de `curl.exe` y la ruta con `/`:
+
+```bash
+curl -s -X POST http://localhost:9000/2015-03-31/functions/function/invocations --data-binary "@events/itinerary-created.json"
 ```
 
 | Archivo | Primera vez | Segunda vez |
@@ -167,13 +187,13 @@ docker exec notification-postgres psql -U notification -d notification_db -c "SE
 
 ## Pruebas
 
-Con el entorno virtual activado (igual en PowerShell y CMD):
+Con el entorno virtual activado (igual en PowerShell, CMD y zsh):
 
 ```
 pytest -v
 ```
 
-Resultado esperado: **59 passed** con `notification-postgres` y la migración aplicada; **53 passed, 6 skipped** sin
+Resultado esperado: **60 passed** con `notification-postgres` y la migración aplicada; **54 passed, 6 skipped** sin
 él. Las pruebas de integración **borran** las filas de `notification_history`.
 
 ## Posibles errores
@@ -182,7 +202,7 @@ Resultado esperado: **59 passed** con `notification-postgres` y la migración ap
 |---|---|---|
 | `ALREADY_PROCESSED` en la primera invocación, con la tabla vacía | El contenedor usa una imagen vieja | `docker build`, `docker rm -f send-notification-function` y `docker run` otra vez |
 | `relation "notification_history" does not exist` | Falta la migración | `alembic upgrade head` |
-| `Runtime.UnmarshalError` | El cuerpo enviado no es JSON | Usar los archivos de `events\` con `--data-binary "@..."` |
+| `Runtime.UnmarshalError` | El cuerpo enviado no es JSON | Usar los archivos de `events\` con `--data-binary "@..."` (en macOS, `"@events/..."`: con `\` curl no encuentra el archivo) |
 | `port is already allocated` | Ya hay algo en el puerto 9000 o 5434 | `docker ps` y detener el otro contenedor |
 | `could not translate host name "notification-postgres"` | La función no está en la red `notification-net` | Recrear el contenedor con `--network notification-net` |
 
@@ -199,7 +219,7 @@ app/
   handler.py             → handler(event, context): adaptador de entrada de Lambda
   config.py
 alembic/                 → migración d1e5f7a3b9c2 (notification_history)
-events/                  → eventos de ejemplo para curl.exe
+events/                  → eventos de ejemplo para curl.exe (curl en macOS)
 tests/                   → dominio, caso de uso, esquema, handler, errores de BD e integración
 Dockerfile               → imagen de Lambda (sin Alembic ni pruebas)
 ```

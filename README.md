@@ -107,8 +107,11 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 6 | Serverless | Completada |
 | 7 a 12 | Gateway, frontend, observabilidad, Docker Compose, pruebas y documentación | Pendientes |
 
-**Última fase completada:** Fase 6 — Serverless (PR #11, etiqueta `fase-6`). **Siguiente:** aislar las pruebas de
-integración de Itinerary Service (rama `fix/`) y después la Fase 7 — API Gateway.
+**Última fase completada:** Fase 6 — Serverless (PR #11, etiqueta `fase-6`). Las pruebas de integración de Itinerary
+Service ya no tocan la cola real ni su DLQ (rama `fix/aislar-pruebas-itinerary`). **Siguiente:** Fase 7 — API Gateway.
+
+El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
+comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
 
 ### Fase 6 — Serverless
 
@@ -160,7 +163,8 @@ levantarlo todo.
 
 ### 1. Contenedores
 
-Igual en PowerShell y CMD. **La primera vez** se crean:
+Igual en PowerShell, CMD y la Terminal de macOS (zsh). En Apple Silicon las imágenes se descargan para `arm64`
+sin opciones adicionales. **La primera vez** se crean:
 
 ```
 docker network create notification-net
@@ -210,10 +214,25 @@ deactivate
 cd ..\..
 ```
 
+**macOS (zsh):**
+
+```bash
+cd services/itinerary-service
+source .venv/bin/activate
+alembic upgrade head
+deactivate
+cd ../../serverless/send-notification-function
+source .venv/bin/activate
+alembic upgrade head
+deactivate
+cd ../..
+```
+
 ### 3. SendNotificationFunction
 
-Igual en PowerShell y CMD, desde `serverless\send-notification-function`. La primera vez (y después de cada cambio en
-el código de la función) se construye la imagen y se crea el contenedor:
+Igual en PowerShell, CMD y zsh, desde `serverless\send-notification-function` (`serverless/send-notification-function`
+en macOS). La primera vez (y después de cada cambio en el código de la función) se construye la imagen y se crea el
+contenedor:
 
 ```
 docker build -t send-notification-function .
@@ -222,11 +241,15 @@ docker run -d --name send-notification-function --network notification-net -p 90
 
 Las veces siguientes: `docker start send-notification-function`.
 
+En Apple Silicon la imagen se construye para `arm64` (la imagen base de Lambda trae las dos arquitecturas). Funciona
+igual en local; solo importa al desplegar en AWS Lambda, donde la función se crearía con arquitectura `arm64` (o la
+imagen se construiría con `docker build --platform linux/amd64`).
+
 ### 4 a 7. Procesos de Python
 
 Cada uno en **su propia terminal**, con el entorno virtual de su carpeta activado
-(`.\.venv\Scripts\Activate.ps1` en PowerShell, `.venv\Scripts\activate.bat` en CMD). Los comandos son iguales en las
-dos terminales:
+(`.\.venv\Scripts\Activate.ps1` en PowerShell, `.venv\Scripts\activate.bat` en CMD, `source .venv/bin/activate` en
+zsh). Los comandos son iguales en las tres terminales (en macOS, las carpetas se escriben con `/`):
 
 | Paso | Carpeta | Comando | Listo cuando |
 |---|---|---|---|
@@ -258,13 +281,21 @@ Para detener todo: Ctrl+C en cada terminal y `docker stop send-notification-func
 
 Recorrido completo: crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial. Requisitos: los
 siete pasos del orden de arranque. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
-PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). El cuerpo del itinerario está en
-`demo\create-itinerary.json`; si la fecha `2026-12-15` ya pasó, cámbiala por una futura.
+PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
+`docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
+ruta del archivo con `/`). El cuerpo del itinerario está en `demo\create-itinerary.json`; si la fecha `2026-12-15` ya
+pasó, cámbiala por una futura.
 
 ### 1. Caso normal
 
 ```
 curl.exe -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo\create-itinerary.json"
+```
+
+**macOS (zsh):**
+
+```bash
+curl -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo/create-itinerary.json"
 ```
 
 Resultado esperado:
@@ -311,6 +342,12 @@ docker exec notification-postgres psql -U notification -d notification_db -c "AL
 curl.exe -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo\create-itinerary.json"
 ```
 
+**macOS (zsh):** el mismo `docker exec` y después:
+
+```bash
+curl -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo/create-itinerary.json"
+```
+
 Resultado esperado: el trigger hace 3 intentos con `errorType=ProgrammingError: ... relation "notification_history"
 does not exist` y registra `Error de la función en 3 intentos ... Va a la DLQ`. En el panel
 (http://localhost:15672 → *Queues and Streams*), `notification.itinerary-created.dlq` tiene 1 mensaje.
@@ -334,6 +371,12 @@ Itinerary Service solo produce eventos válidos, así que se publica uno a mano 
 
 ```
 curl.exe -s -u guest:guest -X POST http://localhost:15672/api/exchanges/%2F/itinerary.events/publish -H "Content-Type: application/json" --data-binary "@demo\publish-invalid-event.json"
+```
+
+**macOS (zsh):**
+
+```bash
+curl -s -u guest:guest -X POST http://localhost:15672/api/exchanges/%2F/itinerary.events/publish -H "Content-Type: application/json" --data-binary "@demo/publish-invalid-event.json"
 ```
 
 Resultado esperado: el trigger registra `La función rechazó el evento (fallo permanente) ... Va a la DLQ`, sin

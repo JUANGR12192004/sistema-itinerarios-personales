@@ -72,9 +72,9 @@ airport-service/
 
 ## Requisitos
 
-- Windows 11
-- Python 3.12 (`py -3.12 --version`)
-- Docker Desktop con WSL 2, para ejecutar Redis (opcional: sin Redis el servicio funciona, pero sin caché)
+- Windows 11 o macOS (Apple Silicon)
+- Python 3.12 (`py -3.12 --version` en Windows, `python3.12 --version` en macOS)
+- Docker Desktop (con WSL 2 en Windows), para ejecutar Redis (opcional: sin Redis el servicio funciona, pero sin caché)
 - Conexión a internet solo para ejecutar el servicio con datos reales (las pruebas no la necesitan
   ni necesitan Redis)
 
@@ -104,15 +104,25 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+macOS (zsh):
+
+```bash
+cd ~/proyectos/sistema-itinerarios-personales/services/airport-service
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 Opcional: copiar `.env.example` como `.env` para cambiar la configuración
-(`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD).
+(`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD, `cp .env.example .env` en zsh).
 
 Si ya tenían el entorno de la Fase 1, basta con volver a ejecutar `pip install -r requirements.txt`
 para instalar el cliente de Redis.
 
 ### Redis (Fase 2)
 
-Con Docker Desktop abierto (el comando es igual en PowerShell y en CMD). Solo la primera vez:
+Con Docker Desktop abierto (el comando es igual en PowerShell, CMD y zsh). Solo la primera vez:
 
 ```
 docker run -d --name airport-redis -p 6379:6379 redis:7.4-alpine
@@ -138,7 +148,7 @@ crear itinerarios.
 
 ## Ejecución
 
-Con el entorno virtual activado y Redis en ejecución (el comando es igual en PowerShell y en CMD):
+Con el entorno virtual activado y Redis en ejecución (el comando es igual en PowerShell, CMD y zsh):
 
 ```
 uvicorn app.main:app --port 8001
@@ -152,6 +162,12 @@ para ver bien las tildes):
 
 ```
 curl.exe -i http://localhost:8001/airports/1
+```
+
+En macOS (zsh), `curl` en lugar de `curl.exe`:
+
+```bash
+curl -i http://localhost:8001/airports/1
 ```
 
 En la consola del servidor aparece un único aviso por respuesta cuando se corrigen coordenadas:
@@ -185,11 +201,19 @@ cd %USERPROFILE%\proyectos\sistema-itinerarios-personales\services\airport-servi
 pytest -v
 ```
 
+macOS (zsh):
+
+```bash
+cd ~/proyectos/sistema-itinerarios-personales/services/airport-service
+source .venv/bin/activate
+pytest -v
+```
+
 Resultado esperado: `185 passed`. pytest muestra una advertencia de Starlette sobre `httpx` en
 `TestClient`; es conocida y está pendiente para la Fase 11.
 
 Solo los escenarios de la Fase 2 (la API funciona, tarda, no responde, consultas repetidas), igual en
-PowerShell y en CMD:
+PowerShell y en CMD (en zsh, `pytest -v tests/integration`):
 
 ```
 pytest -v tests\integration
@@ -371,10 +395,13 @@ Decisiones:
 Todos los comandos se ejecutan en la carpeta del servicio, con el entorno virtual activado y Redis en
 ejecución. Para cambiar una variable solo en la terminal actual:
 
-| | PowerShell | CMD |
-|---|---|---|
-| Asignar | `$env:NOMBRE = "valor"` | `set NOMBRE=valor` |
-| Quitar | `Remove-Item Env:NOMBRE` | `set NOMBRE=` |
+| | PowerShell | CMD | macOS (zsh) |
+|---|---|---|---|
+| Asignar | `$env:NOMBRE = "valor"` | `set NOMBRE=valor` | `export NOMBRE=valor` |
+| Quitar | `Remove-Item Env:NOMBRE` | `set NOMBRE=` | `unset NOMBRE` |
+
+En macOS (zsh) los `curl.exe` de esta sección se escriben `curl`, y `-o NUL` se escribe `-o /dev/null`. Los
+`docker exec` son iguales en las tres terminales.
 
 **1. La API funciona y 4. consultas repetidas.** Iniciar el servicio con `uvicorn app.main:app --port 8001`
 y, en otra terminal, consultar dos veces (igual en PowerShell y en CMD):
@@ -382,6 +409,13 @@ y, en otra terminal, consultar dos veces (igual en PowerShell y en CMD):
 ```
 curl.exe -s -o NUL -D - http://localhost:8001/airports
 curl.exe -s -o NUL -D - http://localhost:8001/airports
+```
+
+macOS (zsh):
+
+```bash
+curl -s -o /dev/null -D - http://localhost:8001/airports
+curl -s -o /dev/null -D - http://localhost:8001/airports
 ```
 
 La primera respuesta trae `x-cache: MISS` y tarda lo que tarda API Colombia; la segunda trae
@@ -413,6 +447,13 @@ set API_COLOMBIA_TIMEOUT_SECONDS=0.001
 uvicorn app.main:app --port 8001
 ```
 
+macOS (zsh):
+
+```bash
+export API_COLOMBIA_TIMEOUT_SECONDS=0.001
+uvicorn app.main:app --port 8001
+```
+
 `curl.exe -i http://localhost:8001/airports/1` responde **504** `AIRPORT_PROVIDER_TIMEOUT`. En la
 consola del servicio se ven los 3 intentos y las esperas del backoff:
 
@@ -423,7 +464,7 @@ WARNING [app.infrastructure.resilience.retry] Se agotaron los 3 intentos: API Co
 ```
 
 Detener el servicio y quitar la variable antes de seguir (`Remove-Item Env:API_COLOMBIA_TIMEOUT_SECONDS`
-en PowerShell o `set API_COLOMBIA_TIMEOUT_SECONDS=` en CMD).
+en PowerShell, `set API_COLOMBIA_TIMEOUT_SECONDS=` en CMD o `unset API_COLOMBIA_TIMEOUT_SECONDS` en zsh).
 
 **3. La API no responde y circuit breaker.** Simular que API Colombia está caída apuntando a un puerto
 cerrado:
@@ -442,18 +483,32 @@ set API_COLOMBIA_BASE_URL=http://127.0.0.1:9
 uvicorn app.main:app --port 8001
 ```
 
+macOS (zsh):
+
+```bash
+export API_COLOMBIA_BASE_URL=http://127.0.0.1:9
+uvicorn app.main:app --port 8001
+```
+
 Ejecutar 4 veces (igual en PowerShell y en CMD):
 
 ```
 curl.exe -s -o NUL -w "%{http_code} %{time_total}s\n" http://localhost:8001/airports/2
 ```
 
+macOS (zsh):
+
+```bash
+curl -s -o /dev/null -w "%{http_code} %{time_total}s\n" http://localhost:8001/airports/2
+```
+
 Las tres primeras responden **503** después de los reintentos (en Windows cada conexión rechazada
-tarda unos 2 s, así que tardan unos 7 s). En la consola aparece
+tarda unos 2 s, así que tardan unos 7 s; en macOS el rechazo es inmediato y solo se notan las esperas del
+backoff, unos 1,5 s). En la consola aparece
 `Circuit breaker 'api-colombia': CLOSED -> OPEN` y la cuarta responde **503 al instante**, sin llamar
 a API Colombia. Pasados 30 s el circuito pasa a `HALF_OPEN` y deja pasar una llamada de prueba.
 
-**Fallback.** Con el servicio normal (sin variables), consultar `curl.exe -i http://localhost:8001/airports/1`
+**Fallback.** Con el servicio normal (sin variables; en zsh, `unset API_COLOMBIA_BASE_URL`), consultar `curl.exe -i http://localhost:8001/airports/1`
 para que quede guardado. Borrar solo la copia fresca, como si hubieran pasado los 10 minutos:
 
 ```

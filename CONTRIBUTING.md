@@ -28,7 +28,7 @@ Cada integrante usa el correo de **su cuenta de GitHub** para este repositorio, 
 para este repositorio** (sin `--global`), para que los commits queden asociados a su cuenta sin
 cambiar la configuración de otros proyectos.
 
-El comando es igual en PowerShell y en CMD, desde la raíz del proyecto:
+El comando es igual en PowerShell, CMD y la Terminal de macOS (zsh), desde la raíz del proyecto:
 
 ```
 git config user.name "Nombre Apellido"

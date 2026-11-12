@@ -61,7 +61,7 @@ Qué pasa si el trigger o lo que necesita no está:
 
 ## Instalación (una vez)
 
-Desde `serverless\event-trigger`.
+Desde `serverless\event-trigger` (`serverless/event-trigger` en macOS).
 
 **PowerShell:**
 
@@ -83,9 +83,19 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
+**macOS (zsh):**
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+cp .env.example .env
+```
+
 ## Ejecución
 
-Con el entorno virtual activado (igual en PowerShell y CMD):
+Con el entorno virtual activado (igual en PowerShell, CMD y zsh):
 
 ```
 python -m app.main
@@ -108,7 +118,7 @@ Un mensaje **válido** puede terminar en la DLQ por un problema de despliegue. P
 sin aplicar o una imagen de la función con un error que el RIE informa con un `errorType` distinto de `TransientError`.
 Una vez corregido el problema, el comando `app.replay_dlq` devuelve esos mensajes a la cola principal.
 
-**Procedimiento** (con el entorno virtual activado, igual en PowerShell y CMD):
+**Procedimiento** (con el entorno virtual activado, igual en PowerShell, CMD y zsh):
 
 1. **Ver qué hay y por qué.** En el panel de RabbitMQ (http://localhost:15672, usuario y clave `guest`), abrir
    *Queues and Streams* → `notification.itinerary-created.dlq` → **Get messages**, con *Ack mode: Nack message
@@ -177,7 +187,7 @@ Si la cola principal no aparece, el trigger nunca la declaró: los eventos esper
 
 ## Pruebas
 
-Con el entorno virtual activado (igual en PowerShell y CMD):
+Con el entorno virtual activado (igual en PowerShell, CMD y zsh):
 
 ```
 pytest -v
