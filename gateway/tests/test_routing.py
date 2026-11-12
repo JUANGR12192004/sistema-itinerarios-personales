@@ -69,7 +69,7 @@ def test_method_and_body_reach_the_service(client: httpx.Client, method: str, pa
     assert echo["headers"]["content-type"] == "application/json"
 
 
-@pytest.mark.parametrize("path", ["/api/foo", "/api/airportsX", "/api/itineraries-x", "/api", "/otra"])
+@pytest.mark.parametrize("path", ["/api/foo", "/api/airportsX", "/api/itineraries-x", "/api", "/otra", "/api/foo.html"])
 def test_unknown_routes_get_route_not_found(
     client: httpx.Client,
     assert_gateway_error: Callable[[httpx.Response, int, str], dict],

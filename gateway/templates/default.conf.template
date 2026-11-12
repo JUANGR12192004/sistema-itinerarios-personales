@@ -171,6 +171,9 @@ server {
         }
 
         # Otra ruta bajo /api/ (por ejemplo /api/foo o /api/airportsX): no existe.
+        # types {} vacío anula mime.types para que default_type siempre gane,
+        # incluso si la URI tiene extensión (p. ej. /api/foo.html).
+        types { }
         default_type "application/json; charset=utf-8";
         return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
     }
@@ -186,6 +189,7 @@ server {
     # --- Respuestas de error del gateway (formato de la sección 10.2) ---------
 
     location @payload_too_large {
+        types { }
         default_type "application/json; charset=utf-8";
         return 413 '{"error":{"code":"PAYLOAD_TOO_LARGE","message":"El cuerpo de la solicitud supera el tamaño máximo permitido (1 MB)","details":null},"correlation_id":"$correlation_id"}';
     }
@@ -194,6 +198,7 @@ server {
     # Una location con su propio add_header deja de heredar los del server, por
     # eso se repite aquí X-Correlation-ID.
     location @rate_limited {
+        types { }
         default_type "application/json; charset=utf-8";
         add_header Retry-After 1 always;
         add_header X-Correlation-ID $correlation_id always;
@@ -201,16 +206,19 @@ server {
     }
 
     location @upstream_unavailable {
+        types { }
         default_type "application/json; charset=utf-8";
         return 502 '{"error":{"code":"UPSTREAM_UNAVAILABLE","message":"El servicio interno no está disponible","details":{"service":"$target_service"}},"correlation_id":"$correlation_id"}';
     }
 
     location @upstream_timeout {
+        types { }
         default_type "application/json; charset=utf-8";
         return 504 '{"error":{"code":"UPSTREAM_TIMEOUT","message":"El servicio interno no respondió a tiempo","details":{"service":"$target_service"}},"correlation_id":"$correlation_id"}';
     }
 
     location @route_not_found {
+        types { }
         default_type "application/json; charset=utf-8";
         return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
     }
