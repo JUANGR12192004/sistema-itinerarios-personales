@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 import httpx
+import pytest
 
 
 def test_root_serves_html(client: httpx.Client) -> None:
@@ -27,11 +28,15 @@ def test_js_served_with_correct_content_type(client: httpx.Client) -> None:
     assert "javascript" in response.headers["content-type"]
 
 
+@pytest.mark.parametrize("path", ["/no-existe.html", "/no-existe.css", "/no-existe.js"])
 def test_nonexistent_file_returns_route_not_found_json(
     client: httpx.Client,
     assert_gateway_error: Callable[[httpx.Response, int, str], dict],
+    path: str,
 ) -> None:
-    response = client.get("/no-existe.html")
+    # La URI tiene extensión reconocida por mime.types; la respuesta debe seguir
+    # siendo application/json porque los location de error usan types {} vacío.
+    response = client.get(path)
 
     body = assert_gateway_error(response, 404, "ROUTE_NOT_FOUND")
     assert body["error"]["details"] is None

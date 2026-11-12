@@ -1006,7 +1006,13 @@ pytest -v
     aeropuertos ordenados por ciudad; tabla con edición inline y eliminación con `confirm()`; `datetime-local` → ISO 8601
     con offset del navegador (ADR-017); todo texto de datos con `textContent`; errores con `correlation_id` y botón
     "Copiar" en 5xx; recarga de datos frescos al cambiar de pestaña.
-  - Pruebas del gateway: **43 pasan** con el sistema completo; **40 pasan, 3 omitidas** sin el gateway real.
+  - Pruebas del gateway (Fase 8 fusionada): **48 recogidas** (no 43 como constaba en la Fase 7; las 5 de
+    `test_static.py` se agregaron en la 8A). El PR #19 se fusionó con el check "API Gateway" fallando:
+    `test_nonexistent_file_returns_route_not_found_json` devolvía `text/html` en lugar de `application/json`
+    porque Nginx resuelve el `Content-Type` por la extensión de la URI (`.html` → mime.types) antes de aplicar
+    `default_type`. Corregido en la rama `fix/gateway-404-json` con `types { }` vacío en las seis ubicaciones
+    que devuelven JSON de error (ver sección 9.1 ADR-033 y el PR de corrección). Total tras el fix:
+    **48 pasan, 3 omitidas** (smoke, sin el gateway real).
 - **Siguiente:** la Fase 9 (Observabilidad): logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger,
   Prometheus y Grafana. Demostración del recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento →
   RabbitMQ → Función.
