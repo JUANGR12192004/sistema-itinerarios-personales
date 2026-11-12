@@ -5,6 +5,7 @@
  */
 
 import { loadAirports } from './airports.js';
+import { loadItineraries } from './itineraries.js';
 
 const TABS = {
   airports: {
@@ -35,7 +36,13 @@ document.addEventListener('DOMContentLoaded', () => {
     tab.btn = document.getElementById(tab.btnId);
     tab.section = document.getElementById(tab.sectionId);
     if (!tab.btn || !tab.section) continue;
-    tab.btn.addEventListener('click', () => switchTab(name));
+
+    tab.btn.addEventListener('click', () => {
+      switchTab(name);
+      // Recargar la sección al activarla: así siempre muestra datos frescos
+      if (name === 'airports') loadAirports(tab.section);
+      if (name === 'itineraries') loadItineraries(tab.section);
+    });
   }
 
   // La pestaña de aeropuertos está activa por defecto: cargar el mapa al arrancar
