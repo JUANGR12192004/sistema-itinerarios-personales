@@ -4,6 +4,8 @@
  * bajo demanda (8B: aeropuertos con mapa; 8C: CRUD de itinerarios).
  */
 
+import { loadAirports } from './airports.js';
+
 const TABS = {
   airports: {
     btnId: 'tab-airports',
@@ -35,4 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!tab.btn || !tab.section) continue;
     tab.btn.addEventListener('click', () => switchTab(name));
   }
+
+  // La pestaña de aeropuertos está activa por defecto: cargar el mapa al arrancar
+  loadAirports(TABS.airports.section);
 });
