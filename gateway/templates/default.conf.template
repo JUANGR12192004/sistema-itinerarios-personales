@@ -134,14 +134,10 @@ server {
     error_page 429 = @rate_limited;
     error_page 502 = @upstream_unavailable;
     error_page 504 = @upstream_timeout;
+    # Cuando try_files no encuentra el archivo, devuelve 404 en el formato JSON del proyecto.
+    error_page 404 = @route_not_found;
 
     # --- Rutas ------------------------------------------------------------------
-
-    # Reservada para el frontend (Fase 8).
-    location = / {
-        default_type "text/plain; charset=utf-8";
-        return 200 "API Gateway del Sistema de Itinerarios Personales. El frontend llega en la Fase 8.\n";
-    }
 
     # Salud del propio gateway (no consulta a los servicios).
     location = /health {
@@ -179,10 +175,12 @@ server {
         return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
     }
 
-    # Cualquier otra ruta no existe en el gateway.
+    # Sirve los archivos estáticos del frontend (Fase 8, ADR-033).
+    # try_files prueba: 1) el archivo exacto, 2) el directorio con index, 3) devuelve 404.
+    # El =404 activa error_page 404 @route_not_found para responder en JSON.
     location / {
-        default_type "application/json; charset=utf-8";
-        return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ =404;
     }
 
     # --- Respuestas de error del gateway (formato de la sección 10.2) ---------
@@ -210,5 +208,10 @@ server {
     location @upstream_timeout {
         default_type "application/json; charset=utf-8";
         return 504 '{"error":{"code":"UPSTREAM_TIMEOUT","message":"El servicio interno no respondió a tiempo","details":{"service":"$target_service"}},"correlation_id":"$correlation_id"}';
+    }
+
+    location @route_not_found {
+        default_type "application/json; charset=utf-8";
+        return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
     }
 }

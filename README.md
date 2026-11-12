@@ -282,7 +282,7 @@ Igual en PowerShell, CMD y zsh, desde la raíz del repositorio. La primera vez (
 `gateway/templates/`) se construye la imagen y se crea el contenedor:
 
 ```
-docker build -t api-gateway gateway
+docker build -t api-gateway -f gateway/Dockerfile .
 docker run -d --name api-gateway -p 8000:8000 api-gateway
 ```
 

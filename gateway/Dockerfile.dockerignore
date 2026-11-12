@@ -1,0 +1,9 @@
+# Solo deja pasar lo necesario para la imagen del gateway.
+# Se aplica al construir con: docker build -f gateway/Dockerfile .
+# (BuildKit ≥ v23: .dockerignore junto al Dockerfile, no en el contexto raíz)
+*
+!gateway/
+!gateway/templates/
+!gateway/templates/**
+!frontend/
+!frontend/**

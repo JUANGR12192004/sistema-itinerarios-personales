@@ -20,3 +20,7 @@ Dockerfile   text eol=lf
 *.gif        binary
 *.ico        binary
 *.pdf        binary
+
+# Archivos JavaScript minificados: se tratan como binarios para evitar diffs ilegibles
+# y conversiones de saltos de línea que corromperían el bundle.
+*.min.js     binary

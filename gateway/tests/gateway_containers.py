@@ -14,6 +14,7 @@ from uuid import uuid4
 import httpx
 
 GATEWAY_DIR = Path(__file__).resolve().parent.parent
+REPO_DIR = GATEWAY_DIR.parent
 TEST_IMAGE = "api-gateway:test"
 CONTAINER_PREFIX = "api-gateway-test-"
 
@@ -58,8 +59,13 @@ def ensure_docker_available() -> None:
 
 
 def build_test_image() -> str:
-    """Construye la imagen desde gateway/ (el mismo Dockerfile y la misma plantilla de siempre)."""
-    result = docker("build", "-q", "-t", TEST_IMAGE, str(GATEWAY_DIR), timeout=BUILD_TIMEOUT_SECONDS)
+    """Construye la imagen desde la raíz del repositorio (incluye gateway/templates/ y frontend/)."""
+    result = docker(
+        "build", "-q", "-t", TEST_IMAGE,
+        "-f", str(GATEWAY_DIR / "Dockerfile"),
+        str(REPO_DIR),
+        timeout=BUILD_TIMEOUT_SECONDS,
+    )
     if result.returncode != 0:
         raise RuntimeError(f"No se pudo construir la imagen del gateway:\n{result.stderr}")
     return TEST_IMAGE

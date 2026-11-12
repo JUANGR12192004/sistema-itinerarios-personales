@@ -15,7 +15,10 @@ ENV AIRPORT_SERVICE_UPSTREAM=host.docker.internal:8001 \
     GATEWAY_RATE_BURST=20 \
     NGINX_ENVSUBST_FILTER="_UPSTREAM\$|^GATEWAY_"
 
-# Al arrancar, la imagen convierte templates/*.template en /etc/nginx/conf.d/*.conf.
-COPY templates/ /etc/nginx/templates/
+# Desde la Fase 8 el contexto de build es la raíz del repositorio:
+#   docker build -t api-gateway -f gateway/Dockerfile .
+# El .dockerignore asociado es gateway/Dockerfile.dockerignore.
+COPY gateway/templates/ /etc/nginx/templates/
+COPY frontend/ /usr/share/nginx/html/
 
 EXPOSE 8000
