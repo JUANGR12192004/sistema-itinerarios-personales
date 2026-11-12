@@ -137,7 +137,7 @@ En la Fase 10, Redis se levantará con Docker Compose junto con el resto del sis
 
 Airport Service es el paso **4** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
 contenedores → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
-Event Trigger. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
+Event Trigger → API Gateway. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
 crear itinerarios.
 
 | Situación | Consecuencia |

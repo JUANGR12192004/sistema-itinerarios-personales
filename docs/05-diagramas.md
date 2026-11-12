@@ -6,10 +6,10 @@
 ```mermaid
 flowchart TB
     U[Usuario] --> FE[Frontend]
-    FE --> GW[API Gateway / BFF]
+    FE --> GW["API Gateway (Nginx) :8000"]
 
-    GW --> AS[Airport Service]
-    GW --> IS[Itinerary Service]
+    GW -->|/api/airports| AS[Airport Service]
+    GW -->|/api/itineraries| IS[Itinerary Service]
 
     IS -->|HTTP: validar aeropuertos| AS
     AS --> AD[API Colombia Adapter]
@@ -33,7 +33,7 @@ flowchart TB
     FE --> MAP[Plotly JS]
 ```
 
-El diagrama representa la arquitectura objetivo. Los componentes se incorporan progresivamente: el frontend y el gateway llegan en las Fases 7 y 8.
+El diagrama representa la arquitectura objetivo. Los componentes se incorporan progresivamente: el gateway llegó en la Fase 7 (Nginx, ADR-009) y el frontend llega en la Fase 8. La llamada Itinerary → Airport es interna y no pasa por el gateway.
 
 El sistema de notificaciones está formado por el Event Trigger, la función y su base de datos `notification_db` (ADR-029). No hay un microservicio de notificaciones adicional.
 
@@ -41,6 +41,15 @@ El sistema de notificaciones está formado por el Event Trigger, la función y s
 
 ```mermaid
 flowchart LR
+    CLI["Cliente / Frontend"] -->|"HTTP :8000"| GWN
+
+    subgraph Gateway["API Gateway (Nginx, sin lógica de negocio)"]
+        GWN["rate limiting · X-Correlation-ID<br/>reenvío de Authorization · timeouts"]
+    end
+
+    GWN -->|"/api/airports/... → /airports/..."| AC
+    GWN -->|"/api/itineraries/... → /itineraries/..."| IC
+
     subgraph Airport["Airport Service"]
         AC[REST Controller]
         APP[Application Layer]
@@ -131,7 +140,7 @@ flowchart LR
 
 Las flechas punteadas representan una relación de implementación conceptual de los puertos, no una llamada en tiempo de ejecución.
 
-Itinerary Service no accede a las capas internas de Airport Service: el adaptador `HttpAirportCatalogAdapter` llama a su API REST. Los casos de uso tampoco hablan directamente con RabbitMQ: usan el puerto `EventPublisher`, implementado en la Fase 4 por un publicador de RabbitMQ y en la Fase 5 por un adaptador Outbox, que registra el evento antes del commit, en la misma transacción del itinerario (ADR-013, ADR-026).
+El API Gateway (Fase 7) solo enruta hacia los controladores REST de cada servicio; no conoce sus capas internas ni tiene lógica de negocio (ADR-009). Itinerary Service no accede a las capas internas de Airport Service: el adaptador `HttpAirportCatalogAdapter` llama a su API REST. Los casos de uso tampoco hablan directamente con RabbitMQ: usan el puerto `EventPublisher`, implementado en la Fase 4 por un publicador de RabbitMQ y en la Fase 5 por un adaptador Outbox, que registra el evento antes del commit, en la misma transacción del itinerario (ADR-013, ADR-026).
 
 El mismo puerto `EventPublisher` tiene dos adaptadores, uno en cada proceso: en la API, `OutboxEventPublisher` guarda el evento en `outbox_events`; en el Outbox Relay, `RabbitMQEventPublisher` (el de la Fase 4, sin cambios) lo publica en RabbitMQ. El relay lee y marca los pendientes con su propio puerto, `OutboxRepository` (ADR-025).
 
@@ -154,8 +163,9 @@ sequenceDiagram
     participant NH as PostgreSQL notificaciones
 
     Usuario->>FE: Crear itinerario
-    FE->>GW: POST /itineraries
-    GW->>IS: Reenviar solicitud
+    FE->>GW: POST /api/itineraries
+    Note over GW: Rate limiting (429 si se supera)<br/>X-Correlation-ID: se reenvía o se genera
+    GW->>IS: POST /itineraries (+ X-Correlation-ID, Authorization)
 
     IS->>AS: Validar aeropuerto de salida
     IS->>AS: Validar aeropuerto de llegada
@@ -239,6 +249,29 @@ sequenceDiagram
     end
 ```
 
+## 3.2. Recorrido de una solicitud por el API Gateway (Fase 7)
+
+```mermaid
+flowchart TD
+    REQ[Solicitud al puerto 8000] --> CID["X-Correlation-ID: se reenvía si es válido<br/>o se genera uno con forma de UUID"]
+    CID --> PATH{¿Ruta?}
+    PATH -->|/health| HEALTH["200 del propio gateway<br/>(no consulta a los servicios)"]
+    PATH -->|/| ROOT["Reservada para el frontend (Fase 8)"]
+    PATH -->|otra ruta| NF404["404 ROUTE_NOT_FOUND"]
+    PATH -->|"/api/airports... o /api/itineraries..."| SIZE{"¿Cuerpo de más de 1 MB?"}
+    SIZE -->|sí| R413["413 PAYLOAD_TOO_LARGE"]
+    SIZE -->|no| RL{"¿Superó 10 r/s<br/>+ ráfaga de 20?"}
+    RL -->|sí| R429["429 RATE_LIMIT_EXCEEDED<br/>Retry-After: 1"]
+    RL -->|no| PROXY["Reenviar sin /api, con X-Correlation-ID,<br/>Authorization y X-Forwarded-*"]
+    PROXY --> CONN{"¿El servicio acepta<br/>la conexión?"}
+    CONN -->|no| R502["502 UPSTREAM_UNAVAILABLE"]
+    CONN -->|sí| TIME{"¿Responde dentro<br/>del timeout (15 s)?"}
+    TIME -->|no| R504["504 UPSTREAM_TIMEOUT"]
+    TIME -->|sí| PASS["Respuesta del servicio SIN cambios<br/>(incluidos sus errores 404, 422, 503...)"]
+```
+
+Los errores del gateway (404, 413, 429, 502 y 504) usan el formato único de errores y llevan el mismo `correlation_id` en el cuerpo y en el header. El gateway no reintenta: los reintentos están en los servicios (Fase 2) y reintentar un `POST` podría duplicar un itinerario (ADR-009).
+
 ## 4. Flujo de resiliencia de Airport Service
 
 ```mermaid
@@ -266,7 +299,7 @@ Orden aceptado en la Fase 2 (ADR-014): caché → circuit breaker → retry con 
 flowchart TB
     subgraph Local["Entorno local con Docker Compose"]
         FRONT[Frontend]
-        GATE[API Gateway]
+        GATE["API Gateway (Nginx)<br/>api-gateway :8000"]
         AIR[Airport Service]
         ITIN[Itinerary Service]
         PG[("PostgreSQL itinerarios<br/>itinerary-postgres :5433")]
@@ -292,7 +325,7 @@ flowchart TB
     end
 ```
 
-El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual; el orden de arranque está en el `README.md` raíz. La integración de observabilidad se desarrollará en la Fase 9.
+El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual. El gateway (contenedor `api-gateway`) llega a los servicios del equipo por `host.docker.internal`; en la Fase 10 usará los nombres de los contenedores; el orden de arranque está en el `README.md` raíz. La integración de observabilidad se desarrollará en la Fase 9.
 
 ## 6. Consideraciones
 

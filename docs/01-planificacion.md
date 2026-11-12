@@ -117,7 +117,7 @@ Los objetivos cuantitativos de rendimiento, disponibilidad y latencia se definir
 | 4 | RabbitMQ, evento de integración y contrato AsyncAPI |
 | 5 | Patrón Transactional Outbox |
 | 6 | SendNotificationFunction y registro de notificaciones |
-| 7 | API Gateway / BFF |
+| 7 | API Gateway (Nginx, ADR-009) |
 | 8 | Frontend y mapa interactivo |
 | 9 | Logs estructurados, trazas, métricas y dashboards |
 | 10 | Orquestación con Docker Compose |

@@ -28,6 +28,24 @@ Si alguno no existe, el itinerario no deberá persistirse como válido.
 
 Si Airport Service no está disponible, Itinerary Service deberá gestionar el fallo sin confundirlo con una respuesta que indique que el aeropuerto no existe.
 
+### 2.3. Entrada por el API Gateway (Fase 7, ADR-009)
+
+Las solicitudes que llegan **desde afuera** (el frontend, `curl`) entran por el API Gateway en el puerto 8000. Es el tráfico *norte-sur*, el que entra al sistema. El gateway es Nginx: enruta `/api/airports/...` a Airport Service y `/api/itineraries/...` a Itinerary Service, quitando el prefijo `/api`, y no tiene lógica de negocio.
+
+La llamada **entre servicios** (Itinerary → Airport, sección 2.2) es tráfico *este-oeste*, interno, y **no pasa por el gateway**. Pasar por él solo agregaría un salto y un punto de fallo, y además compartiría el límite de solicitudes de los clientes.
+
+Qué hace el gateway con cada solicitud:
+
+| Paso | Qué hace |
+|---|---|
+| Rate limiting | Por IP de origen, 10 solicitudes/s con ráfaga de 20, solo en `/api/`. Si se supera: 429 `RATE_LIMIT_EXCEEDED`, sin llamar al servicio |
+| `X-Correlation-ID` | Lo reenvía si es válido o genera uno. Itinerary Service lo copia en el evento (`correlation_id`) y la función lo guarda en `notification_history`: la trazabilidad empieza en el gateway |
+| `Authorization` | Lo reenvía sin validarlo (preparación de JWT) |
+| Errores del gateway | 502 `UPSTREAM_UNAVAILABLE` (servicio apagado), 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE`, en el formato único de errores |
+| Errores de los servicios | Pasan sin cambios (por ejemplo 404 `AIRPORT_NOT_FOUND` o 503 `AIRPORT_SERVICE_UNAVAILABLE`) |
+
+El recorrido está en el diagrama de la sección 3.2 de `05-diagramas.md`.
+
 ## 3. Comunicación basada en eventos
 
 ### 3.1. Evento de integración

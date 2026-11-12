@@ -30,7 +30,7 @@ El sistema estará compuesto por:
 2. **Itinerary Service:** creación, consulta, actualización y eliminación de itinerarios, con su Outbox Relay.
 3. **Sistema de notificaciones:** Event Trigger + SendNotificationFunction + su base de datos.
 4. **SendNotificationFunction:** función serverless que simula la notificación y guarda el historial.
-5. **API Gateway / BFF:** punto de entrada para las solicitudes del frontend.
+5. **API Gateway (Nginx):** punto único de entrada en el puerto 8000; enruta, limita solicitudes y propaga headers, sin lógica de negocio.
 6. **Frontend:** interfaz de gestión de itinerarios y visualización de aeropuertos.
 
 La implementación se desarrolla progresivamente, siguiendo las fases definidas en la documentación del proyecto.
@@ -43,6 +43,7 @@ La implementación se desarrolla progresivamente, siguiendo las fases definidas 
 | Persistencia | PostgreSQL (una base por servicio) |
 | ORM y migraciones | SQLAlchemy y Alembic |
 | Comunicación síncrona | HTTP / REST |
+| API Gateway | Nginx (imagen oficial `nginx:1.30.6-alpine`, ADR-009) |
 | Mensajería | RabbitMQ (pika) |
 | Caché | Redis |
 | Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
@@ -63,8 +64,10 @@ Se aplican arquitectura hexagonal, el patrón Adapter y conceptos de DDD para ma
 
 ```mermaid
 flowchart LR
-    C[Cliente] -->|POST /itineraries| IS[Itinerary Service :8002]
-    IS -->|"HTTP: validar aeropuertos"| AS[Airport Service :8001]
+    C[Cliente] -->|POST /api/itineraries| GW["API Gateway (Nginx) :8000"]
+    GW -->|/api/airports| AS[Airport Service :8001]
+    GW -->|POST /itineraries| IS[Itinerary Service :8002]
+    IS -->|"HTTP: validar aeropuertos"| AS
     AS --> EXT[API Colombia]
     IS -->|"itinerario + evento,<br/>misma transacción"| DBI[(itinerary_db :5433)]
     DBI --> R[Outbox Relay]
@@ -89,6 +92,7 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 
 | Componente | Documentación |
 |---|---|
+| API Gateway | [`gateway/README.md`](gateway/README.md) |
 | Airport Service | [`services/airport-service/README.md`](services/airport-service/README.md) |
 | Itinerary Service y Outbox Relay | [`services/itinerary-service/README.md`](services/itinerary-service/README.md) |
 | SendNotificationFunction | [`serverless/send-notification-function/README.md`](serverless/send-notification-function/README.md) |
@@ -105,13 +109,28 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 4 | Eventos y RabbitMQ | Completada |
 | 5 | Transactional Outbox | Completada |
 | 6 | Serverless | Completada |
-| 7 a 12 | Gateway, frontend, observabilidad, Docker Compose, pruebas y documentación | Pendientes |
+| 7 | API Gateway | Completa en la rama `fase-7-api-gateway`, pendiente de merge |
+| 8 a 12 | Frontend, observabilidad, Docker Compose, pruebas y documentación | Pendientes |
 
-**Última fase completada:** Fase 6 — Serverless (PR #11, etiqueta `fase-6`). Las pruebas de integración de Itinerary
-Service ya no tocan la cola real ni su DLQ (rama `fix/aislar-pruebas-itinerary`). **Siguiente:** Fase 7 — API Gateway.
+**Última fase fusionada:** Fase 6 — Serverless (PR #11, etiqueta `fase-6`). La Fase 7 — API Gateway está terminada
+en la rama `fase-7-api-gateway`, pendiente de su pull request. **Siguiente:** Fase 8 — Frontend.
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+
+### Fase 7 — API Gateway
+
+Punto único de entrada en `http://localhost:8000`: **Nginx** en Docker, sin lógica de negocio (ADR-009). Toda la
+documentación está en [`gateway/README.md`](gateway/README.md).
+
+| Pieza | Qué hace |
+|---|---|
+| Enrutamiento | `/api/airports/...` → Airport Service y `/api/itineraries/...` → Itinerary Service, sin el prefijo `/api`. La llamada Itinerary → Airport es interna y no pasa por el gateway |
+| Rate limiting | 10 solicitudes por segundo por IP, con ráfaga de 20, solo en `/api/`. Al superarlo: 429 `RATE_LIMIT_EXCEEDED` |
+| `X-Correlation-ID` | Se reenvía si es válido; si no, el gateway genera uno. Viaja al evento y al historial de notificaciones |
+| `Authorization` | Se reenvía sin validarlo (preparación de JWT) |
+| Errores propios | 502 `UPSTREAM_UNAVAILABLE`, 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE` en el formato único. Los errores de los servicios pasan sin cambios |
+| Pruebas | Contenedores propios del gateway contra servidores eco: no tocan datos reales ni el límite del gateway de la demostración |
 
 ### Fase 6 — Serverless
 
@@ -258,7 +277,23 @@ zsh). Los comandos son iguales en las tres terminales (en macOS, las carpetas se
 | 6. Outbox Relay | `services\itinerary-service` | `python -m app.outbox_relay` | `Outbox Relay iniciado` |
 | 7. Event Trigger | `serverless\event-trigger` | `python -m app.main` | `escuchando la cola notification.itinerary-created` |
 
-Para detener todo: Ctrl+C en cada terminal y `docker stop send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis`.
+### 8. API Gateway
+
+Igual en PowerShell, CMD y zsh, desde la raíz del repositorio. La primera vez (y después de cada cambio en
+`gateway/templates/`) se construye la imagen y se crea el contenedor:
+
+```
+docker build -t api-gateway gateway
+docker run -d --name api-gateway -p 8000:8000 api-gateway
+```
+
+Las veces siguientes: `docker start api-gateway`. Está listo cuando http://localhost:8000/health responde.
+
+El gateway puede arrancar antes que los servicios: mientras un servicio no esté corriendo, sus rutas responden 502
+`UPSTREAM_UNAVAILABLE`, y en cuanto arranca, funcionan sin reiniciar el gateway. Llega a los servicios del equipo por
+`host.docker.internal` (Docker Desktop lo crea en macOS y Windows).
+
+Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis`.
 
 ### Qué pasa si se omite un paso
 
@@ -276,11 +311,14 @@ Para detener todo: Ctrl+C en cada terminal y `docker stop send-notification-func
 | Outbox Relay | Los itinerarios se crean (201), pero sus eventos **se acumulan pendientes en la outbox** | Arrancarlo; publica los pendientes en orden |
 | Event Trigger (nunca arrancó) | La cola no existe: el relay registra `UnroutableError` y el evento **espera en la outbox** | Arrancarlo: declara la cola y el relay publica en el siguiente ciclo |
 | Event Trigger (apagado después) | Los mensajes se acumulan en la cola (*Ready* en el panel) | Arrancarlo; los procesa en orden |
+| API Gateway | `http://localhost:8000` rechaza la conexión. Los servicios siguen respondiendo directamente en 8001 y 8002 | `docker start api-gateway` (o los comandos del paso 8 la primera vez) |
+| Airport o Itinerary Service, usando el gateway | El gateway responde 502 `UPSTREAM_UNAVAILABLE` con `details.service` | Arrancar el servicio; no hace falta reiniciar el gateway |
 
 ## Demostración de punta a punta
 
-Recorrido completo: crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial. Requisitos: los
-siete pasos del orden de arranque. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
+Recorrido completo: **gateway** → crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial.
+Requisitos: los ocho pasos del orden de arranque. Las solicitudes entran por el gateway
+(`http://localhost:8000/api/itineraries`), igual que lo hará el frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
 PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
 `docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
 ruta del archivo con `/`). El cuerpo del itinerario está en `demo\create-itinerary.json`; si la fecha `2026-12-15` ya
@@ -289,23 +327,24 @@ pasó, cámbiala por una futura.
 ### 1. Caso normal
 
 ```
-curl.exe -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo\create-itinerary.json"
+curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo\create-itinerary.json"
 ```
 
 **macOS (zsh):**
 
 ```bash
-curl -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo/create-itinerary.json"
+curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo/create-itinerary.json"
 ```
 
 Resultado esperado:
 
-- La API responde **201** con el itinerario.
+- El gateway devuelve el **201** de Itinerary Service con el itinerario, y el header `X-Correlation-ID: demo-e2e`.
+- `docker logs api-gateway` muestra la solicitud con `upstream_status=201 correlation_id=demo-e2e`.
 - Unos segundos después, el log del relay muestra `1 publicados` y el del trigger,
   `Evento procesado (PROCESSED): event_id=<id>. ACK`.
 - `docker logs send-notification-function` muestra `Correo simulado enviado a ana@example.com: Hola Ana Pérez...`.
 
-El registro en el historial (con el mismo `correlation_id`):
+El registro en el historial, con el mismo `correlation_id` que llegó al gateway (la trazabilidad empieza en el gateway):
 
 ```
 docker exec notification-postgres psql -U notification -d notification_db -c "SELECT event_id, status, recipient, correlation_id, processed_at FROM notification_history ORDER BY processed_at DESC LIMIT 3;"
@@ -316,6 +355,9 @@ Y en la outbox, el evento ya publicado:
 ```
 docker exec itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id, published_at, attempts FROM outbox_events ORDER BY occurred_at DESC LIMIT 1;"
 ```
+
+**Sin `X-Correlation-ID`:** repetir el `POST` sin ese header. El gateway genera uno con forma de UUID, lo devuelve en
+el header `X-Correlation-ID` de la respuesta, y ese mismo valor aparece en el log del relay y en `notification_history`.
 
 ### 2. Evento duplicado
 
@@ -339,13 +381,13 @@ renombrando la tabla, sin borrar su contenido:
 
 ```
 docker exec notification-postgres psql -U notification -d notification_db -c "ALTER TABLE notification_history RENAME TO notification_history_respaldo;"
-curl.exe -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo\create-itinerary.json"
+curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo\create-itinerary.json"
 ```
 
 **macOS (zsh):** el mismo `docker exec` y después:
 
 ```bash
-curl -s -X POST http://localhost:8002/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo/create-itinerary.json"
+curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo/create-itinerary.json"
 ```
 
 Resultado esperado: el trigger hace 3 intentos con `errorType=ProgrammingError: ... relation "notification_history"

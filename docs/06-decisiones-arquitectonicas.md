@@ -345,6 +345,18 @@ Todos los servicios responden los errores con el mismo formato:
 
 Códigos HTTP: 404 recurso no encontrado, 422 validación, 502 respuesta inesperada del proveedor externo, 503 dependencia no disponible, 504 timeout (Fase 2). Los valores de `code` van en inglés y en MAYÚSCULAS_CON_GUIONES_BAJOS.
 
+*Actualización (Fase 7, ADR-009):* el API Gateway usa el mismo formato para **sus propios** errores. Los errores de los servicios pasan por él sin cambios.
+
+| Situación en el gateway | Código | `code` |
+|---|---|---|
+| La ruta no existe | 404 | `ROUTE_NOT_FOUND` (el mismo código que usan los servicios) |
+| El cuerpo supera 1 MB | 413 | `PAYLOAD_TOO_LARGE` |
+| Se superó el límite de solicitudes | 429 | `RATE_LIMIT_EXCEEDED` (con header `Retry-After`) |
+| El servicio no acepta la conexión | 502 | `UPSTREAM_UNAVAILABLE` (`details.service` indica cuál) |
+| El servicio no responde a tiempo | 504 | `UPSTREAM_TIMEOUT` (`details.service` indica cuál) |
+
+El 502 del gateway no se confunde con el 503 de un servicio: 502 significa que el gateway no llega al servicio, y 503 que el servicio responde pero su dependencia no está disponible.
+
 ### Justificación
 
 Un único formato permite que los clientes manejen los errores de forma uniforme, y distinguir 404, 502 y 503 permite saber si el problema es del dato solicitado, del proveedor o de la disponibilidad.
@@ -627,7 +639,7 @@ Las pruebas (pytest y la integración continua de `.github/workflows/tests.yml`)
 | `sonar.python.version` | `3.12` | Aplica las reglas de Python 3.12 (sin ella, SonarCloud asume compatibilidad con varias versiones de 3.x) |
 | `sonar.sources` | `services,serverless` | Código de producción: todo lo que está dentro de `services/` y, desde la Fase 6, de `serverless/` |
 | `sonar.exclusions` | `**/tests/**,**/alembic/versions/**` | Las pruebas y las migraciones generadas por Alembic no cuentan como código de producción |
-| `sonar.tests` | `services,serverless` | Las pruebas se buscan dentro de `services/` y `serverless/` |
+| `sonar.tests` | `services,serverless,gateway` | Las pruebas se buscan dentro de `services/`, `serverless/` y, desde la Fase 7, `gateway/` (el gateway es configuración de Nginx: solo sus pruebas son Python) |
 | `sonar.test.inclusions` | `**/tests/**` | Solo las carpetas `tests/` se tratan como código de pruebas |
 
 ### Qué analiza
