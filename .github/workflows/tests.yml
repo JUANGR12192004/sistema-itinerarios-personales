@@ -1,10 +1,10 @@
 # Integración continua: ejecuta las pruebas de cada servicio en GitHub Actions.
 #
 # Se ejecuta en cada pull request hacia main y en cada push a main.
-# Hay un job por servicio o componente (Airport Service, Itinerary Service, y desde la
-# Fase 6 SendNotificationFunction y el Event Trigger). Para agregar uno en una fase
-# siguiente, copiar el job "airport-service" y cambiar su nombre y la carpeta
-# (en working-directory y en cache-dependency-path).
+# Hay un job por servicio o componente (Airport Service, Itinerary Service, desde la
+# Fase 6 SendNotificationFunction y el Event Trigger, y desde la Fase 7 el API Gateway).
+# Para agregar uno en una fase siguiente, copiar el job "airport-service" y cambiar su
+# nombre y la carpeta (en working-directory y en cache-dependency-path).
 
 name: Pruebas
 
@@ -141,5 +141,42 @@ jobs:
           pip install -r requirements.txt
 
       # Sin RabbitMQ ni la función en el runner: las pruebas de integración quedan SKIPPED
+      - name: Ejecutar pruebas
+        run: pytest -v
+
+  api-gateway:
+    name: API Gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: gateway
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: gateway/requirements-dev.txt
+
+      - name: Instalar dependencias de las pruebas
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Construye la imagen (Dockerfile + plantilla) y valida la configuración con nginx -t.
+      # En Linux host.docker.internal no existe: --add-host lo crea para que Nginx resuelva
+      # la dirección de los servicios (en Docker Desktop no hace falta).
+      - name: Validar la configuración de Nginx
+        run: |
+          docker build -t api-gateway .
+          docker run --rm --add-host=host.docker.internal:host-gateway api-gateway nginx -t
+
+      # El runner tiene Docker: las pruebas aisladas levantan sus propios contenedores del
+      # gateway contra servidores eco. Las pruebas smoke (gateway real) quedan SKIPPED.
       - name: Ejecutar pruebas
         run: pytest -v
