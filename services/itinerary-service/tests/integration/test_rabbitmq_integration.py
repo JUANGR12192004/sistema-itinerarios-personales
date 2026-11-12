@@ -5,21 +5,18 @@ Para ejecutarla en local:
 
     docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
 
-ATENCIÓN: el fixture rabbitmq_channel (tests/integration/conftest.py) vacía (purge) la cola
-notification.itinerary-created antes y después de la prueba.
+Publica en una topología de prueba con nombres propios (fixture isolated_topology de
+tests/integration/conftest.py): no toca la cola real notification.itinerary-created ni su DLQ.
 """
 
 import json
 from datetime import datetime, timedelta, timezone
 
 from app.application.events import ItineraryCreatedEvent
-from app.config import get_settings
 from app.domain.itinerary import Itinerary
-from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventPublisher
-from tests.integration.conftest import QUEUE_NOTIFICATIONS, RABBITMQ_TIMEOUT_SECONDS
 
 
-def test_el_evento_llega_a_la_cola_de_notificaciones(rabbitmq_channel):
+def test_el_evento_llega_a_la_cola_de_notificaciones(rabbitmq_channel, isolated_topology, isolated_publisher):
     itinerary = Itinerary.create(
         traveler_name="Ana Pérez",
         departure_airport_id=1,
@@ -28,11 +25,10 @@ def test_el_evento_llega_a_la_cola_de_notificaciones(rabbitmq_channel):
         duration_minutes=75,
     )
     event = ItineraryCreatedEvent.from_itinerary(itinerary, "cid-integration")
-    publisher = RabbitMQEventPublisher(get_settings().rabbitmq_url, RABBITMQ_TIMEOUT_SECONDS)
 
-    publisher.publish(event)
+    isolated_publisher.publish(event)
 
-    method, properties, body = rabbitmq_channel.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
+    method, properties, body = rabbitmq_channel.basic_get(isolated_topology.queue, auto_ack=True)
     assert method is not None, "La cola no recibió el mensaje"
     assert json.loads(body) == event.to_dict()
     assert properties.message_id == str(event.event_id)

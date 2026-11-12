@@ -2,8 +2,9 @@
 
 Necesita PostgreSQL (con `alembic upgrade head`) y RabbitMQ; si falta alguno, SKIPPED.
 
-ATENCIÓN: el fixture rabbitmq_channel vacía la cola notification.itinerary-created
-antes y después de cada prueba.
+Publica en una topología de prueba con nombres propios (fixtures isolated_topology e
+isolated_publisher de tests/integration/conftest.py): no toca la cola real ni su DLQ.
+Sí usa la base real itinerary_db (ver la limitación descrita en conftest.py).
 """
 
 import json
@@ -16,15 +17,13 @@ from sqlalchemy.orm import Session
 from app.application.outbox_relay import OutboxRelay, RelayResult
 from app.application.ports import UnitOfWork
 from app.application.use_cases import CreateItineraryCommand, CreateItineraryUseCase
-from app.config import get_settings
-from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventPublisher
+from app.application.ports import EventPublisher
 from app.infrastructure.persistence.models import OutboxEventORM
 from app.infrastructure.persistence.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRepository
 from app.infrastructure.persistence.repository import SqlAlchemyItineraryRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from tests.fakes import FakeAirportCatalog
-from tests.integration.conftest import QUEUE_NOTIFICATIONS, RABBITMQ_TIMEOUT_SECONDS
 
 
 class FailingUnitOfWork(UnitOfWork):
@@ -54,22 +53,24 @@ def _create_itinerary(session: Session):
     )
 
 
-def _relay(session: Session, unit_of_work: UnitOfWork | None = None) -> OutboxRelay:
+def _relay(session: Session, publisher: EventPublisher, unit_of_work: UnitOfWork | None = None) -> OutboxRelay:
     return OutboxRelay(
         outbox=SqlAlchemyOutboxRepository(session),
-        publisher=RabbitMQEventPublisher(get_settings().rabbitmq_url, RABBITMQ_TIMEOUT_SECONDS),
+        publisher=publisher,
         unit_of_work=unit_of_work or SqlAlchemyUnitOfWork(session),
         batch_size=10,
     )
 
 
-def test_el_relay_publica_el_evento_pendiente_en_la_cola(db_session, rabbitmq_channel):
+def test_el_relay_publica_el_evento_pendiente_en_la_cola(
+    db_session, rabbitmq_channel, isolated_topology, isolated_publisher
+):
     itinerary = _create_itinerary(db_session)
 
-    result = _relay(db_session).run_once()
+    result = _relay(db_session, isolated_publisher).run_once()
 
     assert result == RelayResult(published=1, failed=0)
-    method, properties, body = rabbitmq_channel.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
+    method, properties, body = rabbitmq_channel.basic_get(isolated_topology.queue, auto_ack=True)
     assert method is not None, "La cola no recibió el mensaje"
     payload = json.loads(body)
     assert payload["data"]["itinerary_id"] == str(itinerary.id)
@@ -81,28 +82,32 @@ def test_el_relay_publica_el_evento_pendiente_en_la_cola(db_session, rabbitmq_ch
     assert row.published_at is not None
 
 
-def test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces(db_session, rabbitmq_channel):
+def test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces(
+    db_session, rabbitmq_channel, isolated_topology, isolated_publisher
+):
     """Entrega "al menos una vez": puede haber duplicados con el MISMO event_id (message_id)."""
     _create_itinerary(db_session)
 
     with pytest.raises(RuntimeError):
-        _relay(db_session, FailingUnitOfWork()).run_once()
+        _relay(db_session, isolated_publisher, FailingUnitOfWork()).run_once()
     db_session.rollback()  # lo que hace run_cycle: la marca de publicado se pierde
 
-    _relay(db_session).run_once()
+    _relay(db_session, isolated_publisher).run_once()
 
-    first = rabbitmq_channel.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
-    second = rabbitmq_channel.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
+    first = rabbitmq_channel.basic_get(isolated_topology.queue, auto_ack=True)
+    second = rabbitmq_channel.basic_get(isolated_topology.queue, auto_ack=True)
     assert first[0] is not None and second[0] is not None, "Se esperaban dos copias del evento"
     assert first[1].message_id == second[1].message_id
 
 
-def test_sin_cola_del_consumidor_el_evento_espera_en_la_outbox(db_session, unbound_notification_queue):
+def test_sin_cola_del_consumidor_el_evento_espera_en_la_outbox(
+    db_session, rabbitmq_channel, unbound_notification_queue, isolated_publisher
+):
     """ADR-032: si el Event Trigger no ha declarado su cola, RabbitMQ devuelve el mensaje
     (mandatory=True) y el relay lo deja pendiente; cuando la cola existe, lo publica."""
     itinerary = _create_itinerary(db_session)
 
-    result = _relay(db_session).run_once()
+    result = _relay(db_session, isolated_publisher).run_once()
 
     assert result == RelayResult(published=0, failed=1)
     with Session(db_session.get_bind()) as other:
@@ -112,9 +117,8 @@ def test_sin_cola_del_consumidor_el_evento_espera_en_la_outbox(db_session, unbou
     assert row.attempts == 1
 
     # El trigger arranca y enlaza su cola: el siguiente ciclo del relay publica el evento
-    unbound_notification_queue.queue_bind(
-        queue=QUEUE_NOTIFICATIONS, exchange="itinerary.events", routing_key="itinerary.created"
-    )
-    assert _relay(db_session).run_once() == RelayResult(published=1, failed=0)
-    method, _, _ = unbound_notification_queue.basic_get(QUEUE_NOTIFICATIONS, auto_ack=True)
+    topology = unbound_notification_queue
+    rabbitmq_channel.queue_bind(queue=topology.queue, exchange=topology.exchange, routing_key=topology.routing_key)
+    assert _relay(db_session, isolated_publisher).run_once() == RelayResult(published=1, failed=0)
+    method, _, _ = rabbitmq_channel.basic_get(topology.queue, auto_ack=True)
     assert method is not None, "La cola no recibió el evento que esperaba en la outbox"
