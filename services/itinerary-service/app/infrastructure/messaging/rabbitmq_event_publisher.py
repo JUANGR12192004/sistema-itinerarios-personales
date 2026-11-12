@@ -44,6 +44,8 @@ class RabbitMQEventPublisher(EventPublisher):
 
     `connection_factory` permite inyectar una conexión falsa en las pruebas
     (por defecto se usa la BlockingConnection real de pika).
+    `exchange` permite que las pruebas de integración publiquen en un exchange propio,
+    sin tocar la cola real ni su DLQ; la aplicación siempre usa el valor por defecto.
     """
 
     def __init__(
@@ -51,6 +53,7 @@ class RabbitMQEventPublisher(EventPublisher):
         url: str,
         timeout_seconds: float,
         connection_factory: ConnectionFactory = pika.BlockingConnection,
+        exchange: str = EXCHANGE,
     ) -> None:
         self._parameters = pika.URLParameters(url)
         # Sin estos valores, un RabbitMQ caído podría bloquear la solicitud HTTP mucho tiempo
@@ -59,6 +62,7 @@ class RabbitMQEventPublisher(EventPublisher):
         self._parameters.blocked_connection_timeout = timeout_seconds
         self._parameters.connection_attempts = 1
         self._connection_factory = connection_factory
+        self._exchange = exchange
 
     def publish(self, event: ItineraryCreatedEvent) -> None:
         try:
@@ -71,9 +75,9 @@ class RabbitMQEventPublisher(EventPublisher):
         try:
             channel = connection.channel()
             channel.confirm_delivery()
-            declare_exchange(channel)
+            declare_exchange(channel, self._exchange)
             channel.basic_publish(
-                exchange=EXCHANGE,
+                exchange=self._exchange,
                 routing_key=ROUTING_KEY_ITINERARY_CREATED,
                 body=json.dumps(event.to_dict(), ensure_ascii=False).encode("utf-8"),
                 properties=_message_properties(event),

@@ -37,4 +37,15 @@ def test_engine_usa_el_connect_timeout_configurado(monkeypatch: pytest.MonkeyPat
 
     database.get_engine()
 
-    assert calls == [(DATABASE_URL, {"connect_args": {"connect_timeout": 7}})]
+    assert calls == [(DATABASE_URL, {"connect_args": {"connect_timeout": 7}, "hide_parameters": True})]
+
+
+def test_el_engine_no_muestra_los_parametros_del_sql_en_los_errores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los errores de SQLAlchemy llegan al log: no deben llevar el nombre ni el correo del viajero.
+
+    Se crea el engine real (create_engine no se conecta hasta la primera consulta).
+    """
+    settings = Settings(_env_file=None, database_url=DATABASE_URL)
+    monkeypatch.setattr(database, "get_settings", lambda: settings)
+
+    assert database.get_engine().hide_parameters is True

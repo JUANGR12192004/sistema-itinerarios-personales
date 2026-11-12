@@ -28,6 +28,10 @@ EXCHANGE = "itinerary.events"
 ROUTING_KEY_ITINERARY_CREATED = "itinerary.created"
 
 
-def declare_exchange(channel: BlockingChannel) -> None:
-    """Declara el exchange de eventos de itinerarios (topic, durable: sobrevive a un reinicio)."""
-    channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
+def declare_exchange(channel: BlockingChannel, exchange: str = EXCHANGE) -> None:
+    """Declara el exchange de eventos de itinerarios (topic, durable: sobrevive a un reinicio).
+
+    `exchange` solo cambia en las pruebas de integración, que usan un exchange propio para no
+    tocar la topología real (tests/integration/conftest.py).
+    """
+    channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)

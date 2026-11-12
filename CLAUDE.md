@@ -26,7 +26,7 @@ El sistema permite:
 - Aplicar tolerancia a fallos, resiliencia y observabilidad.
 - Mantener el sistema desacoplado de la API externa mediante el patrón **Adapter**.
 
-El equipo tiene **tres integrantes**. Todos trabajan en **Windows 11**.
+El equipo tiene **tres integrantes**. Trabajan en **Windows 11** y en **macOS (Apple Silicon)**.
 
 La documentación de planificación (Fase 0) está en `docs/`:
 
@@ -86,8 +86,8 @@ El proyecto se desarrolla **por fases**. No construyas todo de una vez.
 5. Los archivos necesarios, creados completos.
 6. Explicación de cada archivo: nombre exacto, ruta, qué hace.
 7. Dónde va cada archivo.
-8. Comandos exactos para instalar dependencias (PowerShell).
-9. Comandos exactos para ejecutar (PowerShell).
+8. Comandos exactos para instalar dependencias (PowerShell, CMD y zsh, sección 4).
+9. Comandos exactos para ejecutar (PowerShell, CMD y zsh, sección 4).
 10. Pruebas para comprobar que funciona.
 11. Ejemplos de requests y responses cuando aplique.
 12. Revisión de posibles errores y cómo resolverlos.
@@ -111,33 +111,58 @@ Nunca subas al repositorio credenciales, archivos `.env` ni entornos virtuales.
 
 ---
 
-## 4. Entorno de desarrollo (Windows 11)
+## 4. Entorno de desarrollo (Windows 11 y macOS)
 
 | Herramienta | Versión / detalle |
 |---|---|
-| Sistema operativo | Windows 11 (los tres integrantes) |
-| Terminal | **PowerShell** y **CMD** (no Bash) |
-| Python | **3.12** (usar `py -3.12`) |
-| Git | Git for Windows |
-| Contenedores | Docker Desktop con WSL 2 (desde la Fase 2) |
+| Sistema operativo | Windows 11 y macOS con Apple Silicon (el equipo usa los dos) |
+| Terminal | **PowerShell** y **CMD** en Windows; **Terminal de macOS (zsh)** en macOS |
+| Python | **3.12** (`py -3.12` en Windows, `python3.12` en macOS) |
+| Git | Git for Windows / Git de macOS (Xcode Command Line Tools o Homebrew) |
+| Contenedores | Docker Desktop (con WSL 2 en Windows; versión para Apple Silicon en macOS) |
 
 ### 4.1. Reglas para los comandos
 
-- Todos los comandos se dan **para PowerShell y para CMD** de Windows 11 (los dos bloques, o uno solo
-  si el comando es idéntico en ambas terminales y se indica así).
+- Todos los comandos se dan **para PowerShell, CMD y la Terminal de macOS (zsh)**: un bloque por terminal,
+  o uno solo si el comando es idéntico en todas, indicándolo (por ejemplo, los comandos `docker`, `git`,
+  `alembic`, `pytest` y `python -m ...` con el entorno virtual activado).
 - PowerShell de Windows 11 es la versión **5.1**: no usar parámetros que solo existen en PowerShell 7
   (por ejemplo `-SkipHttpErrorCheck`). PowerShell 5.1 muestra mal las tildes de respuestas JSON sin
   `charset`; para demostraciones usar Swagger o `curl.exe`. En CMD, ejecutar `chcp 65001` antes de
-  `curl.exe` para ver bien las tildes.
-- Usa rutas de Windows (`.\carpeta\archivo`) en los comandos.
-- El proyecto vive en `$HOME\proyectos\sistema-itinerarios-personales`. Nunca trabajes en
-  `C:\WINDOWS\system32` ni pidas ejecutar PowerShell como administrador salvo que sea indispensable
-  (y explica por qué).
-- Para llamadas HTTP de prueba usa `Invoke-RestMethod` o `curl.exe` (con `.exe`, porque en
-  PowerShell `curl` puede ser un alias de `Invoke-WebRequest`).
+  `curl.exe` para ver bien las tildes. En macOS no hace falta: la Terminal ya usa UTF-8.
+- Usa rutas de Windows (`.\carpeta\archivo`) en los bloques de PowerShell y CMD, y rutas con `/` en los de zsh.
+- El proyecto vive en `$HOME\proyectos\sistema-itinerarios-personales` (Windows) o
+  `~/proyectos/sistema-itinerarios-personales` (macOS). Nunca trabajes en `C:\WINDOWS\system32` ni pidas
+  ejecutar PowerShell como administrador (o `sudo` en macOS) salvo que sea indispensable (y explica por qué).
+- Para llamadas HTTP de prueba usa `Invoke-RestMethod` o `curl.exe` en Windows (con `.exe`, porque en
+  PowerShell `curl` puede ser un alias de `Invoke-WebRequest`) y `curl` en macOS.
 - Cada servicio Python tiene su propio entorno virtual en `services/<servicio>/.venv`.
+- En Apple Silicon las imágenes Docker del proyecto (PostgreSQL, RabbitMQ, Redis y la base de AWS Lambda)
+  se descargan y construyen para `arm64` de forma nativa; no hace falta `--platform`.
 
-### 4.2. Entorno virtual (por servicio)
+### 4.2. Equivalencias entre terminales
+
+| Acción | PowerShell | CMD | macOS (zsh) |
+|---|---|---|---|
+| Ruta de una carpeta | `services\itinerary-service` | `services\itinerary-service` | `services/itinerary-service` |
+| Subir dos niveles | `cd ..\..` | `cd ..\..` | `cd ../..` |
+| Crear el entorno virtual | `py -3.12 -m venv .venv` | `py -3.12 -m venv .venv` | `python3.12 -m venv .venv` |
+| Activar el entorno virtual | `.\.venv\Scripts\Activate.ps1` | `.venv\Scripts\activate.bat` | `source .venv/bin/activate` |
+| Permitir activar entornos (una vez) | `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` | No aplica | No aplica |
+| Copiar un archivo | `Copy-Item .env.example .env` | `copy .env.example .env` | `cp .env.example .env` |
+| Asignar una variable de entorno | `$env:NOMBRE = "valor"` | `set NOMBRE=valor` | `export NOMBRE=valor` |
+| Quitar una variable de entorno | `Remove-Item Env:NOMBRE` | `set NOMBRE=` | `unset NOMBRE` |
+| Cliente HTTP | `curl.exe` o `Invoke-RestMethod` | `curl.exe` | `curl` |
+| Enviar un archivo con curl | `--data-binary "@demo\archivo.json"` | `--data-binary "@demo\archivo.json"` | `--data-binary "@demo/archivo.json"` |
+| Descartar la salida de curl | `-o NUL` | `-o NUL` | `-o /dev/null` |
+| JSON en la línea de comandos | `-d '{\"clave\":1}'` | `-d "{\"clave\":1}"` | `-d '{"clave":1}'` |
+| Continuar un comando en otra línea | `` ` `` al final | `^` al final | `\` al final |
+| Ver bien las tildes | Swagger o `curl.exe` | `chcp 65001` | No hace falta |
+| Detener un proceso | Ctrl+C | Ctrl+C | Ctrl+C |
+
+### 4.3. Entorno virtual (por servicio)
+
+**PowerShell:**
 
 ```powershell
 # Solo una vez por equipo, para permitir activar entornos virtuales:
@@ -150,10 +175,29 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4.3. Finales de línea
+**CMD:**
 
-Windows usa CRLF y los contenedores Linux usan LF. El repositorio debe tener un `.gitattributes`
-que normalice a LF los archivos de texto (en especial scripts `.sh`, `Dockerfile` y `.py`).
+```cmd
+py -3.12 -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+**macOS (zsh):**
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4.4. Finales de línea
+
+Windows usa CRLF; macOS y los contenedores Linux usan LF. El repositorio debe tener un `.gitattributes`
+que normalice a LF los archivos de texto (en especial scripts `.sh`, `Dockerfile` y `.py`). En macOS no hay
+conversión: los archivos se guardan con LF, igual que en el repositorio.
 
 ---
 
@@ -458,7 +502,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Transactional Outbox | Itinerario + evento en la misma transacción (ADR-006) |
 | Redis | Caché en Airport Service (ADR-007) |
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana, logs estructurados (ADR-010) |
-| Entorno | Windows 11, PowerShell, Python 3.12 |
+| Entorno | Windows 11 (PowerShell y CMD) y macOS con Apple Silicon (zsh), Python 3.12 |
 | Idioma | Código en inglés, documentación en español (ADR-011) |
 | Formato de errores | Formato único de la sección 10.2 para todos los servicios (ADR-012) |
 | Endpoints de Airport Service | Los de la sección 10.1 (ADR-012) |
@@ -507,6 +551,7 @@ ADR-020 y ADR-021).
 | Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
 | Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
+| Base de datos de las pruebas de integración de Itinerary Service | El fixture `db_session` usa la base real `itinerary_db` y **borra** las filas de `itineraries` y `outbox_events` antes y después de cada prueba; con el Outbox Relay real encendido, este puede publicar en la cola real los eventos que crean las pruebas (detectado en `fix/aislar-pruebas-itinerary`; por decisión del usuario, por ahora solo se documenta). Opciones: una base de pruebas propia (por ejemplo `itinerary_db_test` en el mismo contenedor, migrada por las pruebas), o un esquema de pruebas | Antes de la Fase 11, o antes si molesta en las demostraciones |
 | Advertencia de pika en las pruebas del Event Trigger | `pytest` muestra `DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated` desde `pika/data.py` (detectada en la entrega 6B, al leer el header `x-death` de un mensaje de la DLQ). Viene de pika 1.3.2, no del código del proyecto. Por ahora **no se oculta**. Opciones: actualizar pika si una versión la corrige (revisando ADR-021), o filtrarla documentando el motivo | Fase 11 |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
@@ -859,12 +904,22 @@ pytest -v
     RabbitMQ no disponible o que no acepta el mensaje en `replay_dlq`), con un comentario que explica el motivo.
     Además, el engine de la función usa `hide_parameters=True`: los errores de SQLAlchemy ya no llevan al log el
     correo ni el nombre del viajero. SendNotificationFunction: **60 pasan** con PostgreSQL.
-- **Siguiente:** **antes de la Fase 7**, una rama `fix/` desde `main` para aislar las pruebas de integración de
-  Itinerary Service: hoy vacían (purge) la cola real `notification.itinerary-created` y una la desenlaza un momento
-  (fixtures `rabbitmq_channel` y `unbound_notification_queue` de `tests/integration/conftest.py`), así que correrlas
-  durante una demostración borra los mensajes que esperan en la cola. Mismo criterio que la 6C para el trigger:
-  topología de prueba con nombres propios eliminada al terminar, o, si una prueba no puede aislarse, omitirla
-  cuando la cola real tenga mensajes, documentándolo. En la misma rama se puede agregar `hide_parameters=True` al
-  engine de Itinerary Service (`app/infrastructure/persistence/database.py`), que hoy deja los parámetros del SQL
-  (nombre y correo del viajero) en los mensajes de error, como ya se hizo en la función. Después, la Fase 7
-  (API Gateway), que necesita decidir la tecnología del gateway (ADR-009, sección 9.3).
+- **Rama `fix/aislar-pruebas-itinerary`** (antes de la Fase 7, pendiente de PR):
+  - Commit `test:`: las pruebas de integración de Itinerary Service con RabbitMQ usan una topología propia
+    (`IsolatedTopology`, prefijo `test-<id>.`) declarada una vez por sesión de pytest y borrada al terminar, como las
+    del trigger en la 6C (fixtures `rabbitmq_parameters`, `isolated_topology`, `isolated_publisher` y
+    `unbound_notification_queue`, que ahora desenlaza la cola de prueba). Ninguna prueba necesitó omitirse.
+    Para publicar en el exchange de prueba, `RabbitMQEventPublisher` y `declare_exchange` aceptan un `exchange`
+    opcional (por defecto `itinerary.events`; la aplicación no lo cambia).
+  - Commit `fix:`: `hide_parameters=True` en el engine de Itinerary Service (como en la función). El texto que
+    genera el propio PostgreSQL todavía puede citar un valor en errores de conversión de tipo; aquí es poco
+    probable porque Pydantic y el dominio validan antes.
+  - Commit `docs:`: el equipo trabaja también en **macOS (Apple Silicon)**: sección 4 con comandos para PowerShell,
+    CMD y zsh, tabla de equivalencias (4.2) y variantes zsh en el README raíz, los README de los cuatro componentes y
+    `CONTRIBUTING.md`. Nuevo pendiente en 9.3: las pruebas de integración siguen usando y borrando la base real
+    `itinerary_db`.
+  - Verificación (2026-11-11, en macOS): con 1 mensaje en `notification.itinerary-created` y 1 de prueba en su DLQ,
+    `pytest` en Itinerary Service deja **los mismos conteos** (antes del cambio, la cola real quedaba en 0) y no deja
+    colas ni exchanges `test-*`. Totales de Itinerary Service: **169 pasan** con PostgreSQL y RabbitMQ; **144 pasan,
+    25 omitidas** sin ellos.
+- **Siguiente:** la Fase 7 (API Gateway), que necesita decidir la tecnología del gateway (ADR-009, sección 9.3).

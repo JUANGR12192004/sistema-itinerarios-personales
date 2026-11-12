@@ -237,3 +237,16 @@ def test_el_publicador_no_declara_colas_ni_la_dlx():
     assert "queue_bind" not in names
     declared_exchanges = [kw["exchange"] for name, kw in channel.calls if name == "exchange_declare"]
     assert declared_exchanges == [EXCHANGE]
+
+
+def test_un_exchange_propio_se_declara_y_se_usa_para_publicar():
+    """Las pruebas de integración publican en un exchange propio para no tocar la topología real."""
+    channel = FakeChannel()
+    publisher = RabbitMQEventPublisher(
+        URL, 2.5, connection_factory=lambda _: FakeConnection(channel), exchange="test-1234.itinerary.events"
+    )
+
+    publisher.publish(_event())
+
+    assert channel.first("exchange_declare")["exchange"] == "test-1234.itinerary.events"
+    assert channel.first("basic_publish")["exchange"] == "test-1234.itinerary.events"
