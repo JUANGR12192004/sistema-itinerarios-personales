@@ -11,7 +11,7 @@ Levantan sus propios contenedores del gateway (la misma imagen y la misma planti
 Los contenedores se borran al terminar. Sin Docker, todas estas pruebas quedan SKIPPED.
 Las pruebas "smoke" contra el gateway real están en test_real_gateway.py, con su propio fixture.
 
-gateway_image            — imagen construida desde gateway/ (SKIPPED sin Docker).
+gateway_image            — imagen construida desde la raíz del repositorio (SKIPPED sin Docker).
 gateway                  — gateway con los dos servicios simulados por ecos y un timeout de lectura
                            corto (para el 504). Su ráfaga es enorme, para que el rate limiting no
                            interfiera en las demás pruebas: el límite real se prueba aparte.

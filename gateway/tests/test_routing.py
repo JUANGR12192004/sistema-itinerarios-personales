@@ -17,12 +17,14 @@ def test_health_answers_without_calling_services(client: httpx.Client) -> None:
     assert response.headers["x-correlation-id"]
 
 
-def test_root_is_reserved_for_the_frontend(client: httpx.Client) -> None:
+def test_root_serves_the_frontend(client: httpx.Client) -> None:
+    # Antes de la Fase 8, GET / devolvía text/plain (placeholder).
+    # Desde la Fase 8, Nginx sirve frontend/index.html desde /usr/share/nginx/html/.
     response = client.get("/")
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/plain")
-    assert "Fase 8" in response.text
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<!DOCTYPE html" in response.text
 
 
 @pytest.mark.parametrize(

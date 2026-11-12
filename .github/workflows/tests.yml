@@ -168,12 +168,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      # Construye la imagen (Dockerfile + plantilla) y valida la configuración con nginx -t.
+      # Construye la imagen desde la raíz del repositorio (Fase 8: incluye frontend/).
       # En Linux host.docker.internal no existe: --add-host lo crea para que Nginx resuelva
       # la dirección de los servicios (en Docker Desktop no hace falta).
       - name: Validar la configuración de Nginx
+        working-directory: ${{ github.workspace }}
         run: |
-          docker build -t api-gateway .
+          docker build -t api-gateway -f gateway/Dockerfile .
           docker run --rm --add-host=host.docker.internal:host-gateway api-gateway nginx -t
 
       # El runner tiene Docker: las pruebas aisladas levantan sus propios contenedores del

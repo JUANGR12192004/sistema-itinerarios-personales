@@ -1,10 +1,12 @@
 # API Gateway
 
-Punto único de entrada del Sistema de Itinerarios Personales (Fase 7, [ADR-009](../docs/06-decisiones-arquitectonicas.md)).
-Es **Nginx** en Docker con la imagen oficial `nginx:1.30.6-alpine` (arm64 y amd64) y una plantilla de configuración.
+Punto único de entrada del Sistema de Itinerarios Personales (Fase 7, [ADR-009](../docs/06-decisiones-arquitectonicas.md);
+Fase 8, [ADR-033](../docs/06-decisiones-arquitectonicas.md)).
+Es **Nginx** en Docker con la imagen oficial `nginx:1.30.6-alpine` (arm64 y amd64), una plantilla de configuración
+y los archivos estáticos del frontend (`frontend/`).
 
-El gateway **no tiene lógica de negocio**: solo enruta, reenvía headers, aplica timeouts y responde sus
-propios errores en el formato único del proyecto. Las reglas de negocio están en cada servicio.
+El gateway **no tiene lógica de negocio**: solo enruta, reenvía headers, aplica timeouts, sirve el frontend
+y responde sus propios errores en el formato único del proyecto. Las reglas de negocio están en cada servicio.
 
 ```mermaid
 flowchart LR
@@ -19,7 +21,7 @@ flowchart LR
 | Ruta del gateway | Destino |
 |---|---|
 | `GET /health` | El propio gateway: `{"status":"ok","service":"api-gateway"}` (no consulta a los servicios) |
-| `/` | Reservada para el frontend (Fase 8). Por ahora, un texto |
+| `/`, `/css/...`, `/js/...` | Archivos estáticos del frontend (desde la Fase 8) |
 | `/api/airports`, `/api/airports/...` | Airport Service: `/airports`, `/airports/...` |
 | `/api/itineraries`, `/api/itineraries/...` | Itinerary Service: `/itineraries`, `/itineraries/...` |
 | Cualquier otra | 404 `ROUTE_NOT_FOUND` |
@@ -95,10 +97,10 @@ las solicitudes terminaría en 502.
 Requisitos: Docker Desktop encendido, y Airport Service (8001) e Itinerary Service (8002) corriendo con uvicorn, según
 sus README. Los comandos `docker` son **idénticos en PowerShell, CMD y zsh** y se ejecutan desde la raíz del repositorio.
 
-1. Construir la imagen (también después de cada cambio en `templates/`):
+1. Construir la imagen (también después de cada cambio en `templates/` o en `frontend/`):
 
 ```bash
-docker build -t api-gateway gateway
+docker build -t api-gateway -f gateway/Dockerfile .
 ```
 
 2. Validar la configuración (`nginx -t`):
@@ -275,7 +277,7 @@ servicios encendidos. La primera vez tarda más porque descarga la imagen de Ngi
 | `Conflict. The container name "/api-gateway" is already in use` | El contenedor ya existe: `docker rm -f api-gateway` y volver a ejecutarlo |
 | 502 `UPSTREAM_UNAVAILABLE` con el servicio encendido | El servicio no está en el puerto esperado (8001/8002) o la variable `*_UPSTREAM` apunta a otro lugar |
 | El contenedor se detiene al arrancar (`docker logs api-gateway` muestra `host not found in upstream`) | Nginx no pudo resolver el nombre de un servicio. En Linux, agregar `--add-host=host.docker.internal:host-gateway` |
-| Un cambio en `templates/` no se nota | Hay que reconstruir la imagen y volver a crear el contenedor (pasos 1, 5 y 3) |
+| Un cambio en `templates/` o `frontend/` no se nota | Hay que reconstruir la imagen y volver a crear el contenedor (pasos 1, 5 y 3) |
 | `zsh: no matches found` al usar `curl` | La URL tiene `?`: ponerla entre comillas |
 | La mitad de las solicitudes da 502 en Docker Desktop | Se agregó `--add-host=host.docker.internal:host-gateway`: en Docker Desktop no hace falta y añade una IPv6 inalcanzable. Volver a crear el contenedor sin esa opción |
 | 429 inesperados durante una demostración | Se superó el límite de 10 r/s (por ejemplo, con un bucle de `curl`). Esperar un segundo |

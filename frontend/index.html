@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Itinerarios Personales</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-content">
+      <h1>Sistema de Itinerarios Personales</h1>
+      <nav class="tab-nav" role="tablist" aria-label="Secciones">
+        <button id="tab-airports" class="tab active"
+                role="tab" aria-selected="true" aria-controls="section-airports">
+          Aeropuertos
+        </button>
+        <button id="tab-itineraries" class="tab"
+                role="tab" aria-selected="false" aria-controls="section-itineraries">
+          Itinerarios
+        </button>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section id="section-airports" class="section"
+             role="tabpanel" aria-labelledby="tab-airports">
+    </section>
+    <section id="section-itineraries" class="section hidden"
+             role="tabpanel" aria-labelledby="tab-itineraries">
+    </section>
+  </main>
+  <!-- Bundle parcial de Plotly (solo gráficos geo, sin Mapbox). Debe cargarse antes que main.js. -->
+  <script src="/js/plotly-geo.min.js" defer></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
