@@ -1,0 +1,4 @@
+# La imagen solo necesita la plantilla de Nginx: se excluye todo lo demás
+# (README, .env, y desde la 7B las pruebas y su entorno virtual).
+*
+!templates/

@@ -216,25 +216,58 @@ POST http://localhost:9000/2015-03-31/functions/function/invocations
 
 Lo que hace FaaS a una función es su **modelo de programación y su contrato con la plataforma**: es una función `handler(event, context)` que invoca la plataforma, sin servidor propio y sin estado entre invocaciones (ADR-028). Eso se cumple igual en local y en AWS. Las limitaciones anteriores son de la **operación** de la plataforma local, no del código: la misma imagen, desplegada en AWS Lambda, escalaría y se apagaría sola.
 
-## ADR-009 — API Gateway / BFF
+## ADR-009 — API Gateway con Nginx
 
-**Estado:** Pendiente de selección de tecnología.
+**Estado:** Aceptada (Fase 7, entrega 7A). Antes se llamaba "API Gateway / BFF" y estaba pendiente de seleccionar la tecnología.
 
 ### Contexto
 
-El frontend necesita un punto de entrada para acceder a los servicios internos.
+El frontend (Fase 8) y cualquier otro cliente necesitan un **punto único de entrada** a los servicios internos. Ese punto debe enrutar, aplicar rate limiting y preparar la propagación de JWT, **sin lógica de negocio**: las reglas viven en el dominio de cada servicio (ADR-002, ADR-015). Si se copiaran en el gateway, habría dos fuentes de verdad y cada cambio de negocio obligaría a desplegar un componente que comparten todos.
 
-### Decisión prevista
+Un **API Gateway** es genérico: no conoce el dominio y se ocupa de tareas transversales (enrutamiento, límites, correlación, autenticación). Un **BFF** (*Backend for Frontend*) es un backend hecho a la medida de un frontend concreto, que sí junta y transforma respuestas para la pantalla. El proyecto necesita lo primero.
 
-Utilizar un gateway que enrute solicitudes sin incorporar lógica de negocio.
+La comunicación interna Itinerary Service → Airport Service (validar aeropuertos) **no pasa por el gateway**: el gateway solo atiende las solicitudes que entran desde afuera.
 
-### Criterios
+### Alternativas evaluadas
 
-- Facilidad de ejecución local.
-- Compatibilidad con Docker.
-- Enrutamiento hacia FastAPI.
-- Posibilidad de incorporar rate limiting.
-- Preparación para propagación de JWT.
+| Criterio | Nginx | Traefik | Kong (sin base de datos) | BFF en FastAPI |
+|---|---|---|---|---|
+| Facilidad de uso | Alta: un archivo declarativo | Media | Baja: services, routes, plugins | Alta para el equipo, pero el proxy se programa a mano |
+| Rate limiting nativo | Sí (`limit_req`) | Sí (middleware) | Sí (plugin) | No (a mano o `slowapi`) |
+| 429 con el formato de la sección 10.2 | Sí (`error_page` + `return`) | Texto fijo; el JSON exige un servicio extra | JSON propio de Kong | Sí |
+| Evita lógica de negocio por accidente | Muy bien: sin scripting (no se carga `njs`) | Bien | Regular: plugins Lua ejecutan código | Mal: es código Python |
+| Apple Silicon y Windows | Imagen oficial arm64 y amd64 | Sí | Sí | Sí |
+| Docker Compose (Fase 10) | Simple (plantillas con variables) | Excelente (labels) | Correcta, pero pesada | Necesita su `Dockerfile` |
+| Validar la configuración en CI | `nginx -t` | Limitada | `kong config parse` | pytest |
+| Servir el frontend en el mismo origen (Fase 8) | Sí | No | No | Sí |
+| JWT a futuro | Solo lo reenvía (la versión libre no lo valida) | `ForwardAuth` | Plugin JWT nativo | Con una librería |
+
+### Decisión
+
+- **Nginx** como gateway puro, en Docker con la imagen oficial **`nginx:1.30.6-alpine`** (versión estable, arm64 y amd64). La carpeta `gateway/` tiene un `Dockerfile` que solo parte de esa imagen y copia la plantilla `templates/default.conf.template`. Se usa un `Dockerfile` y no un volumen porque la ruta del volumen se escribe distinto en PowerShell, CMD y zsh.
+- **Enrutamiento:** `/api/airports` y `/api/airports/...` → Airport Service (`/airports...`); `/api/itineraries` y `/api/itineraries/...` → Itinerary Service (`/itineraries...`). El gateway quita el prefijo `/api` y traduce de vuelta las redirecciones de los servicios (`proxy_redirect`). Cualquier otra ruta → 404 `ROUTE_NOT_FOUND`.
+- **Direcciones de los servicios por variables de entorno** (`AIRPORT_SERVICE_UPSTREAM`, `ITINERARY_SERVICE_UPSTREAM`), que la imagen oficial reemplaza en la plantilla al arrancar (`envsubst`, limitado por `NGINX_ENVSUBST_FILTER`). En la Fase 7 los servicios corren con uvicorn en el equipo y el gateway llega a ellos por `host.docker.internal:8001/8002`. En la Fase 10 solo cambian por los nombres de los contenedores. En Linux (el CI) hace falta `--add-host=host.docker.internal:host-gateway`.
+- **Headers reenviados:** `Authorization` tal cual, sin validarlo (preparación de JWT; nunca se escribe en el log), `X-Correlation-ID`, `Host`, `X-Real-IP`, `X-Forwarded-For` y `X-Forwarded-Proto`.
+- **X-Correlation-ID:** si llega con un formato seguro (`^[A-Za-z0-9._-]{1,128}$`) se reenvía. Si falta o no es válido, el gateway genera uno con forma de UUID a partir de `$request_id`. Se valida porque el valor se escribe dentro del JSON de los errores y en el log. La respuesta lleva un solo header `X-Correlation-ID` (el del servicio se oculta; es el mismo valor) y el log de acceso incluye `correlation_id` (preparación de la Fase 9).
+- **Timeouts:** conexión 2 s (`GATEWAY_PROXY_CONNECT_TIMEOUT`) y lectura/escritura 15 s (`GATEWAY_PROXY_READ_TIMEOUT`). La lectura es mayor que los timeouts internos (Itinerary → Airport: 2 × 5 s; Airport → API Colombia: 3 intentos de 3 s más las esperas, ADR-014), para que el servicio alcance a responder su propio error. `proxy_next_upstream off`: el gateway no reintenta (los reintentos están en los servicios y reintentar un `POST` podría duplicar un itinerario). `max_fails=0`: Nginx nunca marca un servicio como caído por su cuenta.
+- **Errores propios del gateway** con el formato de la sección 10.2, nunca con la página HTML de Nginx: 502 `UPSTREAM_UNAVAILABLE` (el servicio no acepta la conexión), 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE` (cuerpo de más de 1 MB). Los 502 y 504 indican el servicio en `details.service`. Con `proxy_intercept_errors off`, las respuestas de error **de los servicios** (sus 404, 422, 502, 503, 504) pasan sin cambios. Se eligió 502 (y no 503) porque es el código HTTP estándar cuando un gateway no logra hablar con el servidor de atrás. Así el cliente distingue entre "el gateway no llega al servicio" (502) y "el servicio responde, pero su dependencia no está disponible" (503).
+- **Rate limiting (entrega 7B):** por IP de origen (`$binary_remote_addr`), 10 solicitudes por segundo con ráfaga de 20 (`nodelay`), solo en `/api/` (las rutas de los servicios están dentro de `location /api/`, que aplica el `limit_req`). Se configuran con `GATEWAY_RATE_LIMIT` y `GATEWAY_RATE_BURST`. Al superarlo: 429 `RATE_LIMIT_EXCEEDED` con el formato de la sección 10.2 y header `Retry-After: 1`, antes de llamar al servicio.
+- **Pruebas (entrega 7B):** en `gateway/tests`, con pytest y httpx (`gateway/requirements-dev.txt`). Levantan sus propios contenedores del gateway (imagen `api-gateway:test`) contra servidores eco de Python, así que no tocan datos reales ni el límite del gateway de la demostración. Además hay unas pocas pruebas *smoke* solo con `GET` contra el gateway real, que se omiten si no está corriendo. Sin Docker, todas se omiten.
+- **Otras rutas:** `GET /health` del propio gateway (`{"status": "ok", "service": "api-gateway"}`, no consulta a los servicios) y `/` reservada para el frontend de la Fase 8 (por ahora, un texto). Swagger (`/docs`) de cada servicio no se expone por el gateway.
+- **Sin CORS:** el frontend se servirá desde el mismo origen (Fase 8).
+- `server_tokens off` (no revela la versión de Nginx).
+
+### Justificación
+
+Nginx cumple todos los requisitos de la fase con configuración declarativa. Su `limit_req` es nativo y permite responder los errores en el formato propio del proyecto. Además, su configuración no deja lugar a lógica de negocio, se valida con `nginx -t` y en la Fase 8 sirve el frontend desde el mismo origen. Traefik destaca en el descubrimiento de contenedores, pero no responde el 429 en JSON sin un servicio adicional ni sirve archivos estáticos. Kong es más pesado y permite ejecutar código en plugins. Un BFF en FastAPI invitaría a agregar lógica y es otro patrón.
+
+### Consecuencias
+
+- La versión libre de Nginx **no valida JWT**. Si más adelante hiciera falta validarlo en el gateway, habría que usar `auth_request` hacia un servicio de autenticación o reconsiderar Kong.
+- Nginx resuelve los nombres de los servicios **al arrancar**. Si un nombre no existe, el gateway no inicia. Con `host.docker.internal` no pasa en Docker Desktop. En la Fase 10 habrá que tenerlo en cuenta (orden de arranque o resolución dinámica).
+- En Docker Desktop, todas las solicitudes hechas desde el propio equipo llegan al contenedor con la misma IP (`192.168.65.1`), así que localmente el límite de solicitudes es compartido.
+- En zsh, las URL con `?` deben ir entre comillas en `curl` (si no, zsh intenta expandirlas como un patrón de archivos).
+- Si el nombre de un servicio resuelve a **varias direcciones**, Nginx reparte las solicitudes entre ellas y, con `max_fails=0` y `proxy_next_upstream off`, una dirección inalcanzable produce 502 en esa parte de las solicitudes. Se detectó en la 7B: en Docker Desktop, `--add-host=host.docker.internal:host-gateway` agrega también una IPv6 que la red de Docker no alcanza, y la mitad de las solicitudes daba 502. Por eso esa opción solo se usa en Linux. Hoy no afecta: sin esa opción, Docker Desktop resuelve `host.docker.internal` solo a IPv4, y en la Fase 10 los nombres de los contenedores resuelven a una sola IPv4. Si cambiara (por ejemplo, una red de Docker con IPv6), habría que revisar esos dos parámetros.
 
 ## ADR-010 — Observabilidad
 
@@ -311,6 +344,18 @@ Todos los servicios responden los errores con el mismo formato:
 ```
 
 Códigos HTTP: 404 recurso no encontrado, 422 validación, 502 respuesta inesperada del proveedor externo, 503 dependencia no disponible, 504 timeout (Fase 2). Los valores de `code` van en inglés y en MAYÚSCULAS_CON_GUIONES_BAJOS.
+
+*Actualización (Fase 7, ADR-009):* el API Gateway usa el mismo formato para **sus propios** errores. Los errores de los servicios pasan por él sin cambios.
+
+| Situación en el gateway | Código | `code` |
+|---|---|---|
+| La ruta no existe | 404 | `ROUTE_NOT_FOUND` (el mismo código que usan los servicios) |
+| El cuerpo supera 1 MB | 413 | `PAYLOAD_TOO_LARGE` |
+| Se superó el límite de solicitudes | 429 | `RATE_LIMIT_EXCEEDED` (con header `Retry-After`) |
+| El servicio no acepta la conexión | 502 | `UPSTREAM_UNAVAILABLE` (`details.service` indica cuál) |
+| El servicio no responde a tiempo | 504 | `UPSTREAM_TIMEOUT` (`details.service` indica cuál) |
+
+El 502 del gateway no se confunde con el 503 de un servicio: 502 significa que el gateway no llega al servicio, y 503 que el servicio responde pero su dependencia no está disponible.
 
 ### Justificación
 
@@ -594,7 +639,7 @@ Las pruebas (pytest y la integración continua de `.github/workflows/tests.yml`)
 | `sonar.python.version` | `3.12` | Aplica las reglas de Python 3.12 (sin ella, SonarCloud asume compatibilidad con varias versiones de 3.x) |
 | `sonar.sources` | `services,serverless` | Código de producción: todo lo que está dentro de `services/` y, desde la Fase 6, de `serverless/` |
 | `sonar.exclusions` | `**/tests/**,**/alembic/versions/**` | Las pruebas y las migraciones generadas por Alembic no cuentan como código de producción |
-| `sonar.tests` | `services,serverless` | Las pruebas se buscan dentro de `services/` y `serverless/` |
+| `sonar.tests` | `services,serverless,gateway` | Las pruebas se buscan dentro de `services/`, `serverless/` y, desde la Fase 7, `gateway/` (el gateway es configuración de Nginx: solo sus pruebas son Python) |
 | `sonar.test.inclusions` | `**/tests/**` | Solo las carpetas `tests/` se tratan como código de pruebas |
 
 ### Qué analiza

@@ -78,16 +78,22 @@ Función serverless (FaaS) en `serverless/send-notification-function` (ADR-008 y
 
 No guarda estado entre invocaciones y no conoce RabbitMQ. La función no es responsable de administrar itinerarios ni de implementar sus reglas de negocio.
 
-### 2.5. API Gateway / BFF
+### 2.5. API Gateway
+
+Nginx en Docker (Fase 7, ADR-009), en el puerto 8000. Es el punto único de entrada para el frontend y cualquier otro cliente.
 
 Responsabilidades:
 
-- Actuar como punto de entrada del frontend.
-- Enrutar solicitudes a los servicios internos.
-- Evitar incorporar lógica de negocio.
-- Preparar la incorporación de rate limiting y propagación de JWT.
+- Enrutar `/api/airports/...` a Airport Service y `/api/itineraries/...` a Itinerary Service, quitando el prefijo `/api`.
+- Aplicar rate limiting por IP de origen (10 solicitudes por segundo, ráfaga de 20; 429 al superarlo).
+- Reenviar el header `Authorization` sin validarlo (preparación de JWT).
+- Reenviar o generar `X-Correlation-ID`, para que la trazabilidad empiece en el gateway.
+- Aplicar timeouts hacia los servicios y responder sus propios errores (502, 504, 404, 413, 429) en el formato único de errores.
+- Más adelante, servir el frontend desde el mismo origen (Fase 8).
 
-La solución concreta de gateway se seleccionará antes de la fase de implementación correspondiente.
+**No tiene lógica de negocio.** Las reglas viven en el dominio de cada servicio. Si se copiaran en el gateway, habría dos fuentes de verdad, y un componente que comparten todos tendría que cambiar con cada regla nueva. Por eso es un **API Gateway** genérico y no un **BFF** (*Backend for Frontend*), que sí juntaría y transformaría respuestas para una pantalla concreta.
+
+La comunicación entre servicios (Itinerary → Airport) no pasa por el gateway.
 
 ### 2.6. Frontend
 
@@ -106,7 +112,11 @@ No consumirá directamente la API externa.
 
 Se utilizará HTTP/REST cuando un componente necesite una respuesta inmediata.
 
-Ejemplo:
+Desde afuera (tráfico *norte-sur*):
+
+Cliente / Frontend → API Gateway (:8000) → Airport Service o Itinerary Service
+
+Entre servicios (tráfico *este-oeste*, sin pasar por el gateway):
 
 Itinerary Service → Airport Service
 

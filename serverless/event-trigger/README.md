@@ -39,7 +39,7 @@ temporal se reintenta sin límite y lo permanente se aparta.
 
 ## Orden de arranque del sistema completo
 
-El trigger es el **último** paso del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+El trigger es el paso **7** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` y `notification_db`.
@@ -48,6 +48,7 @@ El trigger es el **último** paso del orden completo, explicado en el [README ra
 5. Itinerary Service.
 6. Outbox Relay.
 7. **Event Trigger**.
+8. API Gateway (contenedor `api-gateway`, puerto 8000).
 
 Qué pasa si el trigger o lo que necesita no está:
 

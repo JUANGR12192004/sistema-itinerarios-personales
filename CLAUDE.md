@@ -264,6 +264,7 @@ Estas son las reglas que debes seguir tú:
 | Comunicación síncrona | HTTP / REST |
 | Mensajería | RabbitMQ (cliente `pika`, ADR-021) |
 | Caché | Redis |
+| API Gateway | Nginx, imagen oficial `nginx:1.30.6-alpine` (ADR-009) |
 | Frontend | HTML, CSS, JavaScript, Plotly JS |
 | Contenedores | Docker y Docker Compose |
 | Serverless | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator (ADR-008) |
@@ -375,7 +376,7 @@ sistema-itinerarios-personales/
 ├── serverless/
 │   ├── send-notification-function/ ← Fase 6: app/ hexagonal, handler.py, alembic/, events/, Dockerfile
 │   └── event-trigger/              ← Fase 6: app/ (application, infrastructure), main.py, replay_dlq.py, demo/
-├── gateway/
+├── gateway/                        ← Fase 7: Dockerfile (Nginx), templates/default.conf.template, tests/
 ├── frontend/
 │   ├── index.html
 │   ├── css/
@@ -538,6 +539,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Fallos en el Event Trigger (Fase 6, ADR-031) | Éxito (`PROCESSED`, `ALREADY_PROCESSED`) → ACK. Permanente (mensaje que no es JSON, `REJECTED`) → `basic_reject(requeue=False)` → DLQ. Infraestructura (sin conexión, timeout de la invocación, HTTP 5xx, `errorType = TransientError`, o timeout de la propia función, que el RIE informa con HTTP 200 y el texto `Task timed out after N seconds`) → reintentos y después `basic_nack(requeue=True)` tras una pausa, sin límite y sin DLQ. Otro `errorType` → reintentos limitados y después a la DLQ, para no bloquear la cola (`prefetch_count=1`). Mismo criterio temporal/permanente de ADR-027. Reprocesamiento (6C): `python -m app.replay_dlq` (uno) o `--all` (los que había al empezar) devuelve los mensajes de la DLQ a la cola principal con el exchange por defecto, confirms y ACK en la DLQ después; quita `x-death` y suma `x-dlq-replays`. La DLQ tiene un segundo binding a la DLX con la routing key `notification.itinerary-created`, para que un mensaje reprocesado que vuelve a fallar no se pierda |
 | Propiedad de la topología (Fase 6, ADR-032) | El publicador de Itinerary Service declara solo el exchange; el Event Trigger declara exchange, cola, binding, DLX y DLQ. Si el trigger no ha arrancado, `mandatory=True` devuelve el mensaje y el evento espera en la outbox |
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties` (desde la 6C analiza también `serverless/`). No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
+| API Gateway (Fase 7, ADR-009) | **Nginx** como gateway puro en Docker (`gateway/Dockerfile` sobre `nginx:1.30.6-alpine`, plantilla `gateway/templates/default.conf.template` con `envsubst` de la imagen oficial), puerto 8000. `/api/airports...` → Airport Service y `/api/itineraries...` → Itinerary Service, quitando `/api` (y `proxy_redirect` para las redirecciones). Direcciones por variables `AIRPORT_SERVICE_UPSTREAM` / `ITINERARY_SERVICE_UPSTREAM` (`host.docker.internal:8001/8002` en la Fase 7; nombres de contenedor en la Fase 10). Reenvía `Authorization` sin validarlo (nunca en el log). `X-Correlation-ID`: se reenvía si cumple `^[A-Za-z0-9._-]{1,128}$`; si no, se genera con forma de UUID. Timeouts: conexión 2 s, lectura 15 s, `proxy_next_upstream off`, `max_fails=0`. Errores propios en el formato de la sección 10.2: 502 `UPSTREAM_UNAVAILABLE`, 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE`; los errores de los servicios pasan sin cambios (`proxy_intercept_errors off`). Rate limiting (7B): por IP, 10 r/s, ráfaga 20, `nodelay`, solo `/api/`, 429 `RATE_LIMIT_EXCEEDED` con `Retry-After`. `GET /health` propio, `/` reservada para el frontend, sin CORS, Swagger no se expone por el gateway |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -548,7 +550,6 @@ ADR-020 y ADR-021).
 
 | Decisión | Opciones | Se necesita en |
 |---|---|---|
-| Gateway (ADR-009) | Propuesta: Nginx como gateway puro (enrutamiento, `limit_req`, reenvío del header `Authorization`) que también sirve el frontend en el mismo origen | Fase 7 |
 | Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
 | Base de datos de las pruebas de integración de Itinerary Service | El fixture `db_session` usa la base real `itinerary_db` y **borra** las filas de `itineraries` y `outbox_events` antes y después de cada prueba; con el Outbox Relay real encendido, este puede publicar en la cola real los eventos que crean las pruebas (detectado en `fix/aislar-pruebas-itinerary`; por decisión del usuario, por ahora solo se documenta). Opciones: una base de pruebas propia (por ejemplo `itinerary_db_test` en el mismo contenedor, migrada por las pruebas), o un esquema de pruebas | Antes de la Fase 11, o antes si molesta en las demostraciones |
@@ -578,7 +579,8 @@ Los endpoints de Airport Service y de Itinerary Service están **aceptados** (AD
 | Todos | `GET /health` | 200 | — |
 | Todos | `GET /metrics` | 200 | — (Fase 9) |
 
-En el Gateway: `/api/airports/...` → Airport Service y `/api/itineraries/...` → Itinerary Service.
+En el Gateway (puerto 8000, ADR-009): `/api/airports/...` → Airport Service y `/api/itineraries/...` → Itinerary Service
+(sin el prefijo `/api`); `GET /health` propio; `/` reservada para el frontend; cualquier otra ruta → 404 `ROUTE_NOT_FOUND`.
 
 El endpoint `map-data` tiene formato de presentación, así que vive en la capa `api`, no en el dominio.
 
@@ -591,6 +593,13 @@ El endpoint `map-data` tiene formato de presentación, así que vive en la capa 
 | El proveedor externo respondió algo inesperado | 502 |
 | Dependencia no disponible (API Colombia, Airport Service) | 503 |
 | Timeout de una dependencia (Fase 2) | 504 |
+| Gateway: la ruta no existe (Fase 7) | 404 `ROUTE_NOT_FOUND` |
+| Gateway: el cuerpo supera 1 MB (Fase 7) | 413 `PAYLOAD_TOO_LARGE` |
+| Gateway: se superó el límite de solicitudes (Fase 7) | 429 `RATE_LIMIT_EXCEEDED` |
+| Gateway: el servicio no acepta la conexión (Fase 7) | 502 `UPSTREAM_UNAVAILABLE` |
+| Gateway: el servicio no responde a tiempo (Fase 7) | 504 `UPSTREAM_TIMEOUT` |
+
+Los errores de los servicios pasan por el gateway sin cambios (ADR-009, actualización de ADR-012).
 
 Formato único de error para todos los servicios:
 
@@ -730,6 +739,16 @@ Rama `fase-6-serverless`. Una pausa al final de cada entrega, antes del commit.
 | **6A** | ADR-008 (decidida), ADR-028 a ADR-030, `serverless/send-notification-function`: dominio (`NotificationRecord`), caso de uso, puertos, `SimulatedEmailSender`, repositorio del historial, handler de Lambda, esquema del evento, Alembic con la migración de `notification_history`, `Dockerfile`, eventos de ejemplo y pruebas | `pytest -v` pasa; invocación con `curl.exe` contra el RIE en el puerto 9000 (`PROCESSED`, `ALREADY_PROCESSED`, `SKIPPED`, `REJECTED`, `TransientError`) |
 | **6B** | ADR-031 y ADR-032, `serverless/event-trigger` (consumo, invocación, ACK/NACK, reintentos, DLQ, declaración de la topología), cambio de la topología del publicador de Itinerary Service (solo el exchange), pruebas unitarias y de integración (SKIPPED sin RabbitMQ, PostgreSQL o la función) | Pruebas del trigger pasan sin servicios |
 | **6C** | Documentación (FaaS, diagramas, AsyncAPI con la operación `receive` y la DLQ, README de cada componente y README raíz), jobs de CI de la función y del trigger, `serverless` en SonarCloud, demostración de punta a punta (incluye evento duplicado, evento en la DLQ y evento que espera en la outbox mientras el trigger no ha arrancado). Aislar las pruebas de integración del trigger: hoy vacían (purge) la cola `notification.itinerary-created` y su DLQ reales, así que correr `pytest` durante una demostración borra sus mensajes. Deben usar un vhost de pruebas o un exchange y colas de prueba con nombres propios, eliminados al terminar; si alguna prueba no puede aislarse, se omite cuando la cola real tenga mensajes, y se documenta | Registro en `notification_history` tras crear un itinerario; las pruebas del trigger no cambian el contenido de la cola real ni de la DLQ |
+
+### 12.7. Plan de la Fase 7 (entregas)
+
+Rama `fase-7-api-gateway`. Una pausa al final de cada entrega, antes del commit.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **7A** | ADR-009 aceptada, carpeta `gateway/` (`Dockerfile`, `.dockerignore`, `templates/default.conf.template`, `.env.example`, README básico): enrutamiento, `X-Correlation-ID`, reenvío de `Authorization`, timeouts, `/health`, `/` y errores en JSON | `nginx -t` correcto; demostración con `curl` contra los dos servicios (incluye 404 del servicio vs. 404 del gateway y 502 con un servicio apagado) |
+| **7B** | Rate limiting con 429 en JSON. Pruebas de integración en `gateway/tests` (con `gateway/requirements-dev.txt`: pytest y httpx, entorno virtual propio): pytest levanta **su propio contenedor del gateway** contra un servidor eco de Python (enrutamiento, quitar `/api`, `Authorization`, `X-Correlation-ID` válido e inválido, 429, 502 con un puerto cerrado, 504 con un eco lento y un timeout corto), más pruebas *smoke* solo con `GET` contra el gateway real (omitidas si no está corriendo). Todo se omite sin Docker | Pruebas pasan; no cambian datos reales ni consumen el límite del gateway real |
+| **7C** | Documentación (`docs/02`, `docs/05`, ADR-012 y sección 10.2 con los errores del gateway, título "API Gateway" en lugar de "API Gateway / BFF", README del gateway y README raíz con el nuevo orden de arranque), job de CI que valide la configuración (`nginx -t`) y ejecute las pruebas de la 7B, demostración de punta a punta pasando por el gateway | CI pasa; recorrido Gateway → Itinerary → Airport → outbox → RabbitMQ → función |
 
 ---
 
@@ -904,7 +923,7 @@ pytest -v
     RabbitMQ no disponible o que no acepta el mensaje en `replay_dlq`), con un comentario que explica el motivo.
     Además, el engine de la función usa `hide_parameters=True`: los errores de SQLAlchemy ya no llevan al log el
     correo ni el nombre del viajero. SendNotificationFunction: **60 pasan** con PostgreSQL.
-- **Rama `fix/aislar-pruebas-itinerary`** (antes de la Fase 7, pendiente de PR):
+- **Rama `fix/aislar-pruebas-itinerary`** (antes de la Fase 7), **fusionada en `main`** (PR #13, merge `825f1be`):
   - Commit `test:`: las pruebas de integración de Itinerary Service con RabbitMQ usan una topología propia
     (`IsolatedTopology`, prefijo `test-<id>.`) declarada una vez por sesión de pytest y borrada al terminar, como las
     del trigger en la 6C (fixtures `rabbitmq_parameters`, `isolated_topology`, `isolated_publisher` y
@@ -922,4 +941,44 @@ pytest -v
     `pytest` en Itinerary Service deja **los mismos conteos** (antes del cambio, la cola real quedaba en 0) y no deja
     colas ni exchanges `test-*`. Totales de Itinerary Service: **169 pasan** con PostgreSQL y RabbitMQ; **144 pasan,
     25 omitidas** sin ellos.
-- **Siguiente:** la Fase 7 (API Gateway), que necesita decidir la tecnología del gateway (ADR-009, sección 9.3).
+- **Fase 7 (API Gateway):** completada en la rama `fase-7-api-gateway`, pendiente del PR. ADR-009 aceptada: Nginx
+  (sección 9.1).
+  - Entrega **7A** completada: carpeta `gateway/` con `Dockerfile` (`nginx:1.30.6-alpine`), `.dockerignore`,
+    `templates/default.conf.template`, `.env.example` y README básico. `nginx -t` correcto. Demostración real
+    (2026-11-11, macOS) con los servicios en uvicorn en `127.0.0.1` (Docker Desktop llega a ellos por
+    `host.docker.internal`): enrutamiento de los dos servicios, errores de los servicios sin cambios (404, 422 y el 503
+    de Itinerary con Airport apagado), 404 `ROUTE_NOT_FOUND`, 502 `UPSTREAM_UNAVAILABLE` con Airport apagado,
+    `X-Correlation-ID` reenviado, generado y reemplazado si es inválido, y redirección de `/api/airports/` traducida
+    por `proxy_redirect`. Con un servidor eco temporal (fuera del repositorio): `Authorization` y `X-Forwarded-*`
+    llegan al servicio, 504 `UPSTREAM_TIMEOUT` con un timeout de 2 s, y un 502 generado por el servicio pasa sin cambios.
+  - Entrega **7B** completada: rate limiting (`limit_req_zone` por IP, `location /api/` que agrupa las rutas de los
+    servicios, variables `GATEWAY_RATE_LIMIT` y `GATEWAY_RATE_BURST`, 429 `RATE_LIMIT_EXCEEDED` con `Retry-After: 1`).
+    Pruebas en `gateway/tests` (entorno virtual `gateway/.venv`, `requirements-dev.txt` con pytest y httpx): contenedores
+    propios del gateway (`api-gateway:test`, puertos libres de 127.0.0.1, borrados al terminar) contra servidores eco de
+    Python (`tests/echo_server.py`), y pruebas *smoke* solo `GET` contra el gateway real (`GATEWAY_URL`, omitidas si no
+    corre). Hallazgo: en Docker Desktop, `--add-host=host.docker.internal:host-gateway` agrega una IPv6 inalcanzable y
+    la mitad de las solicitudes daba 502, así que las pruebas solo lo usan en Linux (documentado en ADR-009 y en el README
+    del gateway). Total: **40 pasan, 3 omitidas** sin el gateway real; **43 pasan** con él y los dos servicios (3
+    ejecuciones seguidas estables, ~5 s, sin contenedores sobrantes). Tras la suite completa, el gateway real seguía
+    aceptando 18 solicitudes seguidas (su límite no se tocó). Demostración real en zsh: 22 × 200 y luego 429. No
+    verificado en Windows: si las pruebas de enrutamiento dan 502, `GATEWAY_TEST_ECHO_HOST=0.0.0.0`.
+  - Entrega **7C** completada:
+    - Documentación: `docs/01` (nombre de la fase), `docs/02` (2.5 "API Gateway" y tráfico norte-sur vs. este-oeste),
+      `docs/04` (nueva sección 2.3), `docs/05` (gateway en los diagramas general, de componentes, de secuencia y de
+      despliegue, y nuevo diagrama 3.2 con el recorrido de una solicitud por el gateway), ADR-012 y sección 10.2 con los
+      errores del gateway, sección 10.1 con sus rutas. README raíz (alcance, tecnologías, diagrama, resumen de la Fase 7,
+      paso 8 del orden de arranque, filas de "qué pasa si se omite", demostración de punta a punta por
+      `http://localhost:8000/api/itineraries`) y paso 8 en el orden de arranque de los otros cuatro README.
+    - CI: job `api-gateway` en `tests.yml` (construye la imagen, `nginx -t` con `--add-host` y `pytest -v`; en el
+      runner las pruebas aisladas se ejecutan de verdad porque hay Docker; las *smoke* quedan SKIPPED). SonarCloud:
+      `gateway` en `sonar.tests` (ADR-023). El job solo se verifica en GitHub tras el push.
+    - Demostración real (2026-11-11, macOS) con los ocho pasos del orden de arranque: `POST /api/itineraries` por el
+      gateway con `X-Correlation-ID: demo-e2e-gateway` → 201 → relay `2 publicados` → trigger `PROCESSED` → fila en
+      `notification_history` con `correlation_id = demo-e2e-gateway`. Sin el header, el gateway generó
+      `fa22cd0e-...` y ese mismo valor llegó al relay y al historial. CRUD por el gateway (GET, PUT, DELETE → 204, GET →
+      404 `ITINERARY_NOT_FOUND`), 422 `AIRPORT_NOT_FOUND` del servicio sin cambios y `map-data` (51). Al arrancar,
+      el trigger procesó un evento inválido de prueba que estaba en la cola real desde la verificación de
+      `fix/aislar-pruebas-itinerary` (`event_id=c3d4e5f6-...`) y lo envió a la DLQ (comportamiento de ADR-031): la DLQ
+      quedó con 2 mensajes de prueba.
+    - Pruebas del gateway: **43 pasan** con el sistema completo encendido.
+- **Siguiente:** PR de la Fase 7 (lo crea el equipo), etiqueta `fase-7` tras el merge, y después la Fase 8 (Frontend).

@@ -58,6 +58,7 @@ La función es el paso **3** del orden completo, que está explicado en el [READ
 5. Itinerary Service.
 6. Outbox Relay.
 7. Event Trigger.
+8. API Gateway (contenedor `api-gateway`, puerto 8000).
 
 Qué pasa si se omite un paso que depende de esta función:
 

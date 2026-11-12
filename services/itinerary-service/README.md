@@ -151,6 +151,7 @@ Itinerary Service ocupa los pasos **5** (API) y **6** (Outbox Relay) del orden c
 5. **API de Itinerary Service.**
 6. **Outbox Relay.**
 7. Event Trigger.
+8. API Gateway (contenedor `api-gateway`, puerto 8000).
 
 | Paso omitido | Consecuencia |
 |---|---|
