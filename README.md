@@ -109,11 +109,10 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 4 | Eventos y RabbitMQ | Completada |
 | 5 | Transactional Outbox | Completada |
 | 6 | Serverless | Completada |
-| 7 | API Gateway | Completa en la rama `fase-7-api-gateway`, pendiente de merge |
+| 7 | API Gateway | Completada |
 | 8 a 12 | Frontend, observabilidad, Docker Compose, pruebas y documentación | Pendientes |
 
-**Última fase fusionada:** Fase 6 — Serverless (PR #11, etiqueta `fase-6`). La Fase 7 — API Gateway está terminada
-en la rama `fase-7-api-gateway`, pendiente de su pull request. **Siguiente:** Fase 8 — Frontend.
+**Última fase completada:** Fase 7 — API Gateway (PR #14, etiqueta `fase-7`). **Siguiente:** Fase 8 — Frontend.
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
@@ -456,6 +455,7 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | `fase-4-eventos-rabbitmq` | Fase 4 — `ItineraryCreatedEvent`, RabbitMQ y AsyncAPI | `fase-4` |
 | `fase-5-transactional-outbox` | Fase 5 — Transactional Outbox, Outbox Relay y mensajes venenosos | `fase-5` |
 | `fase-6-serverless` | Fase 6 — SendNotificationFunction (AWS Lambda + RIE), Event Trigger, DLQ y su reprocesamiento | `fase-6` |
+| `fase-7-api-gateway` | Fase 7 — API Gateway con Nginx (enrutamiento, rate limiting, correlation ID, propagación de `Authorization`) | `fase-7` |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.

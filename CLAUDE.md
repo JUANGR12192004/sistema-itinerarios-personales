@@ -941,8 +941,8 @@ pytest -v
     `pytest` en Itinerary Service deja **los mismos conteos** (antes del cambio, la cola real quedaba en 0) y no deja
     colas ni exchanges `test-*`. Totales de Itinerary Service: **169 pasan** con PostgreSQL y RabbitMQ; **144 pasan,
     25 omitidas** sin ellos.
-- **Fase 7 (API Gateway):** completada en la rama `fase-7-api-gateway`, pendiente del PR. ADR-009 aceptada: Nginx
-  (sección 9.1).
+- **Fase 7 (API Gateway):** completada y **fusionada en `main`** (PR #14, merge `044fa80`) con la **etiqueta `fase-7`**.
+  La rama `fase-7-api-gateway` se conserva como archivo de solo lectura. ADR-009 aceptada: Nginx (sección 9.1).
   - Entrega **7A** completada: carpeta `gateway/` con `Dockerfile` (`nginx:1.30.6-alpine`), `.dockerignore`,
     `templates/default.conf.template`, `.env.example` y README básico. `nginx -t` correcto. Demostración real
     (2026-11-11, macOS) con los servicios en uvicorn en `127.0.0.1` (Docker Desktop llega a ellos por
@@ -971,7 +971,8 @@ pytest -v
       `http://localhost:8000/api/itineraries`) y paso 8 en el orden de arranque de los otros cuatro README.
     - CI: job `api-gateway` en `tests.yml` (construye la imagen, `nginx -t` con `--add-host` y `pytest -v`; en el
       runner las pruebas aisladas se ejecutan de verdad porque hay Docker; las *smoke* quedan SKIPPED). SonarCloud:
-      `gateway` en `sonar.tests` (ADR-023). El job solo se verifica en GitHub tras el push.
+      `gateway` en `sonar.tests` (ADR-023). En el PR #14 pasaron todos los checks: el job "API Gateway" (las pruebas
+      aisladas corrieron en el runner Linux, donde `--add-host` no causó el problema de IPv6) y SonarCloud.
     - Demostración real (2026-11-11, macOS) con los ocho pasos del orden de arranque: `POST /api/itineraries` por el
       gateway con `X-Correlation-ID: demo-e2e-gateway` → 201 → relay `2 publicados` → trigger `PROCESSED` → fila en
       `notification_history` con `correlation_id = demo-e2e-gateway`. Sin el header, el gateway generó
@@ -981,4 +982,5 @@ pytest -v
       `fix/aislar-pruebas-itinerary` (`event_id=c3d4e5f6-...`) y lo envió a la DLQ (comportamiento de ADR-031): la DLQ
       quedó con 2 mensajes de prueba.
     - Pruebas del gateway: **43 pasan** con el sistema completo encendido.
-- **Siguiente:** PR de la Fase 7 (lo crea el equipo), etiqueta `fase-7` tras el merge, y después la Fase 8 (Frontend).
+- **Siguiente:** la Fase 8 (Frontend): consultar aeropuertos, mapa con Plotly JS y CRUD de itinerarios, servido por el
+  gateway desde el mismo origen (la ruta `/` está reservada para él, ADR-009).
