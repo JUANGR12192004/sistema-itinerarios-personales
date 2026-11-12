@@ -42,6 +42,18 @@ map $uri $target_service {
 }
 
 
+# --- Rate limiting (entrega 7B) ----------------------------------------------
+# Algoritmo "leaky bucket" (cubo con fuga): cada IP de origen tiene un cubo que
+# se vacía a GATEWAY_RATE_LIMIT (10 r/s). La "ráfaga" (burst) son las solicitudes
+# extra que caben en el cubo; con nodelay se atienden de inmediato en lugar de
+# esperar su turno. Cuando el cubo está lleno, la solicitud se rechaza con 429.
+# $binary_remote_addr es la IP en binario (4 bytes en IPv4): ocupa menos memoria.
+# La zona de 10 MB guarda unas 160 000 IP.
+limit_req_zone $binary_remote_addr zone=api_per_ip:10m rate=${GATEWAY_RATE_LIMIT};
+limit_req_status 429;
+limit_req_log_level warn;
+
+
 # --- Log de acceso -----------------------------------------------------------
 # Una línea por solicitud con su correlation_id (preparación de la Fase 9, donde
 # pasará a JSON). Nunca incluye el header Authorization.
@@ -119,6 +131,7 @@ server {
     # respuestas de los servicios.
     proxy_intercept_errors off;
     error_page 413 = @payload_too_large;
+    error_page 429 = @rate_limited;
     error_page 502 = @upstream_unavailable;
     error_page 504 = @upstream_timeout;
 
@@ -136,24 +149,34 @@ server {
         return 200 '{"status":"ok","service":"api-gateway"}';
     }
 
-    # /api/airports/... → Airport Service /airports/...
-    # Al llevar una ruta en proxy_pass, Nginx reemplaza el prefijo de la location
-    # por esa ruta: /api/airports/5?x=1 → /airports/5?x=1.
-    location = /api/airports {
-        proxy_pass http://airport_service/airports;
-    }
+    # Todo lo que empieza por /api/ pasa por el rate limiting; /health y / no.
+    # Las locations de adentro heredan el limit_req.
+    location /api/ {
+        limit_req zone=api_per_ip burst=${GATEWAY_RATE_BURST} nodelay;
 
-    location /api/airports/ {
-        proxy_pass http://airport_service/airports/;
-    }
+        # /api/airports/... → Airport Service /airports/...
+        # Al llevar una ruta en proxy_pass, Nginx reemplaza el prefijo de la
+        # location por esa ruta: /api/airports/5?x=1 → /airports/5?x=1.
+        location = /api/airports {
+            proxy_pass http://airport_service/airports;
+        }
 
-    # /api/itineraries/... → Itinerary Service /itineraries/...
-    location = /api/itineraries {
-        proxy_pass http://itinerary_service/itineraries;
-    }
+        location /api/airports/ {
+            proxy_pass http://airport_service/airports/;
+        }
 
-    location /api/itineraries/ {
-        proxy_pass http://itinerary_service/itineraries/;
+        # /api/itineraries/... → Itinerary Service /itineraries/...
+        location = /api/itineraries {
+            proxy_pass http://itinerary_service/itineraries;
+        }
+
+        location /api/itineraries/ {
+            proxy_pass http://itinerary_service/itineraries/;
+        }
+
+        # Otra ruta bajo /api/ (por ejemplo /api/foo o /api/airportsX): no existe.
+        default_type "application/json; charset=utf-8";
+        return 404 '{"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe en el API Gateway","details":null},"correlation_id":"$correlation_id"}';
     }
 
     # Cualquier otra ruta no existe en el gateway.
@@ -167,6 +190,16 @@ server {
     location @payload_too_large {
         default_type "application/json; charset=utf-8";
         return 413 '{"error":{"code":"PAYLOAD_TOO_LARGE","message":"El cuerpo de la solicitud supera el tamaño máximo permitido (1 MB)","details":null},"correlation_id":"$correlation_id"}';
+    }
+
+    # Retry-After: segundos que el cliente debería esperar antes de reintentar.
+    # Una location con su propio add_header deja de heredar los del server, por
+    # eso se repite aquí X-Correlation-ID.
+    location @rate_limited {
+        default_type "application/json; charset=utf-8";
+        add_header Retry-After 1 always;
+        add_header X-Correlation-ID $correlation_id always;
+        return 429 '{"error":{"code":"RATE_LIMIT_EXCEEDED","message":"Se superó el límite de solicitudes. Intente de nuevo en unos segundos","details":{"retry_after_seconds":1}},"correlation_id":"$correlation_id"}';
     }
 
     location @upstream_unavailable {

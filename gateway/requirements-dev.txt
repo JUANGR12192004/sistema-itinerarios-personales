@@ -1,0 +1,8 @@
+# Dependencias de DESARROLLO del API Gateway (solo para las pruebas, entrega 7B).
+# El gateway es Nginx: su imagen no usa Python ni estas librerías.
+
+# Pruebas
+pytest==9.1.1
+
+# Cliente HTTP para llamar al gateway desde las pruebas (la misma versión que usan los servicios)
+httpx==0.28.1

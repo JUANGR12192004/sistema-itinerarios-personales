@@ -941,4 +941,15 @@ pytest -v
     `X-Correlation-ID` reenviado, generado y reemplazado si es inválido, y redirección de `/api/airports/` traducida
     por `proxy_redirect`. Con un servidor eco temporal (fuera del repositorio): `Authorization` y `X-Forwarded-*`
     llegan al servicio, 504 `UPSTREAM_TIMEOUT` con un timeout de 2 s, y un 502 generado por el servicio pasa sin cambios.
-- **Siguiente:** entrega 7B (rate limiting y pruebas del gateway).
+  - Entrega **7B** completada: rate limiting (`limit_req_zone` por IP, `location /api/` que agrupa las rutas de los
+    servicios, variables `GATEWAY_RATE_LIMIT` y `GATEWAY_RATE_BURST`, 429 `RATE_LIMIT_EXCEEDED` con `Retry-After: 1`).
+    Pruebas en `gateway/tests` (entorno virtual `gateway/.venv`, `requirements-dev.txt` con pytest y httpx): contenedores
+    propios del gateway (`api-gateway:test`, puertos libres de 127.0.0.1, borrados al terminar) contra servidores eco de
+    Python (`tests/echo_server.py`), y pruebas *smoke* solo `GET` contra el gateway real (`GATEWAY_URL`, omitidas si no
+    corre). Hallazgo: en Docker Desktop, `--add-host=host.docker.internal:host-gateway` agrega una IPv6 inalcanzable y
+    la mitad de las solicitudes daba 502, así que las pruebas solo lo usan en Linux (documentado en ADR-009 y en el README
+    del gateway). Total: **40 pasan, 3 omitidas** sin el gateway real; **43 pasan** con él y los dos servicios (3
+    ejecuciones seguidas estables, ~5 s, sin contenedores sobrantes). Tras la suite completa, el gateway real seguía
+    aceptando 18 solicitudes seguidas (su límite no se tocó). Demostración real en zsh: 22 × 200 y luego 429. No
+    verificado en Windows: si las pruebas de enrutamiento dan 502, `GATEWAY_TEST_ECHO_HOST=0.0.0.0`.
+- **Siguiente:** entrega 7C (documentación, CI del gateway y demostración de punta a punta).

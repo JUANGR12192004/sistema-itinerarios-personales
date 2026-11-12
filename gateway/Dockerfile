@@ -11,6 +11,8 @@ ENV AIRPORT_SERVICE_UPSTREAM=host.docker.internal:8001 \
     ITINERARY_SERVICE_UPSTREAM=host.docker.internal:8002 \
     GATEWAY_PROXY_CONNECT_TIMEOUT=2s \
     GATEWAY_PROXY_READ_TIMEOUT=15s \
+    GATEWAY_RATE_LIMIT=10r/s \
+    GATEWAY_RATE_BURST=20 \
     NGINX_ENVSUBST_FILTER="_UPSTREAM\$|^GATEWAY_"
 
 # Al arrancar, la imagen convierte templates/*.template en /etc/nginx/conf.d/*.conf.
