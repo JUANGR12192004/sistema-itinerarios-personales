@@ -8,8 +8,8 @@ import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-import app.tracing as tracing_module
-from app.tracing import setup_tracing
+import observability.tracing as tracing_module
+from observability.tracing import setup_tracing
 
 
 def _reset_otel_global():
@@ -84,7 +84,7 @@ def test_otel_context_filter_reads_active_span():
     import logging
     from io import StringIO
 
-    from app.logging_config import AppJsonFormatter, CorrelationIdFilter, OTelContextFilter
+    from observability.logging_config import AppJsonFormatter, CorrelationIdFilter, OTelContextFilter
 
     exporter = InMemorySpanExporter()
     setup_tracing("airport-service-test", exporter=exporter)

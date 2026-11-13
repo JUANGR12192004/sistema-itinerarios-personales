@@ -1,4 +1,8 @@
-# Dependencias de Itinerary Service (Fase 3)
+# Dependencias de Itinerary Service (Fases 3 y 9)
+
+# Paquete compartido de observabilidad (Microservice Chassis Pattern, Fase 9)
+-e ../../libs/observability
+
 
 # Framework web y servidor ASGI
 fastapi==0.162.0

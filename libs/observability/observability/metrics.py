@@ -1,10 +1,11 @@
-"""Métricas de Prometheus para Airport Service (ADR-038, Fase 9C).
+"""Métricas HTTP de Prometheus compartidas por los servicios FastAPI (ADR-038, Fase 9C).
 
-Registra el recuento y la duración de las solicitudes HTTP recibidas y monta
-el endpoint /metrics que Prometheus consulta cada 15 s.
+Expone HTTP_REQUESTS (Counter), HTTP_DURATION (Histogram), metrics_app (ASGI) y
+metrics_middleware (middleware FastAPI). Usado por Airport Service e Itinerary Service.
 
-Las métricas se definen en este módulo (nivel de módulo = se registran una sola vez
-en el CollectorRegistry global), y se usan en el middleware de main.py.
+Los contadores específicos de cada componente (itineraries_created_total,
+notifications_dispatched_total y los contadores del Outbox Relay) se definen en
+el módulo metrics.py del componente correspondiente.
 """
 
 import time
@@ -34,12 +35,12 @@ async def metrics_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """Middleware que registra métricas HTTP para cada solicitud.
+    """Registra métricas HTTP para cada solicitud.
 
     Se omite /metrics para no auto-instrumentar el propio endpoint de métricas.
-    La plantilla de la ruta (/airports/{id}) se lee DESPUÉS de call_next, que es
-    cuando el router ya resolvió la ruta y la dejó en request.scope["route"].
-    Usar la plantilla evita la explosión de cardinalidad (una serie por ID numérico).
+    La plantilla de la ruta se lee DESPUÉS de call_next, cuando el router ya la resolvió
+    y la dejó en request.scope["route"]. Usar la plantilla evita la explosión de
+    cardinalidad (una serie por ID numérico en lugar de una por ruta parametrizada).
     """
     if request.url.path == "/metrics":
         return await call_next(request)

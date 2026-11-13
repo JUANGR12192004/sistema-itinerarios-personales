@@ -1,4 +1,8 @@
-# Dependencias de Airport Service (Fases 1 y 2)
+# Dependencias de Airport Service (Fases 1, 2 y 9)
+
+# Paquete compartido de observabilidad (Microservice Chassis Pattern, Fase 9)
+-e ../../libs/observability
+
 
 # Framework web y servidor ASGI para ejecutarlo
 fastapi==0.162.0

@@ -33,9 +33,9 @@ from app.infrastructure.cache.store import RedisCacheStore
 from app.infrastructure.resilience.circuit_breaker import CircuitBreaker
 from app.infrastructure.resilience.resilient_provider import ResilientAirportProvider
 from app.infrastructure.resilience.retry import RetryPolicy
-from app.logging_config import configure_logging
-from app.metrics import metrics_app, metrics_middleware
-from app.tracing import setup_tracing
+from observability.logging_config import configure_logging
+from observability.metrics import metrics_app, metrics_middleware
+from observability.tracing import setup_tracing
 
 
 def build_airport_provider(settings: Settings, http_client: httpx.AsyncClient, redis: Redis) -> AirportProvider:
@@ -68,7 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Crea la aplicación FastAPI con sus rutas, errores y dependencias."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.service_name)
-    setup_tracing(settings.service_name)
+    setup_tracing(settings.service_name, instrumentors=["fastapi", "httpx"])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -23,7 +23,7 @@ def _reset_otel_global():
 
 @pytest.fixture
 def reset_tracing():
-    import app.tracing as tracing_module
+    import observability.tracing as tracing_module
 
     tracing_module._initialized = False
     _reset_otel_global()
@@ -270,7 +270,7 @@ def test_relay_restaura_contexto_otel_desde_traceparent(reset_tracing):
     from opentelemetry import trace
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-    from app.tracing import setup_tracing
+    from observability.tracing import setup_tracing
 
     setup_tracing("itinerary-service-test", exporter=InMemorySpanExporter())
 

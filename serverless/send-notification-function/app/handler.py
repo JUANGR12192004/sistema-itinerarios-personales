@@ -42,8 +42,8 @@ from app.infrastructure.persistence.database import get_session_factory
 from app.infrastructure.persistence.errors import translate_database_errors
 from app.infrastructure.persistence.repository import SqlAlchemyNotificationHistoryRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
-from app.logging_config import configure_logging
-from app.tracing import setup_tracing
+from observability.logging_config import configure_logging
+from observability.tracing import setup_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -129,4 +129,4 @@ def _configure_logging() -> None:
     """Configura logs JSON y trazas. Idempotente: no reinicializa entre invocaciones."""
     s = get_settings()
     configure_logging(s.log_level, s.function_name)
-    setup_tracing(s.function_name)
+    setup_tracing(s.function_name, instrumentors=["sqlalchemy"], batch=False)

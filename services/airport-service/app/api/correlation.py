@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 
-from app.logging_config import set_correlation_id
+from observability.logging_config import set_correlation_id
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 MAX_CORRELATION_ID_LENGTH = 128

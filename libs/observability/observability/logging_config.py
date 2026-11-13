@@ -1,7 +1,10 @@
-"""Configuración de logs JSON (ADR-034, Fase 9A).
+"""Logs JSON estructurados compartidos por todos los componentes (ADR-034, Fase 9A).
 
-Mismo patrón que Airport Service: OTelContextFilter, CorrelationIdFilter,
-AppJsonFormatter y configure_logging. Ver Airport Service para la explicación completa.
+Componentes:
+- OTelContextFilter: inyecta trace_id y span_id del span activo de OpenTelemetry.
+- CorrelationIdFilter: inyecta correlation_id del ContextVar del componente.
+- AppJsonFormatter: formato JSON con los 8 campos de ADR-034.
+- configure_logging: idempotente, configura el logger 'app' con StreamHandler JSON.
 """
 
 import logging
@@ -10,6 +13,9 @@ from datetime import datetime, timezone
 
 from pythonjsonlogger.json import JsonFormatter
 
+# ContextVar por solicitud (asyncio copia el contexto por tarea, así que cada
+# solicitud HTTP tiene su propio valor). El relay y el trigger lo dejan vacío
+# salvo cuando procesan un mensaje AMQP concreto.
 _correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 
 
@@ -48,7 +54,12 @@ class CorrelationIdFilter(logging.Filter):
 
 
 class AppJsonFormatter(JsonFormatter):
-    """Formato JSON con los campos de ADR-034."""
+    """Formato JSON con los campos de ADR-034.
+
+    Campos en orden: timestamp, level, service, logger, message,
+    correlation_id, trace_id, span_id. Se incluyen además los campos
+    extra que el llamador pase vía extra={...}.
+    """
 
     def __init__(self, service_name: str) -> None:
         super().__init__()
@@ -83,7 +94,12 @@ class AppJsonFormatter(JsonFormatter):
 
 
 def configure_logging(level: str, service_name: str) -> None:
-    """Configura logs JSON en el logger 'app'. Idempotente."""
+    """Configura logs JSON en el logger 'app'. Idempotente: no reinicializa si ya hay handler.
+
+    Se llama una vez al arrancar el servicio (o al primer acceso del handler de Lambda).
+    Con propagate=False los logs de 'app' van directo a este StreamHandler y no al
+    root logger del runtime (evita duplicados en Lambda).
+    """
     app_logger = logging.getLogger("app")
     if app_logger.handlers:
         return

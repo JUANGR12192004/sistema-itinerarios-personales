@@ -4,7 +4,7 @@ import json
 import logging
 from io import StringIO
 
-from app.logging_config import (
+from observability.logging_config import (
     AppJsonFormatter,
     CorrelationIdFilter,
     OTelContextFilter,

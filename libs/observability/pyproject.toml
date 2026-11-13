@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "observability"
+version = "0.1.0"
+description = "Microservice Chassis: logs JSON, trazas OTel y métricas HTTP compartidos (ADR-034, ADR-035, ADR-038)"
+requires-python = ">=3.12"
+# Las dependencias se gestionan en requirements.txt de cada componente: todas usan versiones
+# fijas distintas (python-json-logger, opentelemetry-sdk, prometheus-client, etc.).
+# Este paquete solo aporta código Python; los paquetes que necesita ya están en cada venv.
+dependencies = []

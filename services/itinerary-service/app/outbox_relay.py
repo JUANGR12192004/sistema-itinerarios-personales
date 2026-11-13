@@ -25,8 +25,8 @@ from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventP
 from app.infrastructure.persistence.database import get_session_factory
 from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
-from app.logging_config import configure_logging
-from app.tracing import setup_tracing
+from observability.logging_config import configure_logging
+from observability.tracing import setup_tracing
 
 # Métricas del relay (proceso separado de la API; puerto 9101).
 # Se definen aquí porque solo este proceso las actualiza.
@@ -114,7 +114,7 @@ def main() -> None:
     settings = get_settings()
     # "itinerary-service-relay" distingue los logs del relay de los de la API en Jaeger
     configure_logging(settings.log_level, "itinerary-service-relay")
-    setup_tracing("itinerary-service-relay")
+    setup_tracing("itinerary-service-relay", instrumentors=["sqlalchemy", "pika"])
     # Servidor HTTP de métricas en un hilo de fondo; Prometheus consulta este puerto (ADR-038)
     start_http_server(settings.outbox_relay_metrics_port)
     logger.info("Servidor de métricas del relay escuchando en el puerto %d", settings.outbox_relay_metrics_port)
