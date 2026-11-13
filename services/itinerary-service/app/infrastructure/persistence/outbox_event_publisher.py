@@ -12,6 +12,7 @@ El Outbox Relay (entrega 5B) publica después los eventos pendientes.
 
 import logging
 
+from opentelemetry import propagate
 from sqlalchemy.orm import Session
 
 from app.application.events import ItineraryCreatedEvent
@@ -22,6 +23,13 @@ from app.infrastructure.persistence.models import OutboxEventORM
 logger = logging.getLogger(__name__)
 
 
+def _capture_traceparent() -> str | None:
+    """Captura el traceparent W3C del span activo, o None si no hay span."""
+    carrier: dict[str, str] = {}
+    propagate.inject(carrier)
+    return carrier.get("traceparent")
+
+
 class OutboxEventPublisher(EventPublisher):
     """Registra el evento en `outbox_events` dentro de la transacción actual."""
 
@@ -29,7 +37,7 @@ class OutboxEventPublisher(EventPublisher):
         self._session = session
 
     def publish(self, event: ItineraryCreatedEvent) -> None:
-        message = OutboxMessage.from_event(event)
+        message = OutboxMessage.from_event(event, traceparent=_capture_traceparent())
         self._session.add(_to_orm(message))
         logger.debug(
             "Evento %s (event_id=%s) agregado a la outbox; se confirma con el commit",
@@ -51,4 +59,5 @@ def _to_orm(message: OutboxMessage) -> OutboxEventORM:
         attempts=message.attempts,
         last_error=message.last_error,
         failed_at=message.failed_at,
+        traceparent=message.traceparent,
     )

@@ -20,7 +20,7 @@ class ScriptedInvoker(FunctionInvoker):
         self._results = list(results)
         self.calls: list[Any] = []
 
-    def invoke(self, event: Any) -> InvocationResult:
+    def invoke(self, event: Any, traceparent: str | None = None) -> InvocationResult:
         self.calls.append(event)
         if len(self._results) > 1:
             return self._results.pop(0)

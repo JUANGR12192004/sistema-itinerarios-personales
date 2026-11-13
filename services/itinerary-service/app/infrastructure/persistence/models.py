@@ -64,3 +64,7 @@ class OutboxEventORM(Base):
     last_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     # Fecha del fallo permanente (mensaje venenoso, ADR-027); NULL si no lo hubo
     failed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    # Contexto W3C traceparent del span HTTP que creó el itinerario (ADR-037, Fase 9B).
+    # El relay lo restaura como contexto OTel antes de publicar en RabbitMQ, para que
+    # los spans del relay y del trigger sean hijos del span original.
+    traceparent: Mapped[str | None] = mapped_column(sa.String(55), nullable=True)

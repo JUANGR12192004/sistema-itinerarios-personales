@@ -24,6 +24,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from opentelemetry import context as otel_context
+from opentelemetry import propagate, trace
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.events import ItineraryCreatedEvent
@@ -41,6 +43,7 @@ from app.infrastructure.persistence.errors import translate_database_errors
 from app.infrastructure.persistence.repository import SqlAlchemyNotificationHistoryRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from app.logging_config import configure_logging
+from app.tracing import setup_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +61,32 @@ def process_event(event: Any, run: RunUseCase) -> dict[str, Any]:
     """Valida el evento, ejecuta el caso de uso y arma la respuesta.
 
     `run` se recibe como parámetro para probar el handler con un caso de uso falso.
+    Lee `traceparent` del evento para continuar la traza distribuida (ADR-037, Fase 9B).
     """
+    # Restaura el contexto OTel del span original (creó el itinerario, publicó en RabbitMQ, etc.)
+    # para que el span de esta invocación sea su hijo. `extra="ignore"` en el schema lo descarta.
+    traceparent = event.get("traceparent") if isinstance(event, dict) else None
+    parent_ctx = propagate.extract({"traceparent": traceparent or ""})
+    token = otel_context.attach(parent_ctx)
     try:
-        notification_event = parse_event(event)
-    except InvalidEventError as error:
-        logger.warning(
-            "Evento rechazado (fallo permanente): event_id=%s motivo=%s",
-            error.event_id,
-            error.reason,
-        )
-        return {
-            "status": ProcessingStatus.REJECTED.value,
-            "event_id": str(error.event_id) if error.event_id else None,
-            "reason": error.reason,
-        }
-
-    return _to_response(run(notification_event))
+        tracer = trace.get_tracer("app.handler")
+        with tracer.start_as_current_span("send_notification"):
+            try:
+                notification_event = parse_event(event)
+            except InvalidEventError as error:
+                logger.warning(
+                    "Evento rechazado (fallo permanente): event_id=%s motivo=%s",
+                    error.event_id,
+                    error.reason,
+                )
+                return {
+                    "status": ProcessingStatus.REJECTED.value,
+                    "event_id": str(error.event_id) if error.event_id else None,
+                    "reason": error.reason,
+                }
+            return _to_response(run(notification_event))
+    finally:
+        otel_context.detach(token)
 
 
 def run_use_case(
@@ -113,10 +126,7 @@ def _to_response(result: NotificationResult) -> dict[str, Any]:
 
 
 def _configure_logging() -> None:
-    """Configura logs JSON en el logger 'app'. Idempotente: no reinicializa entre invocaciones.
-
-    En Lambda el runtime pre-instala un handler en el root logger; configure_logging
-    agrega el suyo al logger 'app' con propagate=False para evitar duplicados.
-    """
+    """Configura logs JSON y trazas. Idempotente: no reinicializa entre invocaciones."""
     s = get_settings()
     configure_logging(s.log_level, s.function_name)
+    setup_tracing(s.function_name)

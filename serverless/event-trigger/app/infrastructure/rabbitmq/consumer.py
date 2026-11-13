@@ -95,7 +95,8 @@ class RabbitMQConsumer:
 
                 if method.redelivered:
                     logger.info("Mensaje entregado de nuevo: message_id=%s", properties.message_id)
-                decision = handler.handle(body, properties.message_id)
+                traceparent = _extract_traceparent(properties.headers)
+                decision = handler.handle(body, properties.message_id, traceparent=traceparent)
                 apply_decision(channel, method.delivery_tag, decision)
                 processed += 1
                 if max_messages is not None and processed >= max_messages:
@@ -105,6 +106,16 @@ class RabbitMQConsumer:
             return processed
         finally:
             _close_quietly(connection)
+
+
+def _extract_traceparent(headers: dict | None) -> str | None:
+    """Lee el traceparent W3C de los headers AMQP. pika puede devolverlo como bytes o str."""
+    if not headers:
+        return None
+    value = headers.get("traceparent")
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value) if value is not None else None
 
 
 def _close_quietly(connection: BlockingConnection) -> None:

@@ -75,7 +75,9 @@ class DeliveryHandler:
         self._policy = policy
         self._sleep = sleep
 
-    def handle(self, body: bytes, message_id: str | None = None) -> Decision:
+    def handle(
+        self, body: bytes, message_id: str | None = None, traceparent: str | None = None
+    ) -> Decision:
         try:
             event = json.loads(body.decode("utf-8"))
         except ValueError as exc:  # incluye UnicodeDecodeError y JSONDecodeError
@@ -94,7 +96,7 @@ class DeliveryHandler:
         function_failures = 0
 
         while True:
-            result = self._invoker.invoke(event)
+            result = self._invoker.invoke(event, traceparent=traceparent)
 
             if result.outcome is InvocationOutcome.SUCCESS:
                 logger.info("Evento procesado (%s): %s. ACK", result.detail, label)

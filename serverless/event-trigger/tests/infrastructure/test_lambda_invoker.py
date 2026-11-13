@@ -118,6 +118,31 @@ def test_http_5xx_es_fallo_de_infraestructura(invoker, status_code):
 
 
 @respx.mock
+def test_traceparent_se_agrega_al_cuerpo_del_evento(invoker):
+    """El traceparent se inyecta en el cuerpo para que la función continúe la traza (ADR-037)."""
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={"status": "PROCESSED"}))
+    tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+    invoker.invoke(EVENT, traceparent=tp)
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["traceparent"] == tp
+    # El resto del evento no cambia
+    assert sent["event_id"] == EVENT["event_id"]
+
+
+@respx.mock
+def test_sin_traceparent_el_evento_no_cambia(invoker):
+    """Sin traceparent, el evento se envía sin modificar."""
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={"status": "PROCESSED"}))
+
+    invoker.invoke(EVENT)
+
+    sent = json.loads(route.calls.last.request.content)
+    assert "traceparent" not in sent
+
+
+@respx.mock
 @pytest.mark.parametrize("status_code", [400, 404, 413])
 def test_otro_codigo_http_es_error_de_la_funcion(invoker, status_code):
     respx.post(URL).mock(return_value=httpx.Response(status_code, text="error"))

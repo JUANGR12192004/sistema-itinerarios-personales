@@ -10,9 +10,11 @@ from app.api.error_handler import add_error_handlers
 from app.api.routes import router
 from app.config import get_settings
 from app.logging_config import configure_logging, set_correlation_id
+from app.tracing import setup_tracing
 
 settings = get_settings()
 configure_logging(settings.log_level, settings.service_name)
+setup_tracing(settings.service_name)
 logger = logging.getLogger(__name__)
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"

@@ -1,5 +1,5 @@
 # =============================================================================
-# API Gateway del Sistema de Itinerarios Personales (Fase 7, ADR-009)
+# API Gateway del Sistema de Itinerarios Personales (Fases 7-9, ADR-009, ADR-036)
 #
 # Esta es una PLANTILLA. Al arrancar el contenedor, el script de la imagen oficial
 # de Nginx (20-envsubst-on-templates.sh) reemplaza las variables de entorno que
@@ -13,6 +13,17 @@
 #
 # Este archivo se incluye dentro del bloque http {} de /etc/nginx/nginx.conf.
 # =============================================================================
+
+# --- OpenTelemetry (ADR-036, Fase 9B) ----------------------------------------
+# ngx_otel_module viene pre-cargado en nginx:1.30.6-alpine-otel (el Dockerfile
+# usa esa imagen base). Aquí solo se configura el exportador y el nombre del servicio;
+# no hace falta `load_module` porque la imagen ya lo incluye en su nginx.conf raíz.
+# Si OTEL_ENABLED=false, `otel_trace off` en la location deshabilita la instrumentación.
+otel_exporter {
+    endpoint ${OTEL_EXPORTER_OTLP_HOST}:4317;
+}
+
+otel_service_name api-gateway;
 
 
 # --- Correlation ID ----------------------------------------------------------
@@ -54,10 +65,8 @@ limit_req_status 429;
 limit_req_log_level warn;
 
 
-# --- Log de acceso en JSON (ADR-034, Fase 9A) --------------------------------
-# escape=json protege caracteres especiales en los valores de las variables Nginx
-# (p. ej. comillas en $request_uri). Los campos trace_id y span_id se rellenan en
-# la Fase 9B cuando se carga ngx_otel_module y se dispone de $otel_trace_id.
+# --- Log de acceso en JSON (ADR-034/036, Fase 9B) ----------------------------
+# $otel_trace_id y $otel_span_id provienen de ngx_otel_module (Fase 9B).
 # Nunca incluye el header Authorization.
 log_format json_access escape=json
     '{"timestamp":"$time_iso8601",'
@@ -71,8 +80,8 @@ log_format json_access escape=json
     '"upstream":"$upstream_addr",'
     '"upstream_status":"$upstream_status",'
     '"correlation_id":"$correlation_id",'
-    '"trace_id":"",'
-    '"span_id":""}';
+    '"trace_id":"$otel_trace_id",'
+    '"span_id":"$otel_span_id"}';
 
 
 
@@ -116,6 +125,13 @@ server {
     # reintentar un POST podría crear un itinerario duplicado.
     proxy_next_upstream off;
 
+    # --- OpenTelemetry: tracing activo en las rutas de la API (ADR-036) -------
+    # GATEWAY_OTEL_TRACE acepta "on" u "off" (valores que entiende Nginx).
+    # otel_trace_context=propagate: inyecta el traceparent W3C en las solicitudes
+    # enviadas a los servicios (y lee el que llega del cliente).
+    otel_trace ${GATEWAY_OTEL_TRACE};
+    otel_trace_context propagate;
+
     # --- Headers que se reenvían a los servicios ------------------------------
     # (Se declaran aquí y en ninguna location: en Nginx, si una location declara
     # un proxy_set_header, deja de heredar todos los del server.)
@@ -124,6 +140,10 @@ server {
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Correlation-ID  $correlation_id;
+    # traceparent W3C: ngx_otel_module lo inyecta automáticamente al propagar el contexto.
+    # Esta línea lo asegura también cuando otel_trace_context=propagate no sea suficiente.
+    proxy_set_header traceparent       $http_traceparent;
+    proxy_set_header tracestate        $http_tracestate;
     # Preparación de JWT: el token se reenvía tal cual, sin validarlo todavía.
     # Si el cliente no envía el header, Nginx no lo agrega (valor vacío).
     proxy_set_header Authorization     $http_authorization;

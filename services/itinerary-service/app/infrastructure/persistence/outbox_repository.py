@@ -76,4 +76,5 @@ def _to_message(orm: OutboxEventORM) -> OutboxMessage:
         attempts=orm.attempts,
         last_error=orm.last_error,
         failed_at=orm.failed_at,
+        traceparent=orm.traceparent,
     )

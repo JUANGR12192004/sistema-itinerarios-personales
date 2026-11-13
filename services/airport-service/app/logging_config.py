@@ -30,18 +30,17 @@ def get_log_correlation_id() -> str:
 
 
 class OTelContextFilter(logging.Filter):
-    """Inyecta trace_id y span_id del span activo de OpenTelemetry.
+    """Inyecta trace_id y span_id del span activo de OpenTelemetry (ADR-035, Fase 9B).
 
-    Vacíos en la Fase 9A. En la 9B se reemplaza por:
-        span = trace.get_current_span()
-        ctx  = span.get_span_context()
-        record.trace_id = format(ctx.trace_id, "032x") if ctx.is_valid else ""
-        record.span_id  = format(ctx.span_id,  "016x") if ctx.is_valid else ""
+    Si no hay span activo (o OTEL está desactivado), deja los campos vacíos.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.trace_id = ""
-        record.span_id = ""
+        from opentelemetry import trace
+
+        ctx = trace.get_current_span().get_span_context()
+        record.trace_id = format(ctx.trace_id, "032x") if ctx.is_valid else ""
+        record.span_id = format(ctx.span_id, "016x") if ctx.is_valid else ""
         return True
 
 

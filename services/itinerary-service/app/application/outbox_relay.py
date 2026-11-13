@@ -25,6 +25,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from opentelemetry import context as otel_context
+from opentelemetry import propagate
+
 from app.application.events import ItineraryCreatedEvent
 from app.application.exceptions import EventPublishError
 from app.application.outbox import OutboxMessage
@@ -90,6 +93,12 @@ class OutboxRelay:
                 )
                 continue
 
+            # Restaura el contexto OTel original de la solicitud HTTP (ADR-037, Fase 9B).
+            # La auto-instrumentación de pika inyecta el span activo en los headers AMQP.
+            # Si traceparent es None (pruebas sin OTel o eventos anteriores a la 9B),
+            # propagate.extract devuelve un contexto vacío y otel_context.attach es un no-op.
+            parent_ctx = propagate.extract({"traceparent": message.traceparent or ""})
+            token = otel_context.attach(parent_ctx)
             try:
                 self._publisher.publish(event)
             except EventPublishError as exc:
@@ -106,10 +115,12 @@ class OutboxRelay:
                     message.attempts + 1,
                     exc,
                 )
+                otel_context.detach(token)
                 break
 
             self._outbox.mark_published(message.id, self._clock())
             published += 1
+            otel_context.detach(token)
 
         self._unit_of_work.commit()
 

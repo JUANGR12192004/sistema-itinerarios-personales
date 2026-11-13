@@ -43,9 +43,12 @@ class OutboxMessage:
     attempts: int = 0
     last_error: str | None = None
     failed_at: datetime | None = None
+    # Contexto W3C traceparent capturado en el momento de la solicitud HTTP (ADR-037, Fase 9B).
+    # Vacío si no hay span OTel activo (por ejemplo, en pruebas sin OTel configurado).
+    traceparent: str | None = None
 
     @classmethod
-    def from_event(cls, event: ItineraryCreatedEvent) -> OutboxMessage:
+    def from_event(cls, event: ItineraryCreatedEvent, traceparent: str | None = None) -> OutboxMessage:
         """Crea el mensaje pendiente a partir del evento de integración."""
         return cls(
             id=event.event_id,
@@ -55,4 +58,5 @@ class OutboxMessage:
             event_version=event.EVENT_VERSION,
             payload=event.to_dict(),
             occurred_at=event.occurred_at,
+            traceparent=traceparent,
         )

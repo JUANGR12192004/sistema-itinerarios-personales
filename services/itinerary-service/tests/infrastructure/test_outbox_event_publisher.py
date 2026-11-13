@@ -7,11 +7,32 @@ La prueba contra PostgreSQL real está en tests/integration/test_outbox_integrat
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.api.dependencies import get_event_publisher
 from app.application.events import ItineraryCreatedEvent
 from app.domain.itinerary import Itinerary
 from app.infrastructure.persistence.models import OutboxEventORM
 from app.infrastructure.persistence.outbox_event_publisher import OutboxEventPublisher
+
+
+def _reset_otel_global():
+    import opentelemetry.trace as _trace
+    from opentelemetry.util._once import Once
+
+    _trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
+    _trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def reset_tracing():
+    import app.tracing as tracing_module
+
+    tracing_module._initialized = False
+    _reset_otel_global()
+    yield
+    tracing_module._initialized = False
+    _reset_otel_global()
 
 
 class FakeSession:
@@ -83,3 +104,35 @@ def test_la_api_inyecta_el_adaptador_outbox():
     publisher = get_event_publisher(session=FakeSession())  # type: ignore[arg-type]
 
     assert isinstance(publisher, OutboxEventPublisher)
+
+
+def test_traceparent_es_none_sin_span_activo():
+    """Sin OTel configurado, propagate.inject devuelve un carrier vacío → traceparent None."""
+    session = FakeSession()
+
+    OutboxEventPublisher(session).publish(_event())  # type: ignore[arg-type]
+
+    row = session.added[0]
+    assert row.traceparent is None
+
+
+def test_traceparent_captura_el_span_activo(reset_tracing):
+    """Con un span OTel activo, OutboxEventPublisher captura su traceparent W3C (ADR-037)."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from app.tracing import setup_tracing
+
+    setup_tracing("itinerary-service-test", exporter=InMemorySpanExporter())
+    session = FakeSession()
+
+    with trace.get_tracer("test").start_as_current_span("crear-itinerario") as span:
+        OutboxEventPublisher(session).publish(_event())  # type: ignore[arg-type]
+        ctx = span.get_span_context()
+
+    row = session.added[0]
+    assert row.traceparent is not None
+    # El traceparent W3C tiene la forma 00-{trace_id_32hex}-{span_id_16hex}-{flags_2hex}
+    assert row.traceparent.startswith("00-")
+    expected_trace_id = format(ctx.trace_id, "032x")
+    assert expected_trace_id in row.traceparent
