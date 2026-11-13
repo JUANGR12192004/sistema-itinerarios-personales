@@ -15,10 +15,13 @@
 # =============================================================================
 
 # --- OpenTelemetry (ADR-036, Fase 9B) ----------------------------------------
-# ngx_otel_module viene pre-cargado en nginx:1.30.6-alpine-otel (el Dockerfile
-# usa esa imagen base). Aquí solo se configura el exportador y el nombre del servicio;
-# no hace falta `load_module` porque la imagen ya lo incluye en su nginx.conf raíz.
-# Si OTEL_ENABLED=false, `otel_trace off` en la location deshabilita la instrumentación.
+# ngx_otel_module viene en la imagen nginx:1.30.6-alpine-otel pero no se carga
+# automáticamente. gateway/nginx.conf lo carga con `load_module` antes del bloque
+# events{}: el único contexto donde Nginx acepta esa directiva. Este archivo
+# (conf.d/) vive dentro del bloque http{} y solo configura el exportador.
+# Si GATEWAY_OTEL_TRACE=off, otel_trace desactiva la instrumentación.
+# otel_trace_context=propagate: lee el traceparent del cliente, crea un span hijo
+# e inyecta el nuevo traceparent en la solicitud al servicio destino.
 otel_exporter {
     endpoint ${OTEL_EXPORTER_OTLP_HOST}:4317;
 }
@@ -140,10 +143,6 @@ server {
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Correlation-ID  $correlation_id;
-    # traceparent W3C: ngx_otel_module lo inyecta automáticamente al propagar el contexto.
-    # Esta línea lo asegura también cuando otel_trace_context=propagate no sea suficiente.
-    proxy_set_header traceparent       $http_traceparent;
-    proxy_set_header tracestate        $http_tracestate;
     # Preparación de JWT: el token se reenvía tal cual, sin validarlo todavía.
     # Si el cliente no envía el header, Nginx no lo agrega (valor vacío).
     proxy_set_header Authorization     $http_authorization;

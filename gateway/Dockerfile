@@ -21,6 +21,9 @@ ENV AIRPORT_SERVICE_UPSTREAM=host.docker.internal:8001 \
 # Desde la Fase 8 el contexto de build es la raíz del repositorio:
 #   docker build -t api-gateway -f gateway/Dockerfile .
 # El .dockerignore asociado es gateway/Dockerfile.dockerignore.
+# nginx.conf propio: carga el módulo OTel dinámico (load_module). La imagen
+# incluye el .so pero no lo carga en su nginx.conf por defecto.
+COPY gateway/nginx.conf /etc/nginx/nginx.conf
 COPY gateway/templates/ /etc/nginx/templates/
 COPY frontend/ /usr/share/nginx/html/
 

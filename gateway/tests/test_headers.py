@@ -9,6 +9,8 @@ from tests.echo_server import SERVICE_CORRELATION_ID
 from tests.gateway_containers import RunningGateway
 
 GENERATED_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# Formato W3C: 00-{32hex}-{16hex}-{2hex}
+TRACEPARENT_RE = re.compile(r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
 
 
 def _received_headers(response: httpx.Response) -> dict[str, str]:
@@ -75,3 +77,30 @@ def test_client_data_is_forwarded(client: httpx.Client, gateway: RunningGateway)
     assert received["x-forwarded-proto"] == "http"
     assert received["x-real-ip"]
     assert received["x-forwarded-for"]
+
+
+def test_traceparent_is_injected_to_upstream(client: httpx.Client) -> None:
+    """El gateway inyecta un traceparent W3C al servicio destino (ADR-036)."""
+    response = client.get("/api/airports/1")
+
+    received = _received_headers(response)
+    assert "traceparent" in received, "ngx_otel_module debe inyectar traceparent al upstream"
+    assert TRACEPARENT_RE.match(received["traceparent"]), f"Formato W3C inválido: {received['traceparent']}"
+
+
+def test_client_traceparent_propagates_same_trace_id(client: httpx.Client) -> None:
+    """Cuando el cliente envía traceparent, el gateway preserva el trace ID (ADR-036).
+
+    otel_trace_context=propagate crea un span hijo del cliente: mismo trace ID,
+    nuevo span ID. No reenvía el traceparent original del cliente (que sería incorrecto).
+    """
+    client_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    client_traceparent = f"00-{client_trace_id}-00f067aa0ba902b7-01"
+
+    response = client.get("/api/airports/1", headers={"traceparent": client_traceparent})
+
+    received = _received_headers(response)
+    assert "traceparent" in received
+    forwarded = received["traceparent"]
+    assert TRACEPARENT_RE.match(forwarded), f"Formato W3C inválido: {forwarded}"
+    assert client_trace_id in forwarded, "El trace ID del cliente debe conservarse en el span hijo"
