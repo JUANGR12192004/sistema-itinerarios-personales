@@ -17,6 +17,9 @@ redis==8.1.0
 # Logs JSON estructurados (ADR-034, Fase 9)
 python-json-logger==4.2.0
 
+# Métricas Prometheus: endpoint /metrics y recuento de solicitudes HTTP (ADR-038, Fase 9C)
+prometheus-client==0.21.1
+
 # Trazas distribuidas: SDK, exportador OTLP y auto-instrumentación (ADR-035, Fase 9B)
 opentelemetry-sdk==1.45.2
 opentelemetry-exporter-otlp-proto-grpc==1.45.2

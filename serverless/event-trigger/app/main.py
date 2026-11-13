@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable
 
 from pika.exceptions import AMQPError
+from prometheus_client import start_http_server
 
 from app.application.delivery_handler import DeliveryHandler, RetryPolicy
 from app.config import Settings, get_settings
@@ -82,6 +83,9 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, settings.service_name)
     setup_tracing(settings.service_name)
+    # Servidor HTTP de métricas en un hilo de fondo; Prometheus consulta este puerto (ADR-038)
+    start_http_server(settings.metrics_port)
+    logger.info("Servidor de métricas del trigger escuchando en el puerto %d", settings.metrics_port)
     # pika registra cada intento de conexión fallido con su traza; el trigger ya informa
     # el error en una línea y se reconecta
     logging.getLogger("pika").setLevel(logging.CRITICAL)

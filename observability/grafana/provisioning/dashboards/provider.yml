@@ -1,0 +1,13 @@
+# Proveedor de dashboards para Grafana (ADR-039, Fase 9C).
+# Lee los archivos JSON de /var/lib/grafana/dashboards al arrancar.
+
+apiVersion: 1
+
+providers:
+  - name: sistema-itinerarios
+    folder: Sistema de Itinerarios
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

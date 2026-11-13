@@ -34,6 +34,7 @@ from app.infrastructure.resilience.circuit_breaker import CircuitBreaker
 from app.infrastructure.resilience.resilient_provider import ResilientAirportProvider
 from app.infrastructure.resilience.retry import RetryPolicy
 from app.logging_config import configure_logging
+from app.metrics import metrics_app, metrics_middleware
 from app.tracing import setup_tracing
 
 
@@ -97,9 +98,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.middleware("http")(cache_status_middleware)
     app.middleware("http")(correlation_id_middleware)
+    app.middleware("http")(metrics_middleware)
     register_error_handlers(app)
     app.include_router(airports_router)
     app.include_router(health_router)
+    # Monta el endpoint /metrics que Prometheus consulta (ADR-038)
+    app.mount("/metrics", metrics_app)
     return app
 
 

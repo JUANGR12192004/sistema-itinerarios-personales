@@ -60,15 +60,15 @@ class FakeHandler:
         self._decisions = list(decisions)
         self.bodies: list[bytes] = []
 
-    def handle(self, body: bytes, message_id: str | None = None) -> Decision:
+    def handle(self, body: bytes, message_id: str | None = None, traceparent: str | None = None) -> Decision:
         self.bodies.append(body)
         return self._decisions.pop(0)
 
 
-def delivery(tag: int, body: bytes = b"{}"):
+def delivery(tag: int, body: bytes = b"{}", headers: dict | None = None):
     return (
         SimpleNamespace(delivery_tag=tag, redelivered=False),
-        SimpleNamespace(message_id=f"m-{tag}"),
+        SimpleNamespace(message_id=f"m-{tag}", headers=headers),
         body,
     )
 

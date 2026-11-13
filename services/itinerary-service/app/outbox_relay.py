@@ -16,6 +16,7 @@ import logging
 import time
 from collections.abc import Callable
 
+from prometheus_client import Counter, start_http_server
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.outbox_relay import OutboxRelay, RelayResult
@@ -26,6 +27,25 @@ from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRep
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from app.logging_config import configure_logging
 from app.tracing import setup_tracing
+
+# Métricas del relay (proceso separado de la API; puerto 9101).
+# Se definen aquí porque solo este proceso las actualiza.
+OUTBOX_PUBLISHED = Counter(
+    "outbox_events_published_total",
+    "Eventos de integración publicados en RabbitMQ por el Outbox Relay",
+)
+OUTBOX_FAILED = Counter(
+    "outbox_events_failed_total",
+    "Fallos temporales del Outbox Relay (se reintentan en el siguiente ciclo)",
+)
+OUTBOX_DEAD = Counter(
+    "outbox_events_dead_total",
+    "Mensajes venenosos descartados permanentemente por el Outbox Relay (ADR-027)",
+)
+RELAY_CYCLES = Counter(
+    "outbox_relay_cycles_total",
+    "Total de ciclos ejecutados por el Outbox Relay",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +101,11 @@ def run_loop(
             )
             result = RelayResult()
 
+        RELAY_CYCLES.inc()
+        OUTBOX_PUBLISHED.inc(result.published)
+        OUTBOX_FAILED.inc(result.failed)
+        OUTBOX_DEAD.inc(result.dead)
+
         if result.published + result.dead < batch_size:
             sleep(interval_seconds)
 
@@ -90,6 +115,9 @@ def main() -> None:
     # "itinerary-service-relay" distingue los logs del relay de los de la API en Jaeger
     configure_logging(settings.log_level, "itinerary-service-relay")
     setup_tracing("itinerary-service-relay")
+    # Servidor HTTP de métricas en un hilo de fondo; Prometheus consulta este puerto (ADR-038)
+    start_http_server(settings.outbox_relay_metrics_port)
+    logger.info("Servidor de métricas del relay escuchando en el puerto %d", settings.outbox_relay_metrics_port)
     # pika registra cada conexión en INFO y cada fallo de ERROR con traceback
     # (una conexión por evento, ADR-021). Con RabbitMQ caído eso llena la consola en cada
     # ciclo; el relay ya registra cada fallo en una línea (WARNING) con su causa.

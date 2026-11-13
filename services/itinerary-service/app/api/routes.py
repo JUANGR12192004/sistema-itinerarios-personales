@@ -26,6 +26,7 @@ from app.application.use_cases import (
     UpdateItineraryCommand,
     UpdateItineraryUseCase,
 )
+from app.metrics import ITINERARIES_CREATED
 
 router = APIRouter(prefix="/itineraries", tags=["Itinerarios"])
 
@@ -50,6 +51,7 @@ def create_itinerary(
             correlation_id=correlation_id,
         )
     )
+    ITINERARIES_CREATED.inc()
     return ItineraryResponse.model_validate(result)
 
 

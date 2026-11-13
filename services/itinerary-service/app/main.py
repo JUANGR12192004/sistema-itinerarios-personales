@@ -10,6 +10,7 @@ from app.api.error_handler import add_error_handlers
 from app.api.routes import router
 from app.config import get_settings
 from app.logging_config import configure_logging, set_correlation_id
+from app.metrics import metrics_app, metrics_middleware
 from app.tracing import setup_tracing
 
 settings = get_settings()
@@ -41,8 +42,11 @@ app = FastAPI(
 )
 
 app.middleware("http")(_correlation_id_middleware)
+app.middleware("http")(metrics_middleware)
 add_error_handlers(app)
 app.include_router(router)
+# Monta el endpoint /metrics que Prometheus consulta (ADR-038)
+app.mount("/metrics", metrics_app)
 
 
 @app.get("/health", tags=["Salud"])

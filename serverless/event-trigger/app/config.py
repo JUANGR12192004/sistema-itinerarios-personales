@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Pausa antes de reconectar si se pierde la conexión con RabbitMQ (segundos)
     rabbitmq_reconnect_delay_seconds: float = Field(default=5.0, ge=0)
 
+    # Puerto del servidor HTTP de métricas (Fase 9C, ADR-038)
+    metrics_port: int = Field(default=9102, gt=0)
+
     # API de invocación de SendNotificationFunction (Runtime Interface Emulator, ADR-008)
     function_invoke_url: str = Field(
         default="http://localhost:9000/2015-03-31/functions/function/invocations"
