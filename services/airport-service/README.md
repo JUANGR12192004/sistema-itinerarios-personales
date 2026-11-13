@@ -117,8 +117,8 @@ pip install -r requirements.txt
 Opcional: copiar `.env.example` como `.env` para cambiar la configuración
 (`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD, `cp .env.example .env` en zsh).
 
-Si ya tenían el entorno de la Fase 1, basta con volver a ejecutar `pip install -r requirements.txt`
-para instalar el cliente de Redis.
+`pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado.
 
 ### Redis (Fase 2)
 

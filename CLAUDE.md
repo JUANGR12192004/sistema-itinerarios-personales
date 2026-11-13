@@ -264,14 +264,15 @@ Estas son las reglas que debes seguir tú:
 | Comunicación síncrona | HTTP / REST |
 | Mensajería | RabbitMQ (cliente `pika`, ADR-021) |
 | Caché | Redis |
-| API Gateway | Nginx, imagen oficial `nginx:1.30.6-alpine` (ADR-009) |
+| API Gateway | Nginx, imagen oficial `nginx:1.30.6-alpine-otel` (ADR-009, ADR-036) |
 | Frontend | HTML, CSS, JavaScript, Plotly JS |
 | Contenedores | Docker y Docker Compose |
 | Serverless | Imagen oficial de AWS Lambda `public.ecr.aws/lambda/python:3.12` con el Runtime Interface Emulator (ADR-008) |
-| Observabilidad | OpenTelemetry, Jaeger, Prometheus, Grafana |
+| Observabilidad | `python-json-logger==4.2.0` (logs JSON), `opentelemetry-sdk==1.45.2` + instrumentadores (trazas), `prometheus-client==0.21.1` (métricas), Jaeger 2.23.0, Grafana 11.3.1 |
+| Paquete compartido | `libs/observability` — Microservice Chassis Pattern: logging, trazas y métricas HTTP comunes a los cuatro componentes Python (ADR-040) |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo) |
-| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services` y `serverless` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023) |
+| Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services`, `serverless` y `libs` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023, ADR-040) |
 
 No agregues librerías fuera de esta lista sin explicar por qué y pedir aprobación.
 
@@ -348,6 +349,14 @@ sistema-itinerarios-personales/
 ├── docs/
 │   ├── 01-planificacion.md ... 06-decisiones-arquitectonicas.md
 │   └── asyncapi/asyncapi.yaml      ← Fase 4
+├── libs/
+│   └── observability/              ← Fase 9: Microservice Chassis Pattern (ADR-040)
+│       ├── pyproject.toml          ← paquete instalable con pip install -e
+│       └── observability/
+│           ├── __init__.py
+│           ├── logging_config.py   ← configure_logging, set_correlation_id, filtros JSON
+│           ├── tracing.py          ← setup_tracing(service_name, instrumentors, batch)
+│           └── metrics.py          ← metrics_middleware, metrics_app, HTTP_REQUESTS, HTTP_DURATION
 ├── services/
 │   ├── airport-service/
 │   │   ├── app/
@@ -376,7 +385,7 @@ sistema-itinerarios-personales/
 ├── serverless/
 │   ├── send-notification-function/ ← Fase 6: app/ hexagonal, handler.py, alembic/, events/, Dockerfile
 │   └── event-trigger/              ← Fase 6: app/ (application, infrastructure), main.py, replay_dlq.py, demo/
-├── gateway/                        ← Fase 7: Dockerfile (Nginx), templates/default.conf.template, tests/
+├── gateway/                        ← Fase 7: nginx.conf, Dockerfile (Nginx), templates/default.conf.template, tests/
 ├── frontend/
 │   ├── index.html
 │   ├── css/
@@ -543,6 +552,8 @@ Confirmadas en la Fase 3 (ADR-015):
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties` (desde la 6C analiza también `serverless/`). No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 | API Gateway (Fase 7, ADR-009) | **Nginx** como gateway puro en Docker (`gateway/Dockerfile` sobre `nginx:1.30.6-alpine`, plantilla `gateway/templates/default.conf.template` con `envsubst` de la imagen oficial), puerto 8000. `/api/airports...` → Airport Service y `/api/itineraries...` → Itinerary Service, quitando `/api` (y `proxy_redirect` para las redirecciones). Direcciones por variables `AIRPORT_SERVICE_UPSTREAM` / `ITINERARY_SERVICE_UPSTREAM` (`host.docker.internal:8001/8002` en la Fase 7; nombres de contenedor en la Fase 10). Reenvía `Authorization` sin validarlo (nunca en el log). `X-Correlation-ID`: se reenvía si cumple `^[A-Za-z0-9._-]{1,128}$`; si no, se genera con forma de UUID. Timeouts: conexión 2 s, lectura 15 s, `proxy_next_upstream off`, `max_fails=0`. Errores propios en el formato de la sección 10.2: 502 `UPSTREAM_UNAVAILABLE`, 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE`; los errores de los servicios pasan sin cambios (`proxy_intercept_errors off`). Rate limiting (7B): por IP, 10 r/s, ráfaga 20, `nodelay`, solo `/api/`, 429 `RATE_LIMIT_EXCEEDED` con `Retry-After`. `GET /health` propio, `/` sirve el frontend (Fase 8), sin CORS, Swagger no se expone por el gateway |
 | Frontend (Fase 8, ADR-033) | Vanilla HTML/CSS/JS con ES modules, sin build toolchain, servido como estáticos por Nginx desde `frontend/` (copiado en la imagen del gateway, `location / { try_files ... }`, rutas no encontradas → 404 `ROUTE_NOT_FOUND` en JSON). Mapa de aeropuertos con `scattergeo` de Plotly 4.3.0 (bundle parcial `plotly-geo.min.js`, 1.4 MB, local para uso sin internet, marcado como binario en `.gitattributes`). CRUD de itinerarios con formulario y tabla; `datetime-local` → ISO 8601 con offset del navegador (ADR-017). Todo texto de datos con `textContent` (nunca `innerHTML`). Errores del gateway con `correlation_id` y botón "Copiar" en 5xx. Pruebas pytest en `gateway/tests` (misma suite del gateway). El contexto de build del gateway cambia a la raíz del repositorio: `docker build -t api-gateway -f gateway/Dockerfile .` |
+| Instrumentación del gateway (Fase 9, ADR-036) | Imagen `nginx:1.30.6-alpine-otel` con `ngx_otel_module`. Se provee `gateway/nginx.conf` propio con `load_module modules/ngx_otel_module.so;` antes del bloque `events {}` (la imagen no lo carga por defecto). `otel_trace_context propagate` inyecta el `traceparent` del span hijo al upstream; no se usa `proxy_set_header traceparent` (sobrescribiría el span hijo con el original del cliente). |
+| Paquete compartido de observabilidad (cierre Fase 9, ADR-040) | `libs/observability`: Microservice Chassis Pattern con logging, trazas y métricas HTTP comunes. Instalado con `-e ../../libs/observability` en cada `requirements.txt`. El Dockerfile de SendNotificationFunction cambia el contexto de build a la raíz del repositorio para incluir `libs/`. Los Dockerfiles de Airport e Itinerary Service harán lo mismo en la Fase 10. |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -1015,7 +1026,7 @@ pytest -v
     `default_type`. Corregido en la rama `fix/gateway-404-json` con `types { }` vacío en las seis ubicaciones
     que devuelven JSON de error (ver sección 9.1 ADR-033 y el PR de corrección). Total tras el fix:
     **48 pasan, 3 omitidas** (smoke, sin el gateway real).
-- **Fase 9 (Observabilidad):** en curso. Rama `fase-9-observabilidad`.
+- **Fase 9 (Observabilidad):** completada y **fusionada en `main`** (PR #21, merge `d9ed023`). Etiqueta `fase-9` pendiente de crear sobre ese commit. La rama `fase-9-observabilidad` se conserva como archivo de solo lectura.
   - Entrega **9A** completada: ADR-034 a ADR-036. Logs JSON estructurados con `python-json-logger==4.2.0` en los cuatro
     componentes Python: `configure_logging(log_level, service_name)` en `app/logging_config.py`; `JsonFormatter` con campos
     `timestamp`, `level`, `service`, `correlation_id`, `trace_id`, `span_id`, `logger`, `message`; `CorrelationIdFilter`
@@ -1024,12 +1035,11 @@ pytest -v
   - Entrega **9B** completada (commit `7dd9087`): ADR-035. Trazas distribuidas con `opentelemetry-sdk==1.45.2` y
     exportador OTLP gRPC a Jaeger 2.23.0 (ADR-039). `setup_tracing(service_name)` en cada componente: modo prueba
     (`InMemorySpanExporter`+`SimpleSpanProcessor`) vs. producción (`OTLPSpanExporter`+`BatchSpanProcessor`). Gateway con
-    imagen `nginx:1.30.6-alpine-otel`, variable `GATEWAY_OTEL_TRACE`, cabeceras `traceparent`/`tracestate`. Propagación
-    W3C por toda la cadena: Outbox escribe `traceparent` en la columna de la outbox (migración `e6f0a4b8c1d9`); relay lo
-    restaura antes de publicar en RabbitMQ; consumer del trigger lo extrae de los headers AMQP; lambda invoker lo inyecta
-    en el cuerpo del evento; handler de la función lo restaura. 4 pruebas nuevas (2 en `test_outbox_event_publisher.py`,
-    2 en `test_outbox_relay.py`). Se corrigió `test_rabbitmq_consumer.py` del trigger: `delivery()` pasó a incluir
-    `headers` y `FakeHandler.handle()` acepta `traceparent`.
+    imagen `nginx:1.30.6-alpine-otel`, variable `GATEWAY_OTEL_TRACE`. Propagación W3C por toda la cadena: Outbox escribe
+    `traceparent` en la columna de la outbox (migración `e6f0a4b8c1d9`); relay lo restaura antes de publicar en
+    RabbitMQ; consumer del trigger lo extrae de los headers AMQP; lambda invoker lo inyecta en el cuerpo del evento;
+    handler de la función lo restaura. 4 pruebas nuevas (2 en `test_outbox_event_publisher.py`, 2 en
+    `test_outbox_relay.py`).
   - Entrega **9C** completada: ADR-038. Métricas Prometheus con `prometheus-client==0.21.1`. Airport e Itinerary Service:
     middleware HTTP `metrics_middleware` (recuento y duración por `method`, `path` como plantilla de ruta, `status`),
     endpoint `/metrics` con `make_asgi_app()`. Itinerary Service: contador de negocio `itineraries_created_total`
@@ -1037,7 +1047,7 @@ pytest -v
     `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total`.
     Event Trigger (puerto 9102): `start_http_server()`; contador `notifications_dispatched_total{outcome}` en
     `DeliveryHandler`. Variables `.env.example`: `OUTBOX_RELAY_METRICS_PORT=9101` y `METRICS_PORT=9102`. Configuración de
-    observabilidad en `observability/`: `prometheus/prometheus.yml` (4 targets), Grafana 13.3.1 con provisioning de
+    observabilidad en `observability/`: `prometheus/prometheus.yml` (4 targets), Grafana 11.3.1 con provisioning de
     datasource y dashboard `sistema-itinerarios.json` (paneles de negocio, HTTP req/s y latencia p50/p95/p99, relay y
     trigger). 10 pruebas nuevas (4 en Airport, 6 en Itinerary). Totales: Airport **201 pasan**; Itinerary **163 pasan,
     25 omitidas**; Event Trigger **70 pasan, 16 omitidas**.
@@ -1048,4 +1058,18 @@ pytest -v
     estado, nuevo paso 2 "Observabilidad" en el orden de arranque (Jaeger, Prometheus y Grafana), sección "Fase 9 —
     Observabilidad" y sección "Demostración de observabilidad", rama `fase-8-frontend` en la tabla de ramas.
     READMEs de los cuatro componentes actualizados con sección "Observabilidad (Fase 9)".
-- **Siguiente:** PR de la Fase 9 (rama `fase-9-observabilidad` → `main`), después Fase 10 (Docker Compose).
+  - **Cierre de la Fase 9** (rama `docs/cierre-fase-9`): dos correcciones que quedaron fuera de la entrega 9D:
+    - Commit `af6cf61` — `refactor: extrae logging, trazas y métricas HTTP a libs/observability (Microservice Chassis
+      Pattern)`: SonarCloud detectó 25,3 % de duplicación por los cuatro `logging_config.py`/`tracing.py` idénticos.
+      Se crea `libs/observability` (ADR-040) con los tres módulos compartidos; los cuatro componentes actualizan sus
+      importaciones y `requirements.txt`; el Dockerfile de SendNotificationFunction cambia el contexto de build a la
+      raíz; `sonar.sources` incluye `libs`. 32 archivos cambiados.
+    - Commit `1e0681b` — `fix: corrige carga del módulo OTel y propagación de traceparent en el gateway`: el CI del
+      gateway fallaba con `unknown directive "otel_exporter"` porque `load_module` no estaba en ningún `nginx.conf`
+      principal. Se crea `gateway/nginx.conf` con `load_module modules/ngx_otel_module.so;` y se copia en el
+      Dockerfile. Se elimina `proxy_set_header traceparent/tracestate` del template (sobrescribía el span hijo que
+      inyecta `otel_trace_context propagate`). 2 pruebas nuevas de propagación de `traceparent`.
+      Gateway: **50 pasan, 3 omitidas** (smoke, sin el gateway real).
+    - `docs/06` ampliado con ADR-036 (corrección) y ADR-040 (nuevo). `CLAUDE.md` sección 6, 7.5, 9.1 y 15
+      actualizados. READMEs con nota sobre `libs/observability`.
+- **Siguiente:** Fase 10 (Docker Compose).

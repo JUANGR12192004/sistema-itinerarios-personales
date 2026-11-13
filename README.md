@@ -111,17 +111,17 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 6 | Serverless | Completada |
 | 7 | API Gateway | Completada |
 | 8 | Frontend | Completada |
-| 9 | Observabilidad | En curso |
+| 9 | Observabilidad | Completada |
 | 10 a 12 | Docker Compose, pruebas y documentación | Pendientes |
 
-**En curso:** Fase 9 — Observabilidad (rama `fase-9-observabilidad`). **Última fase completada:** Fase 8 — Frontend (PR #19, etiqueta `fase-8`).
+**Última fase completada:** Fase 9 — Observabilidad (PR #21, merge `d9ed023`). **Siguiente:** Fase 10 — Docker Compose.
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
 
 ### Fase 9 — Observabilidad
 
-Logs JSON estructurados, trazas distribuidas con OpenTelemetry y métricas con Prometheus y Grafana en todos los componentes (ADR-034 a ADR-039).
+Logs JSON estructurados, trazas distribuidas con OpenTelemetry y métricas con Prometheus y Grafana en todos los componentes (ADR-034 a ADR-040). El código de observabilidad compartido se consolidó en el paquete `libs/observability` (Microservice Chassis Pattern, ADR-040), incluido automáticamente al instalar las dependencias de cada componente.
 
 | Pieza | Qué hace |
 |---|---|
@@ -310,12 +310,12 @@ cd ../..
 
 ### 4. SendNotificationFunction
 
-Igual en PowerShell, CMD y zsh, desde `serverless\send-notification-function` (`serverless/send-notification-function`
-en macOS). La primera vez (y después de cada cambio en el código de la función) se construye la imagen y se crea el
+Igual en PowerShell, CMD y zsh, **desde la raíz del repositorio** (el contexto de build incluye `libs/`).
+La primera vez (y después de cada cambio en el código de la función) se construye la imagen y se crea el
 contenedor:
 
 ```
-docker build -t send-notification-function .
+docker build -t send-notification-function -f serverless/send-notification-function/Dockerfile .
 docker run -d --name send-notification-function --network notification-net -p 9000:8080 -e DATABASE_URL=postgresql+psycopg://notification:notification@notification-postgres:5432/notification_db send-notification-function
 ```
 

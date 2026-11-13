@@ -94,6 +94,9 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+`pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado.
+
 ## Ejecución
 
 Con el entorno virtual activado (igual en PowerShell, CMD y zsh):
