@@ -102,8 +102,10 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-`requirements.txt` tiene solo lo que va **dentro** de la imagen. `requirements-dev.txt` agrega Alembic y pytest, que
-usa el equipo y no van en la imagen (ADR-029).
+`requirements.txt` tiene solo lo que va **dentro** de la imagen. `requirements-dev.txt` agrega Alembic, pytest y el
+paquete compartido `libs/observability` como instalación editable (`-e ../../libs/observability`), que no va en la
+imagen (el Dockerfile lo instala directamente desde la raíz del repositorio). La imagen se construye desde la raíz:
+`docker build -t send-notification-function -f serverless/send-notification-function/Dockerfile .` (ADR-029, ADR-040).
 
 ## Base de datos del historial
 

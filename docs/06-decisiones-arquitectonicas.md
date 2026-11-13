@@ -1180,26 +1180,28 @@ OpenTelemetry es el estándar del sector para instrumentación distribuida y no 
 
 ## ADR-036 — Instrumentación del API Gateway con OpenTelemetry (Fase 9)
 
-**Estado:** Aceptada (Fase 9, entrega 9B).
+**Estado:** Aceptada (Fase 9, entrega 9B). Corregida en el cierre de la Fase 9 (rama `docs/cierre-fase-9`).
 
 ### Contexto
 
-Nginx no tiene un SDK de OpenTelemetry, pero la imagen oficial `nginx:1.30.6-alpine-otel` incluye el módulo `ngx_otel_module` precompilado.
+Nginx no tiene un SDK de OpenTelemetry, pero la imagen oficial `nginx:1.30.6-alpine-otel` incluye el módulo `ngx_otel_module` precompilado como módulo dinámico.
 
 ### Decisión
 
 - El `Dockerfile` del gateway cambia la imagen base a **`nginx:1.30.6-alpine-otel`**.
-- La plantilla `default.conf.template` configura el módulo:
+- Se provee un **`gateway/nginx.conf`** propio que carga el módulo con `load_module modules/ngx_otel_module.so;` antes del bloque `events {}`. Ese es el único contexto donde Nginx acepta `load_module`. La imagen incluye el `.so` pero no lo carga en su `nginx.conf` por defecto. El Dockerfile copia este archivo con `COPY gateway/nginx.conf /etc/nginx/nginx.conf`.
+- La plantilla `default.conf.template` (que vive dentro del bloque `http {}`) configura el módulo ya cargado:
   - `otel_exporter { endpoint ${OTEL_EXPORTER_OTLP_HOST}:4317; }` apunta al backend Jaeger.
   - `otel_service_name api-gateway;` nombra el servicio en las trazas.
   - `otel_trace ${GATEWAY_OTEL_TRACE};` activa o desactiva el tracing por variable (valor `on` u `off`).
-  - `otel_trace_context propagate;` inyecta el `traceparent` W3C en las solicitudes hacia los servicios.
+  - `otel_trace_context propagate;` lee el `traceparent` del cliente, crea un span hijo e inyecta el nuevo `traceparent` en la solicitud al servicio destino.
 - Variables de entorno nuevas: `OTEL_EXPORTER_OTLP_HOST` (host del backend, por defecto `host.docker.internal`) y `GATEWAY_OTEL_TRACE` (por defecto `on`).
 - Los campos `$otel_trace_id` y `$otel_span_id` del módulo se escriben en el log de acceso del gateway (formato JSON).
+- **No se usa `proxy_set_header traceparent $http_traceparent`**: reenviar el `traceparent` original del cliente sobrescribiría el que inyecta `otel_trace_context propagate` (el span hijo correcto). Cuando no hay cliente, `$http_traceparent` está vacío y anularía el header inyectado.
 
 ### Justificación
 
-Reutiliza la imagen oficial sin necesidad de compilar Nginx con el módulo. El tracing del gateway es opcional (se apaga con `GATEWAY_OTEL_TRACE=off`) y no cambia el enrutamiento ni el rate limiting.
+Reutiliza la imagen oficial sin necesidad de compilar Nginx con el módulo. El tracing del gateway es opcional y no cambia el enrutamiento ni el rate limiting. Proporcionar el `nginx.conf` propio desacopla la carga del módulo del comportamiento por defecto de la imagen base.
 
 ### Consecuencias
 
@@ -1282,6 +1284,37 @@ Jaeger 2.x acepta el protocolo OTLP directamente, sin el Jaeger Agent ni el Coll
 
 - En la Fase 10 (Docker Compose), el endpoint de Jaeger cambiará de `host.docker.internal:4317` a `jaeger:4317` (nombre del contenedor dentro de la red de Docker).
 - El almacenamiento en memoria no es adecuado para producción: habría que configurar un backend persistente (Elasticsearch, Cassandra o el almacenamiento de Jaeger en S3).
+
+---
+
+## ADR-040 — Microservice Chassis Pattern: paquete compartido `libs/observability` (Fase 9)
+
+**Estado:** Aceptada (cierre de la Fase 9, rama `docs/cierre-fase-9`).
+
+### Contexto
+
+Al terminar la Fase 9, los cuatro componentes Python (Airport Service, Itinerary Service, SendNotificationFunction y Event Trigger) tenían cada uno su propio `app/logging_config.py` y `app/tracing.py` con implementaciones casi idénticas. SonarCloud Automatic Analysis registró un **25,3 % de duplicación** en el repositorio, superando el umbral de Quality Gate. Además, cualquier cambio en la lógica de observabilidad había que replicarlo cuatro veces.
+
+### Decisión
+
+- Se crea el paquete Python **`libs/observability/`** (patrón _Microservice Chassis_) con tres módulos:
+  - `observability.logging_config`: `configure_logging`, `set_correlation_id`, `AppJsonFormatter`, `CorrelationIdFilter`, `OtelContextFilter`.
+  - `observability.tracing`: `setup_tracing(service_name, exporter=None, instrumentors=None, batch=True)`. El parámetro `instrumentors` acepta `["fastapi", "httpx", "sqlalchemy", "pika"]`; cada componente declara solo los que usa. `batch=False` fuerza `SimpleSpanProcessor` (necesario en la Lambda, que puede suspenderse antes de que el `BatchSpanProcessor` vacíe su cola).
+  - `observability.metrics`: `metrics_middleware`, `metrics_app`, `HTTP_REQUESTS`, `HTTP_DURATION` (compartidos por Airport e Itinerary Service). Los contadores de negocio propios de cada componente siguen en su propio `app/metrics.py`.
+- Se elimina `app/logging_config.py` y `app/tracing.py` de los cuatro componentes. Las importaciones pasan de `from app.logging_config` a `from observability.logging_config`.
+- **Instalación en entornos virtuales:** cada `requirements.txt` incluye `-e ../../libs/observability` (editable install). El paquete tiene `pyproject.toml` con `build-backend = "setuptools.build_meta"` y `dependencies = []` (las dependencias reales ya están fijadas en cada `requirements.txt`).
+- **CI:** el `cache-dependency-path` de cada job incluye `libs/observability/pyproject.toml` para invalidar la caché cuando cambie el paquete.
+- **Dockerfile de SendNotificationFunction:** el contexto de build cambia a la raíz del repositorio (`docker build … -f serverless/send-notification-function/Dockerfile .`) para que `libs/` esté disponible. Se copia `libs/` y se instala con `pip install … "${LAMBDA_TASK_ROOT}/libs/observability" --target "${LAMBDA_TASK_ROOT}"`.
+- **SonarCloud:** `sonar.sources` incluye `libs` para que el paquete compartido se analice como código de producción.
+
+### Justificación
+
+El patrón _Microservice Chassis_ consolida la infraestructura transversal (logs, trazas, métricas HTTP) en un único lugar, eliminando la duplicación que SonarCloud detectó. Usar `-e` (editable install) permite desarrollar el paquete sin reinstalarlo; en producción (imagen Docker) se instala como paquete regular con `--target`.
+
+### Consecuencias
+
+- Los cuatro componentes dependen ahora de `libs/observability`. Un cambio que rompa la API del paquete afecta a todos; es conveniente mantener la interfaz estable.
+- En la Fase 10 (Docker Compose), los Dockerfiles de Airport Service e Itinerary Service también deberán copiar `libs/` y hacer `pip install libs/observability` (igual que ya hace SendNotificationFunction). El gateway no tiene Python, así que no le afecta.
 
 ## 2. Revisión de decisiones
 

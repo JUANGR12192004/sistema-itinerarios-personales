@@ -50,6 +50,9 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+`pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado.
+
 ## Base de datos PostgreSQL
 
 Levantar el contenedor (solo la primera vez; después basta con `docker start itinerary-postgres`).
