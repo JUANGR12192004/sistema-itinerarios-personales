@@ -49,7 +49,7 @@ Son límites de la plataforma local, no del código (ADR-008).
 
 ## Orden de arranque del sistema completo
 
-La función es el paso **3** del orden completo, que está explicado en el [README raíz](../../README.md#orden-de-arranque):
+La función es el paso **4** del orden completo, que está explicado en el [README raíz](../../README.md#orden-de-arranque):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (Itinerary Service) y `notification_db` (**esta función**, `alembic upgrade head`).
@@ -207,6 +207,24 @@ Resultado esperado: **60 passed** con `notification-postgres` y la migración ap
 | `port is already allocated` | Ya hay algo en el puerto 9000 o 5434 | `docker ps` y detener el otro contenedor |
 | `could not translate host name "notification-postgres"` | La función no está en la red `notification-net` | Recrear el contenedor con `--network notification-net` |
 
+## Observabilidad (Fase 9)
+
+La función emite logs JSON y trazas. No tiene métricas propias (el Event Trigger registra el resultado de cada invocación).
+
+### Logs JSON
+
+Los logs del handler salen por `stdout` en formato JSON con los campos `timestamp`, `level`, `service` (`send-notification-function`), `logger`, `message`, `correlation_id`, `trace_id` y `span_id`. El `correlation_id` se extrae del campo `data.correlation_id` del evento.
+
+### Trazas (OpenTelemetry → Jaeger)
+
+Instrumenta SQLAlchemy y el logger. El handler restaura el contexto W3C del campo `traceparent` del evento (inyectado por el Event Trigger) para que el span de la función sea hijo del span del trigger. Usa `SimpleSpanProcessor` (en lugar de `Batch`) porque Lambda puede suspender el proceso entre invocaciones.
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 docker run ... send-notification-function
+```
+
+La variable se pasa como `-e OTEL_EXPORTER_OTLP_ENDPOINT=...` en el `docker run`.
+
 ## Estructura
 
 ```
@@ -218,6 +236,8 @@ app/
     persistence/         → engine, modelo ORM, repositorio, unit of work, traducción a TransientError
   event_schema.py        → esquema Pydantic del contrato v1 (Tolerant Reader)
   handler.py             → handler(event, context): adaptador de entrada de Lambda
+  logging_config.py      → logs JSON estructurados (Fase 9)
+  tracing.py             → setup_tracing() con OpenTelemetry (Fase 9)
   config.py
 alembic/                 → migración d1e5f7a3b9c2 (notification_history)
 events/                  → eventos de ejemplo para curl.exe (curl en macOS)

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    service_name: str = "event-trigger"
     log_level: str = "INFO"
 
     # RabbitMQ. Sin usuario en la URL, pika usa guest/guest (usuario por defecto de la imagen local).
@@ -19,6 +20,9 @@ class Settings(BaseSettings):
     rabbitmq_timeout_seconds: float = Field(default=3.0, gt=0)
     # Pausa antes de reconectar si se pierde la conexión con RabbitMQ (segundos)
     rabbitmq_reconnect_delay_seconds: float = Field(default=5.0, ge=0)
+
+    # Puerto del servidor HTTP de métricas (Fase 9C, ADR-038)
+    metrics_port: int = Field(default=9102, gt=0)
 
     # API de invocación de SendNotificationFunction (Runtime Interface Emulator, ADR-008)
     function_invoke_url: str = Field(

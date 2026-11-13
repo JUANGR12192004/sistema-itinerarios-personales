@@ -35,7 +35,10 @@ class LambdaFunctionInvoker(FunctionInvoker):
         self._timeout_seconds = timeout_seconds
         self._client = client or httpx.Client()
 
-    def invoke(self, event: Any) -> InvocationResult:
+    def invoke(self, event: Any, traceparent: str | None = None) -> InvocationResult:
+        # Agrega traceparent al cuerpo del evento para que la función continúe la traza (ADR-037)
+        if traceparent and isinstance(event, dict):
+            event = {**event, "traceparent": traceparent}
         try:
             response = self._client.post(self._invoke_url, json=event, timeout=self._timeout_seconds)
         except httpx.TimeoutException:

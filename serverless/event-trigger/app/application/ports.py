@@ -14,5 +14,5 @@ class FunctionInvoker(ABC):
     """
 
     @abstractmethod
-    def invoke(self, event: Any) -> InvocationResult:
-        """Invoca la función con el evento (ya leído como JSON) y clasifica la respuesta."""
+    def invoke(self, event: Any, traceparent: str | None = None) -> InvocationResult:
+        """Invoca la función con el evento y el traceparent opcional para propagación de trazas."""

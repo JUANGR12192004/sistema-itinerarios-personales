@@ -21,11 +21,14 @@ import time
 from collections.abc import Callable
 
 from pika.exceptions import AMQPError
+from prometheus_client import start_http_server
 
 from app.application.delivery_handler import DeliveryHandler, RetryPolicy
 from app.config import Settings, get_settings
 from app.infrastructure.lambda_invoker import LambdaFunctionInvoker
 from app.infrastructure.rabbitmq.consumer import RabbitMQConsumer
+from observability.logging_config import configure_logging
+from observability.tracing import setup_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +81,11 @@ def run_with_reconnection(
 
 def main() -> None:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    configure_logging(settings.log_level, settings.service_name)
+    setup_tracing(settings.service_name, instrumentors=["pika"])
+    # Servidor HTTP de métricas en un hilo de fondo; Prometheus consulta este puerto (ADR-038)
+    start_http_server(settings.metrics_port)
+    logger.info("Servidor de métricas del trigger escuchando en el puerto %d", settings.metrics_port)
     # pika registra cada intento de conexión fallido con su traza; el trigger ya informa
     # el error en una línea y se reconecta
     logging.getLogger("pika").setLevel(logging.CRITICAL)

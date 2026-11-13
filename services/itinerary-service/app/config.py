@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8002, gt=0)
 
+    # Puerto del servidor HTTP de métricas del Outbox Relay (Fase 9C, ADR-038).
+    # Proceso separado de la API: tiene su propio registro de Prometheus.
+    outbox_relay_metrics_port: int = Field(default=9101, gt=0)
+
 
 @lru_cache
 def get_settings() -> Settings:

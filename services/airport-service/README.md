@@ -135,8 +135,8 @@ En la Fase 10, Redis se levantará con Docker Compose junto con el resto del sis
 
 ## Orden de arranque del sistema completo
 
-Airport Service es el paso **4** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
-contenedores → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
+Airport Service es el paso **5** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+contenedores → observabilidad → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
 Event Trigger → API Gateway. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
 crear itinerarios.
 
@@ -531,3 +531,36 @@ iniciarlo con `docker start airport-redis`.
   con muchos clientes reintentando a la vez convendría agregarlo.
 - No hay invalidación manual de la caché: los datos se renuevan al vencer su TTL (API Colombia cambia
   muy poco).
+
+## Observabilidad (Fase 9)
+
+Airport Service expone las tres capas de observabilidad. No requieren ninguna variable de entorno extra salvo `OTEL_ENABLED` (por defecto `true`).
+
+### Logs JSON
+
+Los logs salen por `stdout` en formato JSON con los campos `timestamp`, `level`, `service` (`airport-service`), `logger`, `message`, `correlation_id`, `trace_id` y `span_id`. El `correlation_id` se toma del header `X-Correlation-ID` de la solicitud.
+
+### Trazas (OpenTelemetry → Jaeger)
+
+El servicio instrumenta FastAPI, httpx y el logger automáticamente. Cada solicitud genera un span raíz del gateway y spans hijos por cada llamada a API Colombia. Se exportan al backend Jaeger por OTLP gRPC:
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 uvicorn app.main:app --port 8001
+```
+
+Para desactivar las trazas: `OTEL_ENABLED=false`.
+
+### Métricas (Prometheus)
+
+El endpoint `GET /metrics` (puerto 8001) expone las métricas en formato texto plano de Prometheus:
+
+| Métrica | Tipo | Labels |
+|---|---|---|
+| `http_requests_total` | Counter | `method`, `path` (plantilla), `status` |
+| `http_request_duration_seconds` | Histogram | `method`, `path` (plantilla) |
+
+```
+curl.exe http://localhost:8001/metrics
+```
+
+Prometheus consulta este endpoint cada 15 s si está configurado con `observability/prometheus/prometheus.yml`.

@@ -1,4 +1,8 @@
-# Dependencias del Event Trigger (Fase 6, ADR-031)
+# Dependencias del Event Trigger (Fases 6 y 9)
+
+# Paquete compartido de observabilidad (Microservice Chassis Pattern, Fase 9)
+-e ../../libs/observability
+
 
 # Cliente de RabbitMQ (síncrono), el mismo de Itinerary Service (ADR-021)
 pika==1.3.2
@@ -9,6 +13,18 @@ httpx==0.28.1
 # Configuración por variables de entorno
 pydantic==2.14.1
 pydantic-settings==2.16.1
+
+# Logs JSON estructurados (ADR-034, Fase 9)
+python-json-logger==4.2.0
+
+# Métricas Prometheus: contadores de invocaciones a SendNotificationFunction (ADR-038, Fase 9C)
+prometheus-client==0.21.1
+
+# Trazas distribuidas: SDK, exportador OTLP y auto-instrumentación (ADR-035, Fase 9B)
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
+opentelemetry-instrumentation-pika==0.66b2
+opentelemetry-instrumentation-logging==0.66b2
 
 # Pruebas (respx simula las respuestas HTTP de la función)
 pytest==9.1.1

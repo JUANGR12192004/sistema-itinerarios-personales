@@ -402,6 +402,8 @@ Si necesitas cambiar esta estructura, explica el cambio y pide aprobación.
 | RabbitMQ | 5672 (AMQP) / 15672 (panel) |
 | Redis | 6379 |
 | SendNotificationFunction | 9000 |
+| Outbox Relay (métricas) | 9101 (proceso aparte de Itinerary Service, ADR-038) |
+| Event Trigger (métricas) | 9102 (proceso aparte, ADR-038) |
 | Jaeger | 16686 |
 | Prometheus | 9090 |
 | Grafana | 3000 |
@@ -1013,6 +1015,37 @@ pytest -v
     `default_type`. Corregido en la rama `fix/gateway-404-json` con `types { }` vacío en las seis ubicaciones
     que devuelven JSON de error (ver sección 9.1 ADR-033 y el PR de corrección). Total tras el fix:
     **48 pasan, 3 omitidas** (smoke, sin el gateway real).
-- **Siguiente:** la Fase 9 (Observabilidad): logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger,
-  Prometheus y Grafana. Demostración del recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento →
-  RabbitMQ → Función.
+- **Fase 9 (Observabilidad):** en curso. Rama `fase-9-observabilidad`.
+  - Entrega **9A** completada: ADR-034 a ADR-036. Logs JSON estructurados con `python-json-logger==4.2.0` en los cuatro
+    componentes Python: `configure_logging(log_level, service_name)` en `app/logging_config.py`; `JsonFormatter` con campos
+    `timestamp`, `level`, `service`, `correlation_id`, `trace_id`, `span_id`, `logger`, `message`; `CorrelationIdFilter`
+    y `OtelContextFilter` que leen `ContextVar` del request; pruebas de `test_logging_config.py` en Airport e Itinerary
+    Service. `LOGGING` confirmado en `docs/06-decisiones-arquitectonicas.md` (ADR-034).
+  - Entrega **9B** completada (commit `7dd9087`): ADR-035. Trazas distribuidas con `opentelemetry-sdk==1.45.2` y
+    exportador OTLP gRPC a Jaeger 2.23.0 (ADR-039). `setup_tracing(service_name)` en cada componente: modo prueba
+    (`InMemorySpanExporter`+`SimpleSpanProcessor`) vs. producción (`OTLPSpanExporter`+`BatchSpanProcessor`). Gateway con
+    imagen `nginx:1.30.6-alpine-otel`, variable `GATEWAY_OTEL_TRACE`, cabeceras `traceparent`/`tracestate`. Propagación
+    W3C por toda la cadena: Outbox escribe `traceparent` en la columna de la outbox (migración `e6f0a4b8c1d9`); relay lo
+    restaura antes de publicar en RabbitMQ; consumer del trigger lo extrae de los headers AMQP; lambda invoker lo inyecta
+    en el cuerpo del evento; handler de la función lo restaura. 4 pruebas nuevas (2 en `test_outbox_event_publisher.py`,
+    2 en `test_outbox_relay.py`). Se corrigió `test_rabbitmq_consumer.py` del trigger: `delivery()` pasó a incluir
+    `headers` y `FakeHandler.handle()` acepta `traceparent`.
+  - Entrega **9C** completada: ADR-038. Métricas Prometheus con `prometheus-client==0.21.1`. Airport e Itinerary Service:
+    middleware HTTP `metrics_middleware` (recuento y duración por `method`, `path` como plantilla de ruta, `status`),
+    endpoint `/metrics` con `make_asgi_app()`. Itinerary Service: contador de negocio `itineraries_created_total`
+    incrementado en `create_itinerary()`. Outbox Relay (puerto 9101): `start_http_server()`; contadores
+    `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total`.
+    Event Trigger (puerto 9102): `start_http_server()`; contador `notifications_dispatched_total{outcome}` en
+    `DeliveryHandler`. Variables `.env.example`: `OUTBOX_RELAY_METRICS_PORT=9101` y `METRICS_PORT=9102`. Configuración de
+    observabilidad en `observability/`: `prometheus/prometheus.yml` (4 targets), Grafana 13.3.1 con provisioning de
+    datasource y dashboard `sistema-itinerarios.json` (paneles de negocio, HTTP req/s y latencia p50/p95/p99, relay y
+    trigger). 10 pruebas nuevas (4 en Airport, 6 en Itinerary). Totales: Airport **201 pasan**; Itinerary **163 pasan,
+    25 omitidas**; Event Trigger **70 pasan, 16 omitidas**.
+  - Entrega **9D** completada: documentación de la Fase 9. `docs/02` sección 6 reemplazada con la implementación
+    concreta (logs JSON, trazas W3C con Jaeger, métricas con Prometheus y Grafana). `docs/05` diagrama de despliegue
+    actualizado con los componentes reales de observabilidad (Jaeger :16686, Prometheus :9090, Grafana :3000) y nuevo
+    diagrama 5.1 del flujo de datos de observabilidad. `docs/06` con ADR-033 a ADR-039. `README.md` raíz: tabla de
+    estado, nuevo paso 2 "Observabilidad" en el orden de arranque (Jaeger, Prometheus y Grafana), sección "Fase 9 —
+    Observabilidad" y sección "Demostración de observabilidad", rama `fase-8-frontend` en la tabla de ramas.
+    READMEs de los cuatro componentes actualizados con sección "Observabilidad (Fase 9)".
+- **Siguiente:** PR de la Fase 9 (rama `fase-9-observabilidad` → `main`), después Fase 10 (Docker Compose).

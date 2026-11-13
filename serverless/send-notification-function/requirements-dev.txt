@@ -2,6 +2,10 @@
 # Instala también las de la función.
 -r requirements.txt
 
+# Paquete compartido de observabilidad (Microservice Chassis Pattern, Fase 9).
+# El Dockerfile lo instala desde libs/ del repositorio; aquí lo hace pip para el venv local.
+-e ../../libs/observability
+
 # Migraciones del historial: se aplican aparte, no en cada invocación (ADR-029)
 alembic==1.16.1
 

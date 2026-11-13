@@ -171,17 +171,50 @@ Los reintentos se limitarán a operaciones apropiadas y no deben multiplicar inn
 
 ## 6. Observabilidad
 
-La solución incluirá progresivamente:
+La solución incorpora tres capas de observabilidad (Fase 9) que permiten seguir una operación desde el frontend hasta los servicios, la base de datos y el procesamiento del evento.
 
-- Logs estructurados en JSON.
-- Correlation ID para relacionar solicitudes.
-- trace_id y span_id.
-- OpenTelemetry.
-- Jaeger.
-- Prometheus.
-- Grafana.
+### 6.1. Logs estructurados en JSON (ADR-034)
 
-Se buscará seguir una operación desde el frontend hasta los servicios, la base de datos y el procesamiento del evento.
+Los cuatro componentes Python producen logs en formato JSON con `python-json-logger`. Cada línea incluye los campos `timestamp`, `level`, `service`, `logger`, `message`, `correlation_id`, `trace_id` y `span_id`.
+
+Dos filtros inyectan los valores dinámicos en cada línea:
+
+- **`CorrelationIdFilter`:** lee el `correlation_id` de una `ContextVar` que se establece al principio de cada solicitud HTTP (desde el header `X-Correlation-ID`).
+- **`OTelContextFilter`:** lee el `trace_id` y el `span_id` del span activo de OpenTelemetry. Si no hay span activo (por ejemplo, en el Outbox Relay fuera de un ciclo de procesamiento), los campos quedan vacíos.
+
+La función `configure_logging(log_level, service_name)` en `app/logging_config.py` configura el logger raíz `app` y es idempotente. El nivel de log se controla con la variable `LOG_LEVEL` (por defecto `INFO`).
+
+### 6.2. Trazas distribuidas (ADR-035, ADR-036, ADR-037, ADR-039)
+
+La instrumentación usa **OpenTelemetry SDK 1.45.2** con exportador OTLP gRPC hacia **Jaeger 2.23.0** (puerto 4317 OTLP, puerto 16686 interfaz de usuario). La variable `OTEL_ENABLED=false` desactiva el envío de trazas sin cambiar el código.
+
+Cada componente instrumenta sus propias dependencias:
+
+| Componente | Librerías instrumentadas |
+|---|---|
+| Airport Service | FastAPI, httpx, Logging |
+| Itinerary Service | FastAPI, httpx, SQLAlchemy, pika, Logging |
+| Outbox Relay | pika, Logging |
+| Event Trigger | pika, Logging |
+| SendNotificationFunction | SQLAlchemy, Logging |
+| API Gateway | `ngx_otel_module` (imagen `nginx:1.30.6-alpine-otel`, ADR-036) |
+
+La propagación del contexto W3C (header `traceparent`) conecta los spans de distintos componentes en una sola traza. El API Gateway inyecta `traceparent` en las solicitudes hacia los servicios (`otel_trace_context propagate`). El Itinerary Service lo captura al registrar el evento en la outbox, guardándolo en la columna `traceparent` de `outbox_events` (migración `e6f0a4b8c1d9`, ADR-037); el Outbox Relay lo restaura antes de publicar en RabbitMQ, y el Event Trigger lo extrae de los headers AMQP para pasarlo a la función.
+
+En las pruebas se usa `InMemorySpanExporter` con `SimpleSpanProcessor`: no es necesario tener Jaeger corriendo.
+
+### 6.3. Métricas (ADR-038)
+
+Los cuatro componentes exponen métricas en formato Prometheus (`prometheus-client==0.21.1`):
+
+| Componente | Puerto | Endpoint | Métricas |
+|---|---|---|---|
+| Airport Service | 8001 | `/metrics` | `http_requests_total`, `http_request_duration_seconds` |
+| Itinerary Service | 8002 | `/metrics` | `http_requests_total`, `http_request_duration_seconds`, `itineraries_created_total` |
+| Outbox Relay | 9101 | `/` | `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total` |
+| Event Trigger | 9102 | `/` | `notifications_dispatched_total{outcome}` |
+
+**Prometheus** (puerto 9090) consulta los cuatro endpoints cada 15 segundos. **Grafana** (puerto 3000) muestra un dashboard preconfigurado con cuatro paneles: negocio (itinerarios creados, notificaciones, relay), solicitudes HTTP por servicio (rate y distribución), latencia (p50/p95/p99 por servicio) y detalle del relay y el trigger. El datasource y el dashboard se cargan al arrancar Grafana desde `observability/grafana/provisioning/`.
 
 ## 7. Despliegue
 

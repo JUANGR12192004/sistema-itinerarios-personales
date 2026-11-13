@@ -33,7 +33,9 @@ from app.infrastructure.cache.store import RedisCacheStore
 from app.infrastructure.resilience.circuit_breaker import CircuitBreaker
 from app.infrastructure.resilience.resilient_provider import ResilientAirportProvider
 from app.infrastructure.resilience.retry import RetryPolicy
-from app.logging_config import configure_logging
+from observability.logging_config import configure_logging
+from observability.metrics import metrics_app, metrics_middleware
+from observability.tracing import setup_tracing
 
 
 def build_airport_provider(settings: Settings, http_client: httpx.AsyncClient, redis: Redis) -> AirportProvider:
@@ -65,7 +67,8 @@ def build_airport_provider(settings: Settings, http_client: httpx.AsyncClient, r
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Crea la aplicación FastAPI con sus rutas, errores y dependencias."""
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.service_name)
+    setup_tracing(settings.service_name, instrumentors=["fastapi", "httpx"])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -95,9 +98,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.middleware("http")(cache_status_middleware)
     app.middleware("http")(correlation_id_middleware)
+    app.middleware("http")(metrics_middleware)
     register_error_handlers(app)
     app.include_router(airports_router)
     app.include_router(health_router)
+    # Monta el endpoint /metrics que Prometheus consulta (ADR-038)
+    app.mount("/metrics", metrics_app)
     return app
 
 

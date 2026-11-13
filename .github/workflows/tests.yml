@@ -41,7 +41,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: services/airport-service/requirements.txt
+          cache-dependency-path: |
+            services/airport-service/requirements.txt
+            libs/observability/pyproject.toml
 
       - name: Instalar dependencias
         run: |
@@ -68,7 +70,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: services/itinerary-service/requirements.txt
+          cache-dependency-path: |
+            services/itinerary-service/requirements.txt
+            libs/observability/pyproject.toml
 
       - name: Instalar dependencias
         run: |
@@ -100,6 +104,7 @@ jobs:
           cache-dependency-path: |
             serverless/send-notification-function/requirements.txt
             serverless/send-notification-function/requirements-dev.txt
+            libs/observability/pyproject.toml
 
       - name: Instalar dependencias
         run: |
@@ -112,9 +117,10 @@ jobs:
           DATABASE_URL: postgresql+psycopg://localhost:5434/notification_db
         run: pytest -v
 
-      # Comprueba que la imagen de Lambda se construye (Dockerfile y requirements.txt)
+      # El contexto de build es la raíz del repositorio (incluye libs/observability, Fase 9)
       - name: Construir la imagen de la función
-        run: docker build -t send-notification-function .
+        working-directory: ${{ github.workspace }}
+        run: docker build -t send-notification-function -f serverless/send-notification-function/Dockerfile .
 
   event-trigger:
     name: Event Trigger
@@ -133,7 +139,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: serverless/event-trigger/requirements.txt
+          cache-dependency-path: |
+            serverless/event-trigger/requirements.txt
+            libs/observability/pyproject.toml
 
       - name: Instalar dependencias
         run: |

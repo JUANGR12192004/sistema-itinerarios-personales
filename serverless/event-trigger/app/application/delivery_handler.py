@@ -31,6 +31,7 @@ from typing import Any
 
 from app.application.invocation import InvocationOutcome
 from app.application.ports import FunctionInvoker
+from app.metrics import NOTIFICATIONS_DISPATCHED
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,9 @@ class DeliveryHandler:
         self._policy = policy
         self._sleep = sleep
 
-    def handle(self, body: bytes, message_id: str | None = None) -> Decision:
+    def handle(
+        self, body: bytes, message_id: str | None = None, traceparent: str | None = None
+    ) -> Decision:
         try:
             event = json.loads(body.decode("utf-8"))
         except ValueError as exc:  # incluye UnicodeDecodeError y JSONDecodeError
@@ -87,6 +90,7 @@ class DeliveryHandler:
                 message_id,
                 exc,
             )
+            NOTIFICATIONS_DISPATCHED.labels(outcome="rejected").inc()
             return Decision.REJECT
 
         label = _event_label(event, message_id)
@@ -94,7 +98,9 @@ class DeliveryHandler:
         function_failures = 0
 
         while True:
-            result = self._invoker.invoke(event)
+            result = self._invoker.invoke(event, traceparent=traceparent)
+            # Registra cada intento de invocación con su resultado (ADR-038)
+            NOTIFICATIONS_DISPATCHED.labels(outcome=result.outcome.value.lower()).inc()
 
             if result.outcome is InvocationOutcome.SUCCESS:
                 logger.info("Evento procesado (%s): %s. ACK", result.detail, label)

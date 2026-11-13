@@ -1,0 +1,34 @@
+# Configuración de Prometheus para el Sistema de Itinerarios Personales (ADR-039, Fase 9C).
+#
+# Consulta los cuatro endpoints /metrics cada 15 s.
+# En desarrollo los servicios corren en el host local; en la Fase 10 (Docker Compose)
+# se reemplaza host.docker.internal por los nombres de los contenedores.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Airport Service (FastAPI, puerto 8001)
+  - job_name: airport-service
+    static_configs:
+      - targets: ["host.docker.internal:8001"]
+    metrics_path: /metrics
+
+  # Itinerary Service — API FastAPI (puerto 8002)
+  - job_name: itinerary-service
+    static_configs:
+      - targets: ["host.docker.internal:8002"]
+    metrics_path: /metrics
+
+  # Itinerary Service — Outbox Relay (proceso aparte, puerto 9101)
+  - job_name: itinerary-service-relay
+    static_configs:
+      - targets: ["host.docker.internal:9101"]
+    metrics_path: /
+
+  # Event Trigger (proceso aparte, puerto 9102)
+  - job_name: event-trigger
+    static_configs:
+      - targets: ["host.docker.internal:9102"]
+    metrics_path: /

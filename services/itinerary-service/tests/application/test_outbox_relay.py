@@ -1,14 +1,35 @@
 """Pruebas unitarias de OutboxRelay con fakes, sin PostgreSQL ni RabbitMQ (ADR-025)."""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
 from app.application.events import ItineraryCreatedEvent
 from app.application.outbox import OutboxMessage
 from app.application.outbox_relay import OutboxRelay, RelayResult
+from app.application.ports import EventPublisher
 from app.domain.itinerary import Itinerary
 from tests.fakes import FakeEventPublisher, FakeOutboxRepository, FakeUnitOfWork
+
+
+def _reset_otel_global():
+    import opentelemetry.trace as _trace
+    from opentelemetry.util._once import Once
+
+    _trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
+    _trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
+
+
+@pytest.fixture
+def reset_tracing():
+    import observability.tracing as tracing_module
+
+    tracing_module._initialized = False
+    _reset_otel_global()
+    yield
+    tracing_module._initialized = False
+    _reset_otel_global()
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
 
@@ -238,3 +259,58 @@ def test_error_inesperado_se_propaga_sin_commit():
 
     assert uow.commits == 0
     assert len(publisher.published) == 1  # ya salió: se publicará de nuevo (duplicado)
+
+
+def test_relay_restaura_contexto_otel_desde_traceparent(reset_tracing):
+    """El relay adjunta el contexto W3C del traceparent al publicar (ADR-037, Fase 9B).
+
+    Se verifica que el publisher se ejecuta dentro del span del traceparent original:
+    el trace_id del span activo coincide con el que viajó en el traceparent.
+    """
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from observability.tracing import setup_tracing
+
+    setup_tracing("itinerary-service-test", exporter=InMemorySpanExporter())
+
+    # Captura el traceparent de un span ficticio (simula el span de la solicitud HTTP)
+    from opentelemetry import propagate
+
+    tracer = trace.get_tracer("test")
+    with tracer.start_as_current_span("span-solicitud-http") as span:
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+        traceparent = carrier["traceparent"]
+        expected_trace_id = format(span.get_span_context().trace_id, "032x")
+
+    # El publisher falso captura el trace_id del span activo en el momento de publish
+    class ContextCapturingPublisher(EventPublisher):
+        def __init__(self) -> None:
+            self.captured_trace_id: str = ""
+
+        def publish(self, event: ItineraryCreatedEvent) -> None:
+            ctx = trace.get_current_span().get_span_context()
+            self.captured_trace_id = format(ctx.trace_id, "032x") if ctx.is_valid else ""
+
+    message = _message()
+    message.traceparent = traceparent
+    outbox = FakeOutboxRepository([message])
+    publisher = ContextCapturingPublisher()
+    relay = OutboxRelay(outbox, publisher, FakeUnitOfWork(), batch_size=10)
+
+    relay.run_once()
+
+    assert publisher.captured_trace_id == expected_trace_id
+
+
+def test_relay_sin_traceparent_no_falla():
+    """Un mensaje sin traceparent se publica sin error (compatible con eventos anteriores a 9B)."""
+    message = _message()
+    assert message.traceparent is None
+    relay, _, publisher, _ = _relay([message])
+
+    result = relay.run_once()
+
+    assert result.published == 1
+    assert len(publisher.published) == 1

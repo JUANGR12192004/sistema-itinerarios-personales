@@ -1,4 +1,8 @@
-# Dependencias de Airport Service (Fases 1 y 2)
+# Dependencias de Airport Service (Fases 1, 2 y 9)
+
+# Paquete compartido de observabilidad (Microservice Chassis Pattern, Fase 9)
+-e ../../libs/observability
+
 
 # Framework web y servidor ASGI para ejecutarlo
 fastapi==0.162.0
@@ -13,6 +17,19 @@ httpx==0.28.1
 
 # Cliente de Redis (incluye la versión asíncrona redis.asyncio) para la caché de la Fase 2
 redis==8.1.0
+
+# Logs JSON estructurados (ADR-034, Fase 9)
+python-json-logger==4.2.0
+
+# Métricas Prometheus: endpoint /metrics y recuento de solicitudes HTTP (ADR-038, Fase 9C)
+prometheus-client==0.21.1
+
+# Trazas distribuidas: SDK, exportador OTLP y auto-instrumentación (ADR-035, Fase 9B)
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
+opentelemetry-instrumentation-fastapi==0.66b2
+opentelemetry-instrumentation-httpx==0.66b2
+opentelemetry-instrumentation-logging==0.66b2
 
 # Pruebas (respx simula las respuestas HTTP de API Colombia)
 pytest==9.1.1

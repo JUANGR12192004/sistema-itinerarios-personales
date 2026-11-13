@@ -1112,6 +1112,177 @@ No se pierde nada, y el relay no necesita ningún cambio para esto.
 - Los argumentos de la cola existen ahora en un solo componente (el trigger). Si cambian, solo cambia el trigger; pero la cola ya creada en RabbitMQ conserva los anteriores y habría que borrarla antes (RabbitMQ no permite cambiar los argumentos de una cola existente).
 - En la demostración, el orden de arranque deja de importar: el trigger puede arrancar antes o después de Itinerary Service.
 
+## ADR-033 — Frontend con HTML/CSS/JS y Plotly JS (Fase 8)
+
+**Estado:** Aceptada (Fase 8, ADR-033). Detalles en la sección 9.1 de `CLAUDE.md`.
+
+## ADR-034 — Logs JSON estructurados con python-json-logger (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9A).
+
+### Contexto
+
+Los logs de texto plano no se pueden filtrar ni agregar de forma programática. En un sistema distribuido es necesario relacionar los mensajes de distintos componentes por el `correlation_id` y por los identificadores de traza.
+
+### Decisión
+
+- Librería **`python-json-logger==4.2.0`** en los cuatro componentes Python (Airport Service, Itinerary Service, Outbox Relay y Event Trigger). La SendNotificationFunction también la usa.
+- **`AppJsonFormatter`**: formatea cada línea como un objeto JSON con los campos en el orden `timestamp`, `level`, `service`, `logger`, `message`, `correlation_id`, `trace_id`, `span_id`. El campo `service` viene del parámetro `service_name` de `configure_logging`.
+- **`CorrelationIdFilter`**: lee el `correlation_id` de una `ContextVar` que se establece al principio de cada solicitud HTTP. En procesos sin solicitudes HTTP (Outbox Relay, Event Trigger) el valor queda vacío.
+- **`OTelContextFilter`**: lee el `trace_id` y el `span_id` del span activo de OpenTelemetry (si existe). En logs fuera de un span activo los campos son cadenas vacías.
+- La función `configure_logging(log_level, service_name)` en `app/logging_config.py` configura el logger raíz `app` con los tres elementos anteriores y es idempotente (solo aplica si no hay handlers previos). Se llama desde el punto de ensamblaje de cada componente (`main.py` o el proceso).
+- Variable `LOG_LEVEL` (por defecto `INFO`).
+
+### Justificación
+
+JSON permite filtrar por `correlation_id` o `trace_id` sin expresiones regulares y es el formato que esperan las plataformas de observabilidad (Loki, CloudWatch, etc.). El patrón compartido entre componentes simplifica el mantenimiento y la explicación.
+
+### Consecuencias
+
+- El Outbox Relay y el Event Trigger son procesos que no reciben solicitudes HTTP: `correlation_id` puede estar vacío en sus ciclos. Cada componente puede establecer el `ContextVar` antes de procesar un mensaje si quiere propagarlo.
+- Los logs del gateway (Nginx) tienen un formato distinto (también JSON, configurado en la plantilla Nginx), con los mismos campos `service`, `correlation_id`, `trace_id` y `span_id` tomados de las variables de `ngx_otel_module`.
+
+## ADR-035 — Trazas distribuidas con OpenTelemetry (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9B).
+
+### Contexto
+
+El sistema distribuye el procesamiento de una operación entre el gateway, dos servicios, el Outbox Relay, RabbitMQ, el Event Trigger y la función serverless. Sin trazas distribuidas es imposible ver en un solo lugar el camino de una solicitud y su latencia por tramo.
+
+### Decisión
+
+- Librería **`opentelemetry-sdk==1.45.2`** con instrumentación automática **`opentelemetry-instrumentation==0.66b2`**.
+- La función `setup_tracing(service_name)` en `app/tracing.py` es idempotente y se llama desde el punto de ensamblaje de cada componente.
+  - En modo **producción** (variable `OTEL_ENABLED` no es `"false"`): `OTLPSpanExporter` con `BatchSpanProcessor`, que envía los spans en lotes al backend de Jaeger por OTLP gRPC. El endpoint se configura con la variable estándar `OTEL_EXPORTER_OTLP_ENDPOINT` (por defecto `http://localhost:4317`).
+  - En modo **pruebas**: `InMemorySpanExporter` con `SimpleSpanProcessor`. Las pruebas no necesitan Jaeger.
+- Cada componente instrumenta sus propias dependencias:
+
+| Componente | Librerías instrumentadas |
+|---|---|
+| Airport Service | FastAPI, httpx, Logging |
+| Itinerary Service | FastAPI, httpx, SQLAlchemy, pika, Logging |
+| Outbox Relay | pika, Logging |
+| Event Trigger | pika, Logging |
+| SendNotificationFunction | SQLAlchemy, Logging |
+
+- El API Gateway usa `ngx_otel_module` (ADR-036).
+- La propagación del contexto W3C (`traceparent`) se hace con `opentelemetry-propagator-b3` y el propagador compuesto de OpenTelemetry; los headers `traceparent` y `tracestate` viajan en las solicitudes HTTP y en los headers AMQP.
+
+### Justificación
+
+OpenTelemetry es el estándar del sector para instrumentación distribuida y no acopla el código al backend (Jaeger puede sustituirse por otro backend OTLP sin cambiar el código). La instrumentación automática evita escribir spans a mano para las operaciones de las librerías.
+
+### Consecuencias
+
+- Los tests unitarios usan `InMemorySpanExporter`; una prueba que necesite verificar spans puede inspeccionarlo.
+- La columna `traceparent` en `outbox_events` (ADR-037) cierra el único tramo sin propagación automática: de la API al Outbox Relay por la base de datos.
+
+## ADR-036 — Instrumentación del API Gateway con OpenTelemetry (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9B).
+
+### Contexto
+
+Nginx no tiene un SDK de OpenTelemetry, pero la imagen oficial `nginx:1.30.6-alpine-otel` incluye el módulo `ngx_otel_module` precompilado.
+
+### Decisión
+
+- El `Dockerfile` del gateway cambia la imagen base a **`nginx:1.30.6-alpine-otel`**.
+- La plantilla `default.conf.template` configura el módulo:
+  - `otel_exporter { endpoint ${OTEL_EXPORTER_OTLP_HOST}:4317; }` apunta al backend Jaeger.
+  - `otel_service_name api-gateway;` nombra el servicio en las trazas.
+  - `otel_trace ${GATEWAY_OTEL_TRACE};` activa o desactiva el tracing por variable (valor `on` u `off`).
+  - `otel_trace_context propagate;` inyecta el `traceparent` W3C en las solicitudes hacia los servicios.
+- Variables de entorno nuevas: `OTEL_EXPORTER_OTLP_HOST` (host del backend, por defecto `host.docker.internal`) y `GATEWAY_OTEL_TRACE` (por defecto `on`).
+- Los campos `$otel_trace_id` y `$otel_span_id` del módulo se escriben en el log de acceso del gateway (formato JSON).
+
+### Justificación
+
+Reutiliza la imagen oficial sin necesidad de compilar Nginx con el módulo. El tracing del gateway es opcional (se apaga con `GATEWAY_OTEL_TRACE=off`) y no cambia el enrutamiento ni el rate limiting.
+
+### Consecuencias
+
+- La imagen `nginx:1.30.6-alpine-otel` puede cambiar de versión de Nginx en el futuro. Hay que verificar la compatibilidad del módulo al actualizar.
+- En la Fase 10 (Docker Compose), `OTEL_EXPORTER_OTLP_HOST` cambiará por el nombre del contenedor de Jaeger.
+
+## ADR-037 — Columna `traceparent` en `outbox_events` para propagar el contexto de traza (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9B).
+
+### Contexto
+
+El Outbox Relay es un proceso aparte que publica los eventos pendientes. No recibe la solicitud HTTP original, así que no puede leer el `traceparent` del header. Sin esta columna, la traza se rompe entre el span de la API y el span de publicación en RabbitMQ.
+
+### Decisión
+
+- Nueva columna **`traceparent`** (`VARCHAR(55)`, nullable) en la tabla `outbox_events` (migración `e6f0a4b8c1d9`).
+- El `OutboxEventPublisher` captura el contexto W3C en el momento de guardar el evento (dentro de la transacción de la API) usando `propagate.inject()` de OpenTelemetry, y lo guarda en la columna.
+- El Outbox Relay restaura el contexto con `propagate.extract()` y `otel_context.attach()` antes de llamar a `RabbitMQEventPublisher`. El token de contexto se desconecta después de publicar (o en caso de error), para no contaminar el siguiente evento del lote.
+- El Event Trigger extrae el `traceparent` de los headers AMQP (donde lo coloca la instrumentación de pika) y lo pasa a `LambdaFunctionInvoker`, que lo inyecta en el cuerpo del evento al invocar la función.
+- La SendNotificationFunction restaura el contexto en su handler.
+
+### Justificación
+
+La columna `traceparent` es el único mecanismo disponible para cruzar la barrera entre la escritura en la outbox y la publicación en RabbitMQ, que ocurren en dos procesos distintos y en momentos distintos.
+
+### Consecuencias
+
+- La migración es compatible con datos existentes (columna nullable, valor por defecto `NULL`).
+- Si `traceparent` es `NULL` (eventos anteriores a la Fase 9), el relay no restaura contexto y la traza del relay es independiente.
+
+## ADR-038 — Métricas con Prometheus y dashboard de Grafana (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9C).
+
+### Contexto
+
+Los logs y las trazas permiten depurar casos concretos, pero no dan una visión agregada del comportamiento del sistema: cuántos itinerarios se crean por minuto, cuál es la latencia del percentil 99 o cuántos eventos lleva publicados el relay.
+
+### Decisión
+
+- Librería **`prometheus-client==0.21.1`** en los cuatro componentes Python.
+- **Airport Service e Itinerary Service (FastAPI):** un middleware `metrics_middleware` registra, después de cada respuesta, el contador `http_requests_total{method, path, status}` y el histograma `http_request_duration_seconds{method, path}`. La `path` es la plantilla de la ruta (por ejemplo `/airports/{id}`, no la ruta concreta), para evitar la explosión de cardinalidad. El endpoint `/metrics` se monta con `make_asgi_app()` del collector de Prometheus.
+- **Itinerary Service:** contador de negocio `itineraries_created_total` (sin labels), incrementado en la ruta POST después de una creación exitosa.
+- **Outbox Relay** (proceso aparte, `python -m app.outbox_relay`): llama a `start_http_server(settings.outbox_relay_metrics_port)` al arrancar (puerto 9101 por defecto). Contadores propios: `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total`, incrementados en cada ciclo.
+- **Event Trigger** (proceso aparte, `python -m app.main`): llama a `start_http_server(settings.metrics_port)` al arrancar (puerto 9102 por defecto). Contador `notifications_dispatched_total{outcome}`, con valores `success`, `rejected`, `infrastructure_error` y `function_error`, incrementado en `DeliveryHandler`.
+- **Prometheus** (imagen `prom/prometheus:v2.55.0`, puerto 9090): configurado en `observability/prometheus/prometheus.yml` con cuatro jobs (uno por endpoint), scraping cada 15 segundos.
+- **Grafana** (imagen `grafana/grafana:11.3.1`, puerto 3000): provisioning automático en `observability/grafana/provisioning/`. Dashboard `sistema-itinerarios.json` con cuatro secciones: negocio (itinerarios creados, notificaciones por resultado, mensajes procesados por el relay, ciclos del relay), solicitudes HTTP por servicio, latencia (p50/p95/p99 en ventana de 5 minutos) y detalle del relay y el trigger.
+
+### Justificación
+
+La métrica de negocio `itineraries_created_total` responde la pregunta "¿funciona el sistema?" sin abrir los logs. Las métricas del relay y el trigger muestran la salud del flujo asíncrono. El dashboard preconfigurado evita configurarlo a mano en cada equipo.
+
+### Consecuencias
+
+- Los puertos 9101 y 9102 deben estar accesibles desde el contenedor de Prometheus. En la Fase 10 (Docker Compose) se usarán los nombres de los contenedores en lugar de `host.docker.internal`.
+- En las pruebas, el `CollectorRegistry` global de Prometheus acumula métricas entre tests si no se limpia. Los tests que verifican métricas usan un registry propio.
+
+## ADR-039 — Jaeger como backend de trazas (Fase 9)
+
+**Estado:** Aceptada (Fase 9, entrega 9B).
+
+### Contexto
+
+La SDK de OpenTelemetry exporta trazas a un backend que las almacena y las presenta. Hay que elegir uno.
+
+### Decisión
+
+- **Jaeger 2.23.0** (`jaegertracing/jaeger:2.23.0`), imagen multiarquitectura (amd64 y arm64).
+- Recibe trazas por el receptor OTLP gRPC en el puerto 4317.
+- Expone su interfaz de usuario en el puerto 16686.
+- Almacena las trazas en memoria (modo todo-en-uno, `--set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317`). Las trazas no persisten entre reinicios; es adecuado para el desarrollo.
+- Desde los servicios Python, el exportador `OTLPSpanExporter()` sin argumentos usa la variable `OTEL_EXPORTER_OTLP_ENDPOINT` (por defecto `http://localhost:4317`). Desde el contenedor del gateway, la variable `OTEL_EXPORTER_OTLP_HOST` apunta al host donde corre Jaeger (por defecto `host.docker.internal`).
+
+### Justificación
+
+Jaeger 2.x acepta el protocolo OTLP directamente, sin el Jaeger Agent ni el Collector separados. La imagen todo-en-uno es suficiente para desarrollo y no requiere configuración adicional.
+
+### Consecuencias
+
+- En la Fase 10 (Docker Compose), el endpoint de Jaeger cambiará de `host.docker.internal:4317` a `jaeger:4317` (nombre del contenedor dentro de la red de Docker).
+- El almacenamiento en memoria no es adecuado para producción: habría que configurar un backend persistente (Elasticsearch, Cassandra o el almacenamiento de Jaeger en S3).
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.
