@@ -300,16 +300,22 @@ flowchart TB
     subgraph Local["Entorno local con Docker Compose"]
         FRONT[Frontend]
         GATE["API Gateway (Nginx)<br/>api-gateway :8000"]
-        AIR[Airport Service]
-        ITIN[Itinerary Service]
+        AIR[Airport Service :8001]
+        ITIN[Itinerary Service :8002]
         PG[("PostgreSQL itinerarios<br/>itinerary-postgres :5433")]
-        RED[(Redis)]
+        RED[(Redis :6379)]
         RAB["RabbitMQ<br/>itinerary-rabbitmq :5672 / :15672"]
-        RELAY[Outbox Relay]
-        TRIG[Event Trigger]
+        RELAY["Outbox Relay<br/>(métricas :9101)"]
+        TRIG["Event Trigger<br/>(métricas :9102)"]
         FUNC["SendNotificationFunction<br/>imagen Lambda + RIE :9000"]
         NPG[("PostgreSQL notificaciones<br/>notification-postgres :5434")]
-        OBS[Stack de observabilidad]
+
+        subgraph OBS["Stack de observabilidad (Fase 9)"]
+            JAEGER["Jaeger :16686<br/>(OTLP gRPC :4317)"]
+            PROM["Prometheus :9090"]
+            GRAFANA["Grafana :3000"]
+            PROM --> GRAFANA
+        end
 
         FRONT --> GATE
         GATE --> AIR
@@ -322,10 +328,70 @@ flowchart TB
         RAB --> TRIG
         TRIG --> FUNC
         FUNC -->|red notification-net| NPG
+
+        GATE -.->|trazas OTLP gRPC| JAEGER
+        AIR -.->|trazas OTLP gRPC| JAEGER
+        ITIN -.->|trazas OTLP gRPC| JAEGER
+        RELAY -.->|trazas OTLP gRPC| JAEGER
+        TRIG -.->|trazas OTLP gRPC| JAEGER
+        FUNC -.->|trazas OTLP gRPC| JAEGER
+        PROM -.->|scraping /metrics cada 15 s| AIR
+        PROM -.->|scraping /metrics cada 15 s| ITIN
+        PROM -.->|scraping :9101 cada 15 s| RELAY
+        PROM -.->|scraping :9102 cada 15 s| TRIG
     end
 ```
 
-El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual. El gateway (contenedor `api-gateway`) llega a los servicios del equipo por `host.docker.internal`; en la Fase 10 usará los nombres de los contenedores; el orden de arranque está en el `README.md` raíz. La integración de observabilidad se desarrollará en la Fase 9.
+El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual. El gateway (contenedor `api-gateway`) llega a los servicios del equipo por `host.docker.internal`; en la Fase 10 usará los nombres de los contenedores; el orden de arranque está en el `README.md` raíz.
+
+## 5.1. Flujo de datos de observabilidad (Fase 9)
+
+```mermaid
+flowchart LR
+    subgraph Componentes
+        GW["API Gateway<br/>(nginx-otel)"]
+        AS[Airport Service]
+        IS[Itinerary Service]
+        REL[Outbox Relay]
+        ET[Event Trigger]
+        NF[SendNotificationFunction]
+    end
+
+    subgraph Logs
+        STDOUT["stdout (JSON)<br/>timestamp · level · service<br/>correlation_id · trace_id · span_id"]
+    end
+
+    subgraph Trazas
+        JAEGER["Jaeger :16686<br/>OTLP gRPC :4317"]
+    end
+
+    subgraph Metricas["Métricas"]
+        PROM["Prometheus :9090<br/>scraping cada 15 s"]
+        GRAFANA["Grafana :3000<br/>dashboard preconfigurado"]
+        PROM --> GRAFANA
+    end
+
+    GW -->|"traceparent W3C (ngx_otel_module)"| Trazas
+    AS -->|opentelemetry-sdk| Trazas
+    IS -->|opentelemetry-sdk| Trazas
+    REL -->|opentelemetry-sdk| Trazas
+    ET -->|opentelemetry-sdk| Trazas
+    NF -->|opentelemetry-sdk| Trazas
+
+    GW --> Logs
+    AS --> Logs
+    IS --> Logs
+    REL --> Logs
+    ET --> Logs
+    NF --> Logs
+
+    AS -->|"/metrics :8001"| PROM
+    IS -->|"/metrics :8002"| PROM
+    REL -->|":9101"| PROM
+    ET -->|":9102"| PROM
+```
+
+El `correlation_id` viaja en el header `X-Correlation-ID` desde el gateway hasta los logs del Outbox Relay y del Event Trigger, y queda guardado en `notification_history`. El `traceparent` W3C une los spans en una sola traza en Jaeger: el gateway lo inyecta, el Itinerary Service lo guarda en `outbox_events` (ADR-037) y el relay lo restaura al publicar en RabbitMQ.
 
 ## 6. Consideraciones
 

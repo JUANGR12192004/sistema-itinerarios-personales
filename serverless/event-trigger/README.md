@@ -39,7 +39,7 @@ temporal se reintenta sin límite y lo permanente se aparta.
 
 ## Orden de arranque del sistema completo
 
-El trigger es el paso **7** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+El trigger es el paso **8** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` y `notification_db`.
@@ -219,6 +219,36 @@ crear un itinerario y publicar a mano un evento inválido y un mensaje que no es
 | Mensajes que nadie procesa | Dos triggers abiertos a la vez | Dejar uno solo |
 | `DeprecationWarning ... utcfromtimestamp` en las pruebas | Viene de pika 1.3.2 al leer `x-death` | Conocida y anotada para la Fase 11 (CLAUDE.md, sección 9.3); no afecta |
 
+## Observabilidad (Fase 9)
+
+El Event Trigger emite logs JSON y trazas, y expone métricas en un puerto propio.
+
+### Logs JSON
+
+Los logs salen por `stdout` en formato JSON con los campos `timestamp`, `level`, `service` (`event-trigger`), `logger`, `message`, `correlation_id`, `trace_id` y `span_id`.
+
+### Trazas (OpenTelemetry → Jaeger)
+
+Instrumenta pika y el logger. Extrae el `traceparent` de los headers AMQP de cada mensaje (inyectado por el Outbox Relay) y lo propaga al invocar la función.
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python -m app.main
+```
+
+Para desactivar: `OTEL_ENABLED=false`.
+
+### Métricas (Prometheus)
+
+El proceso llama a `start_http_server(settings.metrics_port)` al arrancar (puerto `METRICS_PORT`, por defecto 9102):
+
+| Métrica | Tipo | Labels |
+|---|---|---|
+| `notifications_dispatched_total` | Counter | `outcome`: `success`, `rejected`, `infrastructure_error`, `function_error` |
+
+```
+curl.exe http://localhost:9102/
+```
+
 ## Estructura
 
 ```
@@ -234,6 +264,9 @@ app/
       topology.py        → QueueTopology y declaración de la topología del consumidor
       dlq_replayer.py    → reprocesamiento de la DLQ
   config.py
+  logging_config.py      → logs JSON estructurados (Fase 9)
+  tracing.py             → setup_tracing() con OpenTelemetry (Fase 9)
+  metrics.py             → notifications_dispatched_total (Fase 9)
   main.py                → python -m app.main
   replay_dlq.py          → python -m app.replay_dlq [--all]
 demo/                    → itinerario de ejemplo, evento inválido y mensaje no JSON

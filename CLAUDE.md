@@ -1041,5 +1041,11 @@ pytest -v
     datasource y dashboard `sistema-itinerarios.json` (paneles de negocio, HTTP req/s y latencia p50/p95/p99, relay y
     trigger). 10 pruebas nuevas (4 en Airport, 6 en Itinerary). Totales: Airport **201 pasan**; Itinerary **163 pasan,
     25 omitidas**; Event Trigger **70 pasan, 16 omitidas**.
-- **Siguiente:** completar la documentación de la Fase 9 y el PR (9D si se separa), o bien continuar con la
-  Fase 10 (Docker Compose).
+  - Entrega **9D** completada: documentación de la Fase 9. `docs/02` sección 6 reemplazada con la implementación
+    concreta (logs JSON, trazas W3C con Jaeger, métricas con Prometheus y Grafana). `docs/05` diagrama de despliegue
+    actualizado con los componentes reales de observabilidad (Jaeger :16686, Prometheus :9090, Grafana :3000) y nuevo
+    diagrama 5.1 del flujo de datos de observabilidad. `docs/06` con ADR-033 a ADR-039. `README.md` raíz: tabla de
+    estado, nuevo paso 2 "Observabilidad" en el orden de arranque (Jaeger, Prometheus y Grafana), sección "Fase 9 —
+    Observabilidad" y sección "Demostración de observabilidad", rama `fase-8-frontend` en la tabla de ramas.
+    READMEs de los cuatro componentes actualizados con sección "Observabilidad (Fase 9)".
+- **Siguiente:** PR de la Fase 9 (rama `fase-9-observabilidad` → `main`), después Fase 10 (Docker Compose).

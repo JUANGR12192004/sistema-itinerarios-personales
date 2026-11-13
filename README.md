@@ -110,12 +110,44 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 5 | Transactional Outbox | Completada |
 | 6 | Serverless | Completada |
 | 7 | API Gateway | Completada |
-| 8 a 12 | Frontend, observabilidad, Docker Compose, pruebas y documentación | Pendientes |
+| 8 | Frontend | Completada |
+| 9 | Observabilidad | En curso |
+| 10 a 12 | Docker Compose, pruebas y documentación | Pendientes |
 
-**Última fase completada:** Fase 7 — API Gateway (PR #14, etiqueta `fase-7`). **Siguiente:** Fase 8 — Frontend.
+**En curso:** Fase 9 — Observabilidad (rama `fase-9-observabilidad`). **Última fase completada:** Fase 8 — Frontend (PR #19, etiqueta `fase-8`).
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+
+### Fase 9 — Observabilidad
+
+Logs JSON estructurados, trazas distribuidas con OpenTelemetry y métricas con Prometheus y Grafana en todos los componentes (ADR-034 a ADR-039).
+
+| Pieza | Qué hace |
+|---|---|
+| Logs JSON (`python-json-logger`) | Cada línea incluye `timestamp`, `level`, `service`, `correlation_id`, `trace_id` y `span_id`. Mismo patrón en los cuatro componentes Python |
+| Trazas (OpenTelemetry SDK + Jaeger 2.23.0) | Propaga el contexto W3C por toda la cadena: gateway → servicios → outbox → relay → RabbitMQ → trigger → función. El `traceparent` se guarda en `outbox_events` para cruzar la barrera de procesos (ADR-037) |
+| API Gateway con `ngx_otel_module` | Imagen `nginx:1.30.6-alpine-otel`: inyecta `traceparent` en las solicitudes hacia los servicios y registra `trace_id` y `span_id` en su log de acceso (ADR-036) |
+| Métricas HTTP (middleware en Airport e Itinerary Service) | `http_requests_total{method, path, status}` y `http_request_duration_seconds{method, path}`. Ruta como plantilla para evitar explosión de cardinalidad |
+| Métrica de negocio | `itineraries_created_total` en Itinerary Service: responde "¿funciona el sistema?" sin abrir logs |
+| Métricas del Outbox Relay (puerto 9101) | `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total` |
+| Métricas del Event Trigger (puerto 9102) | `notifications_dispatched_total{outcome}`: `success`, `rejected`, `infrastructure_error`, `function_error` |
+| Prometheus (puerto 9090) | Consulta los cuatro endpoints cada 15 s. Configurado en `observability/prometheus/prometheus.yml` |
+| Grafana (puerto 3000) | Dashboard preconfigurado con paneles de negocio, HTTP, latencia (p50/p95/p99) y relay/trigger. Provisioning automático desde `observability/grafana/provisioning/` |
+
+La demostración completa está en la sección [Demostración de observabilidad](#demostración-de-observabilidad).
+
+### Fase 8 — Frontend
+
+Interfaz web servida por el mismo contenedor del API Gateway. Mapa de aeropuertos con Plotly JS y CRUD de itinerarios (ADR-033).
+
+| Pieza | Qué hace |
+|---|---|
+| Mapa de aeropuertos | `scattergeo` de Plotly 4.3.0 (bundle parcial local), centrado en Colombia, un color por tipo, tooltip con nombre, IATA, ciudad y departamento |
+| CRUD de itinerarios | Formulario de 2 columnas con desplegables de aeropuertos; tabla con edición inline y eliminación con confirmación |
+| `datetime-local` → ISO 8601 | La fecha se envía con el offset del navegador (ADR-017) |
+| Errores del gateway | Se muestran con `correlation_id` y botón "Copiar" en 5xx |
+| Sin `innerHTML` | Todo texto de datos con `textContent` para evitar XSS |
 
 ### Fase 7 — API Gateway
 
@@ -179,7 +211,7 @@ Hasta la Fase 10 (Docker Compose) el sistema se levanta a mano. El orden importa
 anteriores. La instalación de cada componente (entorno virtual, `.env`) está en su README; aquí está el orden para
 levantarlo todo.
 
-### 1. Contenedores
+### 1. Contenedores de infraestructura
 
 Igual en PowerShell, CMD y la Terminal de macOS (zsh). En Apple Silicon las imágenes se descargan para `arm64`
 sin opciones adicionales. **La primera vez** se crean:
@@ -200,7 +232,37 @@ docker start itinerary-postgres itinerary-rabbitmq notification-postgres airport
 
 RabbitMQ tarda unos segundos: está listo cuando `docker logs itinerary-rabbitmq` muestra `Server startup complete`.
 
-### 2. Migraciones
+### 2. Observabilidad (Fase 9)
+
+Stack de observabilidad (Jaeger, Prometheus y Grafana). Es opcional para los pasos siguientes; sin él el sistema
+funciona igual, pero no se ven trazas ni métricas. **La primera vez** se crean:
+
+```
+docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
+docker run -d --name prometheus -p 9090:9090 -v "%CD%\observability\prometheus\prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
+docker run -d --name grafana -p 3000:3000 -v "%CD%\observability\grafana\provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
+```
+
+En macOS (zsh) reemplazar `%CD%` por `$(pwd)`:
+
+```bash
+docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
+docker run -d --name prometheus -p 9090:9090 -v "$(pwd)/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
+docker run -d --name grafana -p 3000:3000 -v "$(pwd)/observability/grafana/provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
+```
+
+**Las veces siguientes:** `docker start jaeger prometheus grafana`.
+
+Interfaces:
+
+- Jaeger: <http://localhost:16686>
+- Prometheus: <http://localhost:9090>
+- Grafana: <http://localhost:3000> (usuario `admin`, clave `admin`)
+
+> Las trazas llegan a Jaeger porque los servicios, el relay y el trigger se inician con `OTEL_ENABLED=true` (valor
+> por defecto). Para desactivarlas: `OTEL_ENABLED=false` como variable de entorno antes de arrancar cada proceso.
+
+### 3. Migraciones
 
 Una vez, y otra cada vez que lleguen migraciones nuevas. Con el entorno virtual de cada carpeta activado.
 
@@ -246,7 +308,7 @@ deactivate
 cd ../..
 ```
 
-### 3. SendNotificationFunction
+### 4. SendNotificationFunction
 
 Igual en PowerShell, CMD y zsh, desde `serverless\send-notification-function` (`serverless/send-notification-function`
 en macOS). La primera vez (y después de cada cambio en el código de la función) se construye la imagen y se crea el
@@ -263,7 +325,7 @@ En Apple Silicon la imagen se construye para `arm64` (la imagen base de Lambda t
 igual en local; solo importa al desplegar en AWS Lambda, donde la función se crearía con arquitectura `arm64` (o la
 imagen se construiría con `docker build --platform linux/amd64`).
 
-### 4 a 7. Procesos de Python
+### 5 a 8. Procesos de Python
 
 Cada uno en **su propia terminal**, con el entorno virtual de su carpeta activado
 (`.\.venv\Scripts\Activate.ps1` en PowerShell, `.venv\Scripts\activate.bat` en CMD, `source .venv/bin/activate` en
@@ -271,12 +333,12 @@ zsh). Los comandos son iguales en las tres terminales (en macOS, las carpetas se
 
 | Paso | Carpeta | Comando | Listo cuando |
 |---|---|---|---|
-| 4. Airport Service | `services\airport-service` | `uvicorn app.main:app --port 8001` | http://localhost:8001/health responde |
-| 5. Itinerary Service | `services\itinerary-service` | `uvicorn app.main:app --port 8002` | http://localhost:8002/health responde |
-| 6. Outbox Relay | `services\itinerary-service` | `python -m app.outbox_relay` | `Outbox Relay iniciado` |
-| 7. Event Trigger | `serverless\event-trigger` | `python -m app.main` | `escuchando la cola notification.itinerary-created` |
+| 5. Airport Service | `services\airport-service` | `uvicorn app.main:app --port 8001` | http://localhost:8001/health responde |
+| 6. Itinerary Service | `services\itinerary-service` | `uvicorn app.main:app --port 8002` | http://localhost:8002/health responde |
+| 7. Outbox Relay | `services\itinerary-service` | `python -m app.outbox_relay` | `Outbox Relay iniciado` |
+| 8. Event Trigger | `serverless\event-trigger` | `python -m app.main` | `escuchando la cola notification.itinerary-created` |
 
-### 8. API Gateway
+### 9. API Gateway
 
 Igual en PowerShell, CMD y zsh, desde la raíz del repositorio. La primera vez (y después de cada cambio en
 `gateway/templates/`) se construye la imagen y se crea el contenedor:
@@ -292,7 +354,7 @@ El gateway puede arrancar antes que los servicios: mientras un servicio no esté
 `UPSTREAM_UNAVAILABLE`, y en cuanto arranca, funcionan sin reiniciar el gateway. Llega a los servicios del equipo por
 `host.docker.internal` (Docker Desktop lo crea en macOS y Windows).
 
-Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis`.
+Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis grafana prometheus jaeger`.
 
 ### Qué pasa si se omite un paso
 
@@ -310,13 +372,48 @@ Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notif
 | Outbox Relay | Los itinerarios se crean (201), pero sus eventos **se acumulan pendientes en la outbox** | Arrancarlo; publica los pendientes en orden |
 | Event Trigger (nunca arrancó) | La cola no existe: el relay registra `UnroutableError` y el evento **espera en la outbox** | Arrancarlo: declara la cola y el relay publica en el siguiente ciclo |
 | Event Trigger (apagado después) | Los mensajes se acumulan en la cola (*Ready* en el panel) | Arrancarlo; los procesa en orden |
-| API Gateway | `http://localhost:8000` rechaza la conexión. Los servicios siguen respondiendo directamente en 8001 y 8002 | `docker start api-gateway` (o los comandos del paso 8 la primera vez) |
+| API Gateway | `http://localhost:8000` rechaza la conexión. Los servicios siguen respondiendo directamente en 8001 y 8002 | `docker start api-gateway` (o los comandos del paso 9 la primera vez) |
 | Airport o Itinerary Service, usando el gateway | El gateway responde 502 `UPSTREAM_UNAVAILABLE` con `details.service` | Arrancar el servicio; no hace falta reiniciar el gateway |
+| Jaeger | Los servicios funcionan con normalidad; el exportador OTLP registra un error al arrancar pero no interrumpe nada | `docker start jaeger` |
+| Prometheus | Los servicios funcionan; el endpoint `/metrics` sigue disponible pero nadie lo consulta | `docker start prometheus` |
+| Grafana | Los servicios y Prometheus funcionan; no hay dashboard | `docker start grafana` |
+
+## Demostración de observabilidad
+
+Requisitos: los nueve pasos del orden de arranque, incluyendo el paso 2 (Jaeger, Prometheus y Grafana).
+
+### Seguir una solicitud de punta a punta en Jaeger
+
+```
+curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-traza" --data-binary "@demo\create-itinerary.json"
+```
+
+**macOS (zsh):**
+
+```bash
+curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-traza" --data-binary "@demo/create-itinerary.json"
+```
+
+Resultado esperado:
+
+1. La solicitud devuelve 201.
+2. En Jaeger (<http://localhost:16686>), buscar el servicio `api-gateway` → aparece la traza que conecta el gateway, Itinerary Service, Airport Service (dos llamadas de validación), la escritura en PostgreSQL y el contexto guardado en la outbox.
+3. Unos segundos después, el relay publica el evento: en Jaeger aparece una traza del `itinerary-service-outbox-relay` que continúa el span original gracias al `traceparent` guardado en `outbox_events`.
+
+### Ver métricas en Grafana
+
+Abrir <http://localhost:3000> (usuario `admin`, clave `admin`), ir a **Dashboards → Sistema de Itinerarios Personales**.
+
+- Crear varios itinerarios y observar que `itineraries_created_total` sube.
+- El panel "Outbox Relay" muestra los eventos publicados en tiempo real.
+- El panel "HTTP Latencia" muestra los percentiles p50, p95 y p99 de los últimos 5 minutos.
+
+Los mismos datos en bruto están en Prometheus (<http://localhost:9090>): buscar `http_requests_total` o `itineraries_created_total`.
 
 ## Demostración de punta a punta
 
 Recorrido completo: **gateway** → crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial.
-Requisitos: los ocho pasos del orden de arranque. Las solicitudes entran por el gateway
+Requisitos: los nueve pasos del orden de arranque. Las solicitudes entran por el gateway
 (`http://localhost:8000/api/itineraries`), igual que lo hará el frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
 PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
 `docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
@@ -456,6 +553,7 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | `fase-5-transactional-outbox` | Fase 5 — Transactional Outbox, Outbox Relay y mensajes venenosos | `fase-5` |
 | `fase-6-serverless` | Fase 6 — SendNotificationFunction (AWS Lambda + RIE), Event Trigger, DLQ y su reprocesamiento | `fase-6` |
 | `fase-7-api-gateway` | Fase 7 — API Gateway con Nginx (enrutamiento, rate limiting, correlation ID, propagación de `Authorization`) | `fase-7` |
+| `fase-8-frontend` | Fase 8 — Frontend (mapa con Plotly JS, CRUD de itinerarios, estáticos servidos por Nginx) | `fase-8` |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.

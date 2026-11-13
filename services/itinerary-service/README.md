@@ -141,7 +141,7 @@ y la explicación completa (Outbox, duplicados, idempotencia y mensajes venenoso
 
 ## Orden de arranque del sistema completo
 
-Itinerary Service ocupa los pasos **5** (API) y **6** (Outbox Relay) del orden completo, explicado en el
+Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en el
 [README raíz](../../README.md#orden-de-arranque):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
@@ -395,6 +395,42 @@ con `event_id`. La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_pu
 Los mensajes ilegibles de la outbox se descartan con `failed_at` y no se reintentan (ADR-027).
 Detalles: [`docs/04-comunicacion-y-eventos.md`](../../docs/04-comunicacion-y-eventos.md), sección 7.
 
+## Observabilidad (Fase 9)
+
+Itinerary Service y el Outbox Relay exponen las tres capas. No requieren variables de entorno extra salvo `OTEL_ENABLED` (por defecto `true`).
+
+### Logs JSON
+
+Los logs de la API y del relay salen por `stdout` en formato JSON con los campos `timestamp`, `level`, `service` (`itinerary-service`), `logger`, `message`, `correlation_id`, `trace_id` y `span_id`. El `correlation_id` se toma del header `X-Correlation-ID` de la solicitud.
+
+### Trazas (OpenTelemetry → Jaeger)
+
+La API instrumenta FastAPI, httpx, SQLAlchemy, pika y el logger. El relay instrumenta pika. El contexto W3C (`traceparent`) se guarda en la columna `traceparent` de `outbox_events` al registrar el evento, y el relay lo restaura antes de publicar en RabbitMQ, conectando ambos spans en una sola traza en Jaeger.
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 uvicorn app.main:app --port 8002
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python -m app.outbox_relay
+```
+
+### Métricas (Prometheus)
+
+La API expone `GET /metrics` (puerto 8002). El relay expone el puerto `OUTBOX_RELAY_METRICS_PORT` (por defecto 9101):
+
+| Componente | Métrica | Tipo | Labels |
+|---|---|---|---|
+| API | `http_requests_total` | Counter | `method`, `path`, `status` |
+| API | `http_request_duration_seconds` | Histogram | `method`, `path` |
+| API | `itineraries_created_total` | Counter | — |
+| Relay | `outbox_events_published_total` | Counter | — |
+| Relay | `outbox_events_failed_total` | Counter | — |
+| Relay | `outbox_events_dead_total` | Counter | — |
+| Relay | `outbox_relay_cycles_total` | Counter | — |
+
+```
+curl.exe http://localhost:8002/metrics
+curl.exe http://localhost:9101/
+```
+
 ## Estructura
 
 ```
@@ -410,6 +446,9 @@ app/
     airport_client/    → HttpAirportCatalogAdapter (llama a Airport Service)
     messaging/         → RabbitMQEventPublisher y topología de RabbitMQ (los usa el relay)
   api/                 → Rutas, esquemas Pydantic, manejador de errores, dependencias
+  logging_config.py    → Logs JSON estructurados (Fase 9)
+  tracing.py           → setup_tracing() con OpenTelemetry (Fase 9)
+  metrics.py           → Métricas Prometheus + middleware HTTP (Fase 9)
   main.py              → Creación de la app FastAPI
   outbox_relay.py      → Proceso del Outbox Relay (python -m app.outbox_relay)
 alembic/               → Migraciones de base de datos
