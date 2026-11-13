@@ -40,6 +40,7 @@ from app.infrastructure.persistence.database import get_session_factory
 from app.infrastructure.persistence.errors import translate_database_errors
 from app.infrastructure.persistence.repository import SqlAlchemyNotificationHistoryRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
+from app.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +113,10 @@ def _to_response(result: NotificationResult) -> dict[str, Any]:
 
 
 def _configure_logging() -> None:
-    """Muestra los logs de `app` con el nivel configurado.
+    """Configura logs JSON en el logger 'app'. Idempotente: no reinicializa entre invocaciones.
 
-    En Lambda el runtime ya instala un handler en el logger raíz (los logs salen por la
-    salida estándar: `docker logs` en local, CloudWatch en AWS); basicConfig solo actúa
-    si no hay ninguno, por ejemplo al ejecutar el handler fuera de Lambda.
+    En Lambda el runtime pre-instala un handler en el root logger; configure_logging
+    agrega el suyo al logger 'app' con propagate=False para evitar duplicados.
     """
-    logging.basicConfig(format="%(levelname)s [%(name)s] %(message)s")
-    logging.getLogger("app").setLevel(get_settings().log_level.upper())
+    s = get_settings()
+    configure_logging(s.log_level, s.function_name)

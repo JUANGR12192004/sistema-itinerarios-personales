@@ -10,6 +10,9 @@ httpx==0.28.1
 pydantic==2.14.1
 pydantic-settings==2.16.1
 
+# Logs JSON estructurados (ADR-034, Fase 9)
+python-json-logger==4.2.0
+
 # Pruebas (respx simula las respuestas HTTP de la función)
 pytest==9.1.1
 respx==0.23.1

@@ -65,7 +65,7 @@ def build_airport_provider(settings: Settings, http_client: httpx.AsyncClient, r
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Crea la aplicación FastAPI con sus rutas, errores y dependencias."""
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.service_name)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

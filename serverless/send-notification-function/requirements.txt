@@ -9,3 +9,6 @@ pydantic-settings==2.16.1
 # ORM y driver de PostgreSQL (psycopg 3, modo síncrono)
 sqlalchemy==2.0.41
 psycopg[binary]==3.2.9
+
+# Logs JSON estructurados (ADR-034, Fase 9)
+python-json-logger==4.2.0

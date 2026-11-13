@@ -24,6 +24,7 @@ from app.infrastructure.messaging.rabbitmq_event_publisher import RabbitMQEventP
 from app.infrastructure.persistence.database import get_session_factory
 from app.infrastructure.persistence.outbox_repository import SqlAlchemyOutboxRepository
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
+from app.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +86,9 @@ def run_loop(
 
 def main() -> None:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    # pika registra cada conexión en INFO y cada fallo de conexión en ERROR con traceback
+    # "itinerary-service-relay" distingue los logs del relay de los de la API en Jaeger
+    configure_logging(settings.log_level, "itinerary-service-relay")
+    # pika registra cada conexión en INFO y cada fallo de ERROR con traceback
     # (una conexión por evento, ADR-021). Con RabbitMQ caído eso llena la consola en cada
     # ciclo; el relay ya registra cada fallo en una línea (WARNING) con su causa.
     logging.getLogger("pika").setLevel(logging.CRITICAL)

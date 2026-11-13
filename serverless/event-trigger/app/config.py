@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    service_name: str = "event-trigger"
     log_level: str = "INFO"
 
     # RabbitMQ. Sin usuario en la URL, pika usa guest/guest (usuario por defecto de la imagen local).

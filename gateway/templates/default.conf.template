@@ -54,12 +54,26 @@ limit_req_status 429;
 limit_req_log_level warn;
 
 
-# --- Log de acceso -----------------------------------------------------------
-# Una línea por solicitud con su correlation_id (preparación de la Fase 9, donde
-# pasará a JSON). Nunca incluye el header Authorization.
-log_format gateway '$remote_addr [$time_local] "$request" $status $body_bytes_sent '
-                   'request_time=$request_time upstream=$upstream_addr '
-                   'upstream_status=$upstream_status correlation_id=$correlation_id';
+# --- Log de acceso en JSON (ADR-034, Fase 9A) --------------------------------
+# escape=json protege caracteres especiales en los valores de las variables Nginx
+# (p. ej. comillas en $request_uri). Los campos trace_id y span_id se rellenan en
+# la Fase 9B cuando se carga ngx_otel_module y se dispone de $otel_trace_id.
+# Nunca incluye el header Authorization.
+log_format json_access escape=json
+    '{"timestamp":"$time_iso8601",'
+    '"service":"api-gateway",'
+    '"level":"INFO",'
+    '"method":"$request_method",'
+    '"uri":"$request_uri",'
+    '"status":$status,'
+    '"request_time":$request_time,'
+    '"bytes_sent":$body_bytes_sent,'
+    '"upstream":"$upstream_addr",'
+    '"upstream_status":"$upstream_status",'
+    '"correlation_id":"$correlation_id",'
+    '"trace_id":"",'
+    '"span_id":""}';
+
 
 
 # --- Servicios internos ------------------------------------------------------
@@ -83,7 +97,7 @@ server {
     # No revelar la versión de Nginx en los headers ni en las páginas de error.
     server_tokens off;
 
-    access_log /var/log/nginx/access.log gateway;
+    access_log /var/log/nginx/access.log json_access;
 
     # Tamaño máximo del cuerpo de una solicitud (un itinerario ocupa menos de 1 KB).
     client_max_body_size 1m;

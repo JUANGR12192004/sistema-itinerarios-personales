@@ -26,6 +26,7 @@ from app.application.delivery_handler import DeliveryHandler, RetryPolicy
 from app.config import Settings, get_settings
 from app.infrastructure.lambda_invoker import LambdaFunctionInvoker
 from app.infrastructure.rabbitmq.consumer import RabbitMQConsumer
+from app.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,7 @@ def run_with_reconnection(
 
 def main() -> None:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    configure_logging(settings.log_level, settings.service_name)
     # pika registra cada intento de conexión fallido con su traza; el trigger ya informa
     # el error en una línea y se reconecta
     logging.getLogger("pika").setLevel(logging.CRITICAL)
