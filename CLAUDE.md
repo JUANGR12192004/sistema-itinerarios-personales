@@ -1166,4 +1166,28 @@ pytest -v
     (ADR-041) y se borró `serverless/send-notification-function/.dockerignore` (sin efecto desde la Fase 9).
     `GenerateItineraryReportFunction` no se implementa por alcance (ADR-043). La 9.3 queda solo con la protección
     de `main`, que configura el dueño del repositorio en GitHub.
+  - Fusionado en `main` (PR #27, merge `6078e16`). Quedó una lista de pendientes de las Fases 0 a 11: los grupos A
+    (configuración y pruebas) y B (documentos que contradicen el código) se corrigen antes de la Fase 12; los grupos
+    C (estados de ADR) y D (CLAUDE.md 7.5, 7.6 y 12, resúmenes del README) quedan para la Fase 12.
+- **Rama `fix/limpieza-config`** (grupo A, configuración y pruebas):
+  - Contexto de build de la imagen de SendNotificationFunction: su Dockerfile hace `COPY libs/` y el
+    `Dockerfile.dockerignore` dejaba pasar todo `libs/observability/`. Con `libs/observability/.venv` presente
+    (ADR-042 indica crearlo para sus pruebas), la imagen llevaba 73 MB de más (`.venv`, `tests/`). Ahora solo pasan
+    `pyproject.toml` y `observability/**`: contexto de 70 MB a 46 KB, `libs/` en la imagen de 73 MB a 92 KB.
+  - Gateway: `Dockerfile.dockerignore` con lista blanca exacta (`nginx.conf`, `templates/`, `frontend/`) en lugar de
+    `!gateway/`, que volvía a incluir toda la carpeta. En el build real no tenía efecto (BuildKit solo transfiere lo
+    que nombran los `COPY`: 1,46 MB antes y después); se mantiene como prevención. Se borró `gateway/.dockerignore`,
+    sin efecto desde la Fase 8 (contexto en la raíz).
+  - `.env.example`: `SERVICE_NAME` en el del trigger; `OTEL_ENABLED` y `OTEL_EXPORTER_OTLP_ENDPOINT` comentadas en
+    los cuatro componentes Python, con la aclaración de que OpenTelemetry las lee del entorno del proceso y no del
+    `.env` (escribirlas ahí no tiene efecto).
+  - Pruebas: se borraron `tests/test_logging_config.py` y `tests/test_tracing.py` de Airport e Itinerary Service
+    (21 pruebas que solo probaban `libs/observability` con un nombre de servicio escrito a mano). La única sin
+    equivalente (log dentro de un span → línea JSON con `trace_id` y `span_id`) pasó a
+    `libs/observability/tests/test_logging_config.py`.
+  - Verificación (2026-11-18, macOS, sin servicios encendidos): libs/observability **19**, Airport **191**, Itinerary
+    **161 pasan, 25 omitidas**, Event Trigger **70 pasan, 16 omitidas**, función **64 pasan, 6 omitidas**, gateway
+    **50 pasan, 3 omitidas**; `docker compose build` de las seis imágenes, `docker compose config` (con y sin
+    `docker-compose.e2e.yml`) y `nginx -t` correctos. Los entornos virtuales de este equipo estaban desactualizados
+    (anteriores a la Fase 9) y se reinstalaron con `pip install -r`.
 - **Siguiente:** Fase 12 (Documentación y entrega).
