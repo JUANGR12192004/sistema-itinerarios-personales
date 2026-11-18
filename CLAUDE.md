@@ -345,10 +345,12 @@ sistema-itinerarios-personales/
 ├── .gitattributes
 ├── .sonarcloud.properties          ← configuración de SonarCloud (Automatic Analysis)
 ├── docker-compose.yml              ← Fase 10
+├── docker-compose.e2e.yml          ← Fase 11: simulador de API Colombia para las pruebas E2E
 ├── .env.example
 ├── docs/
 │   ├── 01-planificacion.md ... 06-decisiones-arquitectonicas.md
-│   └── asyncapi/asyncapi.yaml      ← Fase 4
+│   ├── asyncapi/asyncapi.yaml      ← Fase 4
+│   └── openapi/airport-service.json ← Fase 11: contrato HTTP publicado de Airport Service
 ├── libs/
 │   └── observability/              ← Fase 9: Microservice Chassis Pattern (ADR-040)
 │       ├── pyproject.toml          ← paquete instalable con pip install -e
@@ -396,7 +398,7 @@ sistema-itinerarios-personales/
 ├── scripts/
 │   └── lock_requirements.py        ← genera y comprueba (--check) los requirements-lock.txt de las imágenes
 └── tests/
-    └── e2e/
+    └── e2e/                        ← Fase 11: pruebas de punta a punta (pytest + httpx) y api_colombia_stub/
 ```
 
 Si necesitas cambiar esta estructura, explica el cambio y pide aprobación.
@@ -557,6 +559,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Instrumentación del gateway (Fase 9, ADR-036) | Imagen `nginx:1.30.6-alpine-otel` con `ngx_otel_module`. Se provee `gateway/nginx.conf` propio con `load_module modules/ngx_otel_module.so;` antes del bloque `events {}` (la imagen no lo carga por defecto). `otel_trace_context propagate` inyecta el `traceparent` del span hijo al upstream; no se usa `proxy_set_header traceparent` (sobrescribiría el span hijo con el original del cliente). |
 | Paquete compartido de observabilidad (cierre Fase 9, ADR-040) | `libs/observability`: Microservice Chassis Pattern con logging, trazas y métricas HTTP comunes. Instalado con `-e ../../libs/observability` en cada `requirements.txt`. El Dockerfile de SendNotificationFunction cambia el contexto de build a la raíz del repositorio para incluir `libs/`. Los Dockerfiles de Airport e Itinerary Service harán lo mismo en la Fase 10. |
 | Docker Compose (Fase 10, ADR-041) | `docker-compose.yml` en la raíz (proyecto `sistema-itinerarios`, 15 servicios) con los puertos de la sección 7.6. Imágenes propias sobre `python:3.12-slim` con usuario `appuser`, contexto de build en la raíz y `Dockerfile.dockerignore` por imagen (lista blanca): Airport Service, Itinerary Service (**una imagen para la API, `outbox-relay` e `itinerary-migrations`**), Event Trigger y `Dockerfile.migrations` de la función (imagen de la función sin Alembic, ADR-029). Las imágenes instalan solo `requirements-lock.txt` (todas las dependencias, también las transitivas, con hashes; generado con `python scripts/lock_requirements.py` a partir de `requirements-runtime.txt`, o de `requirements-migrations.txt` en la función) con `pip install --only-binary :all: --require-hashes` (reglas S8541 y S8544 de SonarCloud); `libs/observability` va por `PYTHONPATH`, sin pip. `requirements.txt` sigue siendo el archivo del entorno virtual y del CI. Migraciones como contenedores de una sola ejecución (`service_completed_successfully`); healthchecks de PostgreSQL, RabbitMQ, Redis, servicios FastAPI (Python `urllib`) y gateway (`wget`); el gateway solo espera `service_started`. Redes `itinerary-data` y `notification-data` (cada base solo con su servicio dueño; reemplaza a `notification-net`). `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317`. Observabilidad siempre activa; Prometheus con `prometheus.compose.yml` (`prometheus.yml` se conserva para el modo manual). `stop_signal: SIGINT` en el relay y el trigger. Volúmenes para las dos bases y RabbitMQ (`hostname: rabbitmq`). `.env.example` en la raíz con variables opcionales. Modo manual conservado para desarrollo. Job de CI "Docker Compose" |
+| Estrategia de pruebas (Fase 11, ADR-042) | Pirámide de cinco niveles: unitarias, integración (SKIPPED sin el servicio), contrato, gateway (contenedor propio) y punta a punta. Las pruebas de integración de Itinerary Service y de la función usan `<base>_test` (`itinerary_db_test`, `notification_db_test`) en el mismo servidor, creada y migrada por `tests/integration/database_setup.py` (`alembic/env.py` acepta `config.attributes["connection"]`); un error al migrar falla, solo la falta de PostgreSQL da SKIPPED. `libs/observability` tiene pruebas propias y job de CI. Contratos: `docs/openapi/airport-service.json` (Airport lo compara con su API; se regenera con `UPDATE_CONTRACTS=1`) que Itinerary verifica como consumidor, y AsyncAPI verificado también por la función (consumidor). E2E en `tests/e2e` sobre `docker compose -f docker-compose.yml -f docker-compose.e2e.yml` (simulador de API Colombia), por el gateway; leen las bases con `docker compose exec ... psql`; incluyen una traza en Jaeger con los seis componentes; el job "Docker Compose" las ejecuta (`COMPOSE_FILE` con los dos archivos). Advertencias de Starlette (`httpx2`) y pika (`utcfromtimestamp`) filtradas en `pytest.ini` por mensaje y origen, sin migrar librerías. Las pruebas del gateway fijan `host.docker.internal` a su IPv4 con `--add-host` |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -568,9 +571,6 @@ ADR-020 y ADR-021).
 | Decisión | Opciones | Se necesita en |
 |---|---|---|
 | Protección de `main` y de las ramas `fase-*` | Se configura en GitHub (*Settings → Rules → Rulesets* o *Branches*). Propuesta: en `main`, exigir PR con 1 aprobación y el check "Pruebas", y bloquear push forzado y borrado; en `fase-*`, bloquear push, push forzado y borrado (solo lectura). Hoy son solo acuerdos del equipo. Lo decide y configura el dueño del repositorio | Antes de la Fase 5 o cuando el equipo lo decida |
-| Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
-| Base de datos de las pruebas de integración de Itinerary Service | El fixture `db_session` usa la base real `itinerary_db` y **borra** las filas de `itineraries` y `outbox_events` antes y después de cada prueba; con el Outbox Relay real encendido, este puede publicar en la cola real los eventos que crean las pruebas (detectado en `fix/aislar-pruebas-itinerary`; por decisión del usuario, por ahora solo se documenta). Opciones: una base de pruebas propia (por ejemplo `itinerary_db_test` en el mismo contenedor, migrada por las pruebas), o un esquema de pruebas | Antes de la Fase 11, o antes si molesta en las demostraciones |
-| Advertencia de pika en las pruebas del Event Trigger | `pytest` muestra `DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated` desde `pika/data.py` (detectada en la entrega 6B, al leer el header `x-death` de un mensaje de la DLQ). Viene de pika 1.3.2, no del código del proyecto. Por ahora **no se oculta**. Opciones: actualizar pika si una versión la corrige (revisando ADR-021), o filtrarla documentando el motivo | Fase 11 |
 | IP de los servicios en el gateway con Compose (Fase 10) | Nginx resuelve los upstreams al arrancar: si un contenedor de servicio se recrea con otra IP, el gateway da 502 hasta reiniciarlo (documentado en ADR-041). Opciones: `resolver 127.0.0.11` con variables en `proxy_pass` (cambia ADR-009 y las pruebas del gateway), o mantener la limitación documentada | Cuando el equipo lo decida |
 | `.dockerignore` antiguo de la función (Fase 10) | `serverless/send-notification-function/.dockerignore` no se aplica desde la Fase 9 (contexto en la raíz); lo reemplaza `Dockerfile.dockerignore`. Propuesta: borrarlo (requiere aprobación, sección 3.3) | Cuando el equipo lo apruebe |
 
@@ -790,6 +790,18 @@ Rama `fase-10-docker-compose`. Una pausa al final de cada entrega.
 | **10A** | Dockerfiles de Airport Service, Itinerary Service (API, relay y migraciones), Event Trigger y `Dockerfile.migrations` de la función, con un `Dockerfile.dockerignore` por imagen (incluido el de la imagen de la función) | Las cinco imágenes se construyen; contexto de build pequeño; `whoami` → `appuser` |
 | **10B** | `docker-compose.yml` (15 servicios, migraciones de una sola ejecución, healthchecks, redes por base, volúmenes, `stop_signal: SIGINT`), `prometheus.compose.yml`, `.env.example` en la raíz | `docker compose up -d --build`: migraciones `Exited (0)`, servicios `healthy`, recorrido de punta a punta por el gateway hasta `notification_history` |
 | **10C** | ADR-041, `docs/02` (sección 7), `docs/05` (despliegue y orden de arranque), README raíz (arranque con Compose, modo manual, demostraciones con Compose), README de los cinco componentes, job de CI "Docker Compose", estado de CLAUDE.md | Job "Docker Compose" pasa en el PR |
+
+### 12.10. Plan de la Fase 11 (entregas)
+
+Rama `fase-11-pruebas`. Por decisión del usuario, las cuatro entregas se hicieron seguidas, con un commit por entrega
+y una sola pausa al final.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **11A** | Bases propias de las pruebas de integración (Itinerary y función), pruebas y job de CI de `libs/observability`, IPv4 de `host.docker.internal` en las pruebas del gateway | Integración pasa con la base real sin migrar; `itinerary_db_test` y `notification_db_test` creadas |
+| **11B** | Pruebas de contrato: `docs/openapi/airport-service.json` (proveedor y consumidor) y AsyncAPI en la función | Pruebas de contrato pasan |
+| **11C** | `docker-compose.e2e.yml` con el simulador de API Colombia, `tests/e2e` y su paso en el job "Docker Compose" | 14 E2E pasan dos veces seguidas y no dejan itinerarios |
+| **11D** | Filtro de advertencias, ADR-042, README raíz (sección "Pruebas") y de los componentes, estado de CLAUDE.md | Siete suites sin fallos, sin omitidas y sin advertencias con todo encendido |
 
 ## 13. Estándares de código
 
@@ -1124,4 +1136,24 @@ pytest -v
   `requirements-migrations.txt`, que siguen siendo los archivos que edita el equipo. El job "Docker Compose" ejecuta
   `python3 scripts/lock_requirements.py --check`. ADR-041 actualizada. La imagen de la función (`Dockerfile`, base de
   AWS Lambda) no tenía la alerta y no cambia.
-- **Siguiente:** Fase 11 (Pruebas).
+- **Fase 11 (Pruebas):** completada en la rama `fase-11-pruebas` (pendiente de PR y merge). ADR-042 aceptada
+  (sección 9.1). Antes de empezar: PR #25 (`fix/sonarcloud-require-hashes`) fusionado; SonarCloud en `main` con Quality
+  Gate OK, seguridad A y 0 vulnerabilidades. Etiqueta `fase-10` todavía pendiente.
+  - Entrega **11A** (commit `381b1b9`): bases `itinerary_db_test` y `notification_db_test` creadas y migradas por las
+    pruebas; la prueba del handler de Lambda apunta a la base de pruebas (antes usaba la real; ahora tarda 6 s en lugar
+    de 91 s porque no intenta exportar trazas). `libs/observability`: 18 pruebas, `requirements-dev.txt`, job de CI.
+    Gateway: en Windows 11 `host.docker.internal` resolvía también a IPv6 y la mitad de las pruebas de enrutamiento
+    daba 502; las pruebas lo fijan a IPv4. En la 11D, con el equipo cargado, falló a veces
+    `test_limit_applies_to_both_services` (exigía 429 en la primera solicitud tras agotar el límite, pero a 10 r/s se
+    libera una cada 100 ms): ahora exige un 429 entre las 5 siguientes, que sigue probando que el límite es por IP.
+  - Entrega **11B** (commit `0c33b2a`): contrato HTTP `docs/openapi/airport-service.json` (Airport proveedor,
+    Itinerary consumidor) y contrato del evento en la función (`pyyaml==6.0.3` en su `requirements-dev.txt`).
+  - Entrega **11C** (commit `1e8cf79`): `docker-compose.e2e.yml`, `tests/e2e` (14 pruebas) y su paso en el CI. Hallazgo:
+    `docker compose up --build` construyó tres veces en paralelo la imagen compartida de Itinerary Service y una falló
+    con `image ... already exists`; `docker compose build` y luego `up` (lo que hace el CI) funciona.
+  - Entrega **11D**: filtros de advertencias, ADR-042, README raíz (sección "Pruebas"), README de Airport, Itinerary,
+    función y gateway, y este estado.
+  - Verificación (2026-11-18, Windows 11, sistema completo con el simulador): libs/observability 18, Airport 203,
+    Itinerary 195, función 70, Event Trigger 86, gateway 53 y E2E 14: **639 pasan, 0 fallos, 0 omitidas, 0
+    advertencias**. Sin servicios: Itinerary 170 pasan y 25 omitidas; función 64 pasan y 6 omitidas.
+- **Siguiente:** Fase 12 (Documentación y entrega).

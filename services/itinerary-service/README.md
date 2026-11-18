@@ -255,7 +255,7 @@ pytest -v tests\domain tests\application tests\infrastructure tests\api tests\te
 pytest -v tests\integration
 ```
 
-Resultado esperado: **188 passed** con PostgreSQL y RabbitMQ; **163 passed, 25 skipped** sin ellos.
+Resultado esperado: **195 passed** con PostgreSQL y RabbitMQ; **170 passed, 25 skipped** sin ellos.
 
 **RabbitMQ:** las pruebas de integración **no tocan** la cola real `notification.itinerary-created` ni su DLQ.
 Usan una topología propia con nombres únicos (`test-<id>.itinerary.events`, `test-<id>.notification.itinerary-created`,

@@ -113,12 +113,29 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 8 | Frontend | Completada |
 | 9 | Observabilidad | Completada |
 | 10 | Docker y Docker Compose | Completada (rama `fase-10-docker-compose`) |
-| 11 y 12 | Pruebas y documentación | Pendientes |
+| 11 | Pruebas | Completada (rama `fase-11-pruebas`) |
+| 12 | Documentación y entrega | Pendiente |
 
-**Última fase completada:** Fase 10 — Docker y Docker Compose. **Siguiente:** Fase 11 — Pruebas.
+**Última fase completada:** Fase 11 — Pruebas. **Siguiente:** Fase 12 — Documentación y entrega.
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+
+### Fase 11 — Pruebas
+
+Pirámide de pruebas en cinco niveles (ADR-042; cómo correr cada uno en [Pruebas](#pruebas)):
+
+- **Bases propias de las pruebas de integración**: `itinerary_db_test` y `notification_db_test`, creadas y migradas
+  por las propias pruebas. Ya no borran datos de las bases reales.
+- **Pruebas de `libs/observability`** con su job de CI.
+- **Pruebas de contrato**: Airport Service publica su API en `docs/openapi/airport-service.json` e Itinerary Service
+  la verifica como consumidor; SendNotificationFunction verifica el evento contra AsyncAPI.
+- **Pruebas de punta a punta** (`tests/e2e`) sobre Docker Compose con un simulador de API Colombia
+  (`docker-compose.e2e.yml`): CRUD, outbox → RabbitMQ → función → historial, una traza en Jaeger con los seis
+  componentes y métricas en Prometheus. Las ejecuta el job "Docker Compose" del CI.
+- **Salida limpia**: las advertencias de Starlette y pika (de terceros) se filtran con precisión.
+
+Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas**.
 
 ### Fase 10 — Docker y Docker Compose
 
@@ -640,6 +657,61 @@ En http://localhost:15672 (usuario y clave `guest`) → **Queues and Streams**:
 
 Más escenarios (función apagada, base de datos de notificaciones apagada, trigger apagado desde el principio) en
 [`serverless/event-trigger/README.md`](serverless/event-trigger/README.md) y en ADR-031.
+
+## Pruebas
+
+| Nivel | Componente | Pruebas | Necesita |
+|---|---|---|---|
+| Unitarias, integración y contrato | `services/airport-service` | 203 | Nada (Redis opcional) |
+| Unitarias, integración y contrato | `services/itinerary-service` | 195 | PostgreSQL y RabbitMQ para las de integración |
+| Unitarias, integración y contrato | `serverless/send-notification-function` | 70 | PostgreSQL para las de integración |
+| Unitarias e integración | `serverless/event-trigger` | 86 | RabbitMQ y la función para las de integración |
+| Paquete compartido | `libs/observability` | 18 | Nada |
+| Configuración de Nginx | `gateway` | 53 | Docker (y el gateway real para 3 *smoke*) |
+| Punta a punta | `tests/e2e` | 14 | El sistema con el simulador (abajo) |
+
+Sin los servicios, las pruebas de integración quedan **SKIPPED** (no fallan). Las de integración usan bases propias
+(`itinerary_db_test`, `notification_db_test`) y colas con nombres `test-<id>.`: se pueden correr durante una
+demostración sin perder datos.
+
+Cada componente se prueba desde su carpeta, con su entorno virtual activado (CLAUDE.md 4.3; en la función el archivo es
+`requirements-dev.txt`, igual que en `libs/observability`). El comando es igual en PowerShell, CMD y zsh:
+
+```
+pytest -v
+```
+
+**Pruebas de punta a punta.** Levantan el sistema completo con el simulador de API Colombia (sin internet):
+
+PowerShell y CMD:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait
+cd tests\e2e
+py -3.12 -m venv .venv
+.venv\Scriptsctivate
+pip install -r requirements.txt
+pytest -v
+```
+
+macOS (zsh):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait
+cd tests/e2e
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest -v
+```
+
+(En PowerShell, `.venv\Scripts\Activate.ps1` en lugar de `activate`.) Para volver a usar la API Colombia real:
+`docker compose up -d` (sin el segundo archivo) recrea Airport Service con la dirección real.
+
+**Contrato de Airport Service.** Si cambias su API a propósito, regenera `docs/openapi/airport-service.json` desde
+`services/airport-service` y revisa el diff: `$env:UPDATE_CONTRACTS = "1"; pytest tests/test_openapi_contract.py`
+(PowerShell), `set UPDATE_CONTRACTS=1 && pytest tests/test_openapi_contract.py` (CMD) o
+`UPDATE_CONTRACTS=1 pytest tests/test_openapi_contract.py` (zsh).
 
 ## Desarrollo
 
