@@ -1363,13 +1363,22 @@ Alternativas descartadas:
 
 - Un integrante solo necesita Docker Desktop y Git para levantar y demostrar el sistema (Python 3.12 sigue haciendo falta para desarrollar y ejecutar las pruebas).
 - Las bases de Compose son volúmenes nuevos: los datos de los contenedores manuales no pasan a Compose. No se pueden usar los dos modos a la vez (mismos puertos).
-- Nginx guarda la IP de cada servicio al arrancar: si un contenedor de servicio se **recrea** (`docker compose up` tras un cambio, no `stop`/`start`), su IP puede cambiar y el gateway respondería 502 hasta `docker compose restart api-gateway`. Resolverlo con `resolver 127.0.0.11` y variables en `proxy_pass` cambiaría ADR-009; se documenta como limitación.
+- Nginx guarda la IP de cada servicio al arrancar: si un contenedor de servicio se **recrea** (`docker compose up` tras un cambio, no `stop`/`start`), su IP puede cambiar y el gateway respondería 502 hasta `docker compose restart api-gateway`. Resolverlo con `resolver 127.0.0.11` y variables en `proxy_pass` cambiaría ADR-009; se documenta como limitación (decisión confirmada en el cierre de la Fase 11, ver abajo).
 - Las imágenes Python no incluyen `pytest` ni `respx`: solo instalan las dependencias de ejecución.
 - `--only-binary :all:` exige que cada dependencia publique *wheels* para Linux en amd64 y arm64. Si una versión nueva no los tuviera, el build fallaría (en lugar de compilar en silencio) y habría que elegir otra versión.
 - Las imágenes son reproducibles: el mismo lock instala siempre los mismos archivos, también las dependencias transitivas. A cambio, cada componente con imagen mantiene un `requirements-lock.txt`: al cambiar una versión hay que regenerarlo con `python scripts/lock_requirements.py` (necesita Docker e internet; tarda unos minutos: la otra arquitectura se resuelve con `pip --platform`, sin emularla). La versión inicial de esta ADR no lo hacía ("las reglas no lo exigen"); SonarCloud mantuvo S8544 abierta hasta agregar los hashes.
 - El entorno virtual y el CI siguen instalando `requirements.txt` sin hashes (incluye `-e ../../libs/observability`, que no admite hash); sus versiones directas coinciden con las del lock, y `--check` lo comprueba.
 - La integración continua agrega el job "Docker Compose": valida el archivo, construye las imágenes, levanta el sistema y comprueba los healthchecks, las migraciones y el recorrido por el gateway que no depende de API Colombia.
-- El `serverless/send-notification-function/.dockerignore` antiguo ya no se aplicaba desde la Fase 9 (el contexto es la raíz); lo reemplaza `Dockerfile.dockerignore`.
+- El `serverless/send-notification-function/.dockerignore` antiguo ya no se aplicaba desde la Fase 9 (el contexto es la raíz); lo reemplaza `Dockerfile.dockerignore`. Se borró en el cierre de la Fase 11.
+
+### Decisiones del cierre de la Fase 11
+
+Dos puntos de esta ADR quedaron pendientes en la sección 9.3 de `CLAUDE.md` y el equipo los decidió antes de la Fase 12:
+
+- **IP de los servicios en el gateway: se mantiene la limitación documentada.** Nginx sigue resolviendo `airport-service` e `itinerary-service` una sola vez, al arrancar (bloques `upstream`, ADR-009). Si un contenedor de servicio se recrea y recibe otra IP, el gateway responde 502 `UPSTREAM_UNAVAILABLE` hasta `docker compose restart api-gateway` (documentado en el README raíz y en el del gateway).
+  - Motivo: la alternativa (`resolver 127.0.0.11` con variables en `proxy_pass`) obliga a quitar los bloques `upstream`, cambia cómo se reescribe el prefijo `/api` y las pruebas del gateway, y solo resuelve un caso de desarrollo (reconstruir un servicio con el sistema encendido). En una demostración con `docker compose up -d --build` todos los contenedores se crean a la vez y el problema no aparece.
+  - Consecuencia: el gateway no cambia; si se pasa a un orquestador real, esta decisión se revisa.
+- **`.dockerignore` antiguo de la función: se borra** (aprobado por el equipo). No tenía efecto desde la Fase 9 y podía confundir al leer qué entra en la imagen.
 
 ## ADR-042 — Estrategia de pruebas (Fase 11)
 
@@ -1406,6 +1415,28 @@ Se adopta una **pirámide de pruebas** con cinco niveles, cada uno con un propó
 - Si Airport Service cambia su API, su prueba de contrato falla hasta regenerar `docs/openapi/airport-service.json`, y el diff del PR muestra el cambio a los consumidores. Si agrega un código de respuesta, la prueba de Itinerary Service falla hasta decidir cómo tratarlo.
 - Las E2E necesitan Docker y tardan ~25 s con el sistema arriba; no reemplazan a las demás pruebas, que siguen corriendo sin servicios.
 - Con todo encendido (Fase 11): 639 pruebas en siete suites, 0 fallos, 0 omitidas, 0 advertencias. Sin servicios, las de integración quedan SKIPPED y el resto pasa.
+
+## ADR-043 — GenerateItineraryReportFunction no se implementa (alcance)
+
+**Estado:** Aceptada (cierre de la Fase 11).
+
+### Contexto
+
+El plan de la Fase 6 (sección 12 de `CLAUDE.md`) incluía como **opcional** una segunda función serverless, `GenerateItineraryReportFunction`, para generar un reporte de un itinerario. La Fase 6 se cerró solo con `SendNotificationFunction` y la decisión sobre la opcional quedó sin registrar.
+
+### Decisión
+
+`GenerateItineraryReportFunction` **no se implementa**, por decisión de alcance del equipo antes de la Fase 12.
+
+### Justificación
+
+- `SendNotificationFunction` ya demuestra todo lo que la asignatura pide de la arquitectura serverless: una función sin estado (`handler(event, context)`) sobre la imagen oficial de AWS Lambda (ADR-008, ADR-028), invocada por un evento a través del Event Trigger (equivalente al Event Source Mapping, ADR-031), idempotente (ADR-030), con historial propio y manejo de fallos con DLQ y reprocesamiento.
+- Una segunda función repetiría el mismo patrón y agregaría código, pruebas, una imagen y un contenedor más sin demostrar un concepto nuevo. El tiempo restante se dedica a la Fase 12 (documentación y entrega).
+
+### Consecuencias
+
+- El sistema tiene una sola función serverless. El "sistema de notificaciones" sigue formado por Event Trigger + `SendNotificationFunction` + su almacenamiento (CLAUDE.md 7.1).
+- La función queda como posible trabajo futuro: se agregaría siguiendo el mismo modelo (carpeta propia en `serverless/`, imagen de AWS Lambda, nuevo binding en `itinerary.events` o invocación directa), sin cambiar a los demás componentes.
 
 ## 2. Revisión de decisiones
 
