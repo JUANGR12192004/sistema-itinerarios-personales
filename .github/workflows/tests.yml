@@ -44,6 +44,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             services/airport-service/requirements.txt
+            services/airport-service/requirements-runtime.txt
             libs/observability/pyproject.toml
 
       - name: Instalar dependencias
@@ -73,6 +74,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             services/itinerary-service/requirements.txt
+            services/itinerary-service/requirements-runtime.txt
             libs/observability/pyproject.toml
 
       - name: Instalar dependencias
@@ -105,6 +107,7 @@ jobs:
           cache-dependency-path: |
             serverless/send-notification-function/requirements.txt
             serverless/send-notification-function/requirements-dev.txt
+            serverless/send-notification-function/requirements-migrations.txt
             libs/observability/pyproject.toml
 
       - name: Instalar dependencias
@@ -142,6 +145,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             serverless/event-trigger/requirements.txt
+            serverless/event-trigger/requirements-runtime.txt
             libs/observability/pyproject.toml
 
       - name: Instalar dependencias

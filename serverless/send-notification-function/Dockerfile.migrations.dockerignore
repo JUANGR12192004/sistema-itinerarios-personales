@@ -1,10 +1,8 @@
 # Solo deja pasar lo necesario para la imagen de migraciones del historial.
 # Se aplica al construir con: docker build -f serverless/send-notification-function/Dockerfile.migrations .
 *
-!libs/observability/
-!libs/observability/**
 !serverless/send-notification-function/requirements.txt
-!serverless/send-notification-function/requirements-dev.txt
+!serverless/send-notification-function/requirements-migrations.txt
 !serverless/send-notification-function/alembic.ini
 !serverless/send-notification-function/alembic/
 !serverless/send-notification-function/alembic/**

@@ -12,17 +12,22 @@
 # El .dockerignore asociado es services/itinerary-service/Dockerfile.dockerignore.
 FROM python:3.12-slim
 
+# PYTHONPATH: el paquete compartido libs/observability (ADR-040) es código Python puro y sin
+# dependencias propias: se copia y se pone en el PYTHONPATH, sin instalarlo con pip.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/libs/observability
 
-# Misma estructura del repositorio, para que "-e ../../libs/observability" funcione sin cambios.
 WORKDIR /app/services/itinerary-service
 
-COPY libs/observability /app/libs/observability
-COPY services/itinerary-service/requirements.txt .
-RUN pip install -r requirements.txt
+# Solo dependencias de ejecución con versión fija (incluye Alembic para las migraciones), y solo
+# paquetes ya compilados: pip no ejecuta scripts de instalación (reglas S8541 y S8544 de SonarCloud).
+COPY services/itinerary-service/requirements-runtime.txt .
+RUN pip install --only-binary :all: -r requirements-runtime.txt
+
+COPY libs/observability/observability /app/libs/observability/observability
 
 # Código de la aplicación y de las migraciones (alembic/env.py importa app.config y los modelos)
 COPY services/itinerary-service/app ./app

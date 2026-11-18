@@ -3,7 +3,7 @@
 *
 !libs/observability/
 !libs/observability/**
-!services/itinerary-service/requirements.txt
+!services/itinerary-service/requirements-runtime.txt
 !services/itinerary-service/alembic.ini
 !services/itinerary-service/alembic/
 !services/itinerary-service/alembic/**

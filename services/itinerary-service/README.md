@@ -51,7 +51,7 @@ pip install -r requirements.txt
 ```
 
 `pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
-instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado.
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado. Las dependencias de ejecución están en `requirements-runtime.txt`, que `requirements.txt` incluye con `-r`; la imagen Docker instala solo ese archivo (Fase 10).
 
 ## Base de datos PostgreSQL
 
