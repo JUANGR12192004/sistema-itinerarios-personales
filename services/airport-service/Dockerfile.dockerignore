@@ -1,0 +1,15 @@
+# Solo deja pasar lo necesario para la imagen de Airport Service.
+# Se aplica al construir con: docker build -f services/airport-service/Dockerfile .
+# (BuildKit: el .dockerignore va junto al Dockerfile con su mismo nombre + .dockerignore)
+# Así no se envían al build los entornos virtuales (.venv) ni los .env con valores reales.
+*
+!libs/observability/
+!libs/observability/**
+!services/airport-service/requirements.txt
+!services/airport-service/app/
+!services/airport-service/app/**
+
+# Artefactos de Python que pudieran existir dentro de las carpetas permitidas
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info

@@ -1,0 +1,17 @@
+# Solo deja pasar lo necesario para la imagen de la función (Dockerfile).
+# Se aplica al construir con: docker build -f serverless/send-notification-function/Dockerfile .
+#
+# Desde la Fase 9 el contexto de build es la raíz del repositorio. Docker busca el .dockerignore
+# en la raíz del contexto o junto al Dockerfile con este nombre: el antiguo
+# serverless/send-notification-function/.dockerignore ya no se aplicaba, y el build enviaba
+# todo el repositorio (incluidos los .venv de cada componente). Este archivo lo corrige (Fase 10).
+*
+!libs/observability/
+!libs/observability/**
+!serverless/send-notification-function/requirements.txt
+!serverless/send-notification-function/app/
+!serverless/send-notification-function/app/**
+
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info

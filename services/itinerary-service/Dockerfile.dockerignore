@@ -1,0 +1,15 @@
+# Solo deja pasar lo necesario para la imagen de Itinerary Service (API, relay y migraciones).
+# Se aplica al construir con: docker build -f services/itinerary-service/Dockerfile .
+*
+!libs/observability/
+!libs/observability/**
+!services/itinerary-service/requirements.txt
+!services/itinerary-service/alembic.ini
+!services/itinerary-service/alembic/
+!services/itinerary-service/alembic/**
+!services/itinerary-service/app/
+!services/itinerary-service/app/**
+
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
