@@ -33,7 +33,7 @@ flowchart TB
     FE --> MAP[Plotly JS]
 ```
 
-El diagrama representa la arquitectura objetivo. Los componentes se incorporan progresivamente: el gateway llegó en la Fase 7 (Nginx, ADR-009) y el frontend llega en la Fase 8. La llamada Itinerary → Airport es interna y no pasa por el gateway.
+El diagrama representa la arquitectura implementada. Los componentes se incorporaron por fases: el gateway llegó en la Fase 7 (Nginx, ADR-009) y el frontend en la Fase 8 (ADR-033), servido por el propio gateway. La llamada Itinerary → Airport es interna y no pasa por el gateway.
 
 El sistema de notificaciones está formado por el Event Trigger, la función y su base de datos `notification_db` (ADR-029). No hay un microservicio de notificaciones adicional.
 
@@ -256,7 +256,7 @@ flowchart TD
     REQ[Solicitud al puerto 8000] --> CID["X-Correlation-ID: se reenvía si es válido<br/>o se genera uno con forma de UUID"]
     CID --> PATH{¿Ruta?}
     PATH -->|/health| HEALTH["200 del propio gateway<br/>(no consulta a los servicios)"]
-    PATH -->|/| ROOT["Reservada para el frontend (Fase 8)"]
+    PATH -->|"/ y archivos estáticos"| ROOT["Frontend: archivos de frontend/ (Fase 8)<br/>archivo inexistente → 404 ROUTE_NOT_FOUND"]
     PATH -->|otra ruta| NF404["404 ROUTE_NOT_FOUND"]
     PATH -->|"/api/airports... o /api/itineraries..."| SIZE{"¿Cuerpo de más de 1 MB?"}
     SIZE -->|sí| R413["413 PAYLOAD_TOO_LARGE"]
@@ -428,7 +428,7 @@ El `correlation_id` viaja en el header `X-Correlation-ID` desde el gateway hasta
 
 ## 6. Consideraciones
 
-- Los diagramas representan el diseño previsto.
-- Los nombres de endpoints, colas y contratos deberán coincidir con la implementación final.
+- Los diagramas representan el sistema implementado al cierre de la Fase 11. Si el código cambia, el diagrama afectado se actualiza en el mismo pull request.
+- Los nombres de endpoints, colas y contratos coinciden con la implementación; los contratos los verifican las pruebas de contrato (`docs/openapi/airport-service.json` y `docs/asyncapi/asyncapi.yaml`, ADR-042).
 - La propiedad de las bases de datos se mantendrá por servicio.
 - Los detalles de infraestructura no deberán introducir dependencias directas en el dominio.

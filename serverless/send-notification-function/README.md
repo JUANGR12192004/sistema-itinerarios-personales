@@ -253,9 +253,8 @@ app/
     notification/        → SimulatedEmailSender
     persistence/         → engine, modelo ORM, repositorio, unit of work, traducción a TransientError
   event_schema.py        → esquema Pydantic del contrato v1 (Tolerant Reader)
-  handler.py             → handler(event, context): adaptador de entrada de Lambda
-  logging_config.py      → logs JSON estructurados (Fase 9)
-  tracing.py             → setup_tracing() con OpenTelemetry (Fase 9)
+  handler.py             → handler(event, context): adaptador de entrada de Lambda; los logs JSON y
+                           las trazas vienen del paquete compartido libs/observability (ADR-040)
   config.py
 alembic/                 → migración d1e5f7a3b9c2 (notification_history)
 events/                  → eventos de ejemplo para curl.exe (curl en macOS)

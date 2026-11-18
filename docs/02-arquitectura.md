@@ -89,7 +89,7 @@ Responsabilidades:
 - Reenviar el header `Authorization` sin validarlo (preparación de JWT).
 - Reenviar o generar `X-Correlation-ID`, para que la trazabilidad empiece en el gateway.
 - Aplicar timeouts hacia los servicios y responder sus propios errores (502, 504, 404, 413, 429) en el formato único de errores.
-- Más adelante, servir el frontend desde el mismo origen (Fase 8).
+- Servir el frontend desde el mismo origen (Fase 8, ADR-033): `/` entrega los archivos estáticos de `frontend/`, así que el navegador no necesita CORS.
 
 **No tiene lógica de negocio.** Las reglas viven en el dominio de cada servicio. Si se copiaran en el gateway, habría dos fuentes de verdad, y un componente que comparten todos tendría que cambiar con cada regla nueva. Por eso es un **API Gateway** genérico y no un **BFF** (*Backend for Frontend*), que sí juntaría y transformaría respuestas para una pantalla concreta.
 
@@ -152,9 +152,9 @@ El historial de notificaciones tiene persistencia propia, separada de los datos 
 
 ### Aeropuertos
 
-La fuente externa de información será API Colombia. La incorporación de Redis permitirá almacenar temporalmente resultados de consultas.
+La fuente de verdad es API Colombia. Airport Service usa Redis solo como caché (Fase 2, ADR-007): una copia fresca de 10 minutos y una de respaldo de 24 horas para el fallback.
 
-No se ha definido todavía una base de datos persistente propia para Airport Service.
+Airport Service **no tiene base de datos relacional propia**: no guarda datos que no vengan de API Colombia, así que no la necesita.
 
 ## 5. Resiliencia
 
@@ -182,7 +182,7 @@ Dos filtros inyectan los valores dinámicos en cada línea:
 - **`CorrelationIdFilter`:** lee el `correlation_id` de una `ContextVar` que se establece al principio de cada solicitud HTTP (desde el header `X-Correlation-ID`).
 - **`OTelContextFilter`:** lee el `trace_id` y el `span_id` del span activo de OpenTelemetry. Si no hay span activo (por ejemplo, en el Outbox Relay fuera de un ciclo de procesamiento), los campos quedan vacíos.
 
-La función `configure_logging(log_level, service_name)` en `app/logging_config.py` configura el logger raíz `app` y es idempotente. El nivel de log se controla con la variable `LOG_LEVEL` (por defecto `INFO`).
+La función `configure_logging(log_level, service_name)` del paquete compartido `libs/observability` (módulo `observability.logging_config`, ADR-040) configura el logger raíz `app` y es idempotente. El nivel de log se controla con la variable `LOG_LEVEL` (por defecto `INFO`).
 
 ### 6.2. Trazas distribuidas (ADR-035, ADR-036, ADR-037, ADR-039)
 

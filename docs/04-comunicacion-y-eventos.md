@@ -50,13 +50,13 @@ El recorrido está en el diagrama de la sección 3.2 de `05-diagramas.md`.
 
 ### 3.1. Evento de integración
 
-El evento inicial será:
+El evento de integración que publica el sistema es:
 
 `ItineraryCreatedEvent`
 
 Su propósito es comunicar a otros componentes que se ha creado un itinerario.
 
-El consumidor inicial será el sistema de notificaciones.
+Su consumidor es el sistema de notificaciones: Event Trigger + SendNotificationFunction (Fase 6, sección 8).
 
 ### 3.2. Contrato del evento (versión 1, ADR-020)
 

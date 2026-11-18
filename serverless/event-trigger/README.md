@@ -234,7 +234,7 @@ crear un itinerario y publicar a mano un evento inválido y un mensaje que no es
 | Reintentos con `ConnectError` sin parar | La función no está en el puerto 9000 | `docker ps`; `docker start send-notification-function` |
 | `Sin conexión con RabbitMQ` cada 5 s | RabbitMQ apagado o arrancando | `docker start itinerary-rabbitmq` y esperar |
 | Mensajes que nadie procesa | Dos triggers abiertos a la vez | Dejar uno solo |
-| `DeprecationWarning ... utcfromtimestamp` en las pruebas | Viene de pika 1.3.2 al leer `x-death` | Conocida y anotada para la Fase 11 (CLAUDE.md, sección 9.3); no afecta |
+| `DeprecationWarning ... utcfromtimestamp` en las pruebas | Viene de pika 1.3.2 al leer `x-death` | Filtrada en `pytest.ini` desde la Fase 11 (ADR-042); no afecta. Si aparece, el `pytest.ini` no se está leyendo: ejecutar `pytest` desde la carpeta del trigger |
 
 ## Observabilidad (Fase 9)
 
@@ -281,9 +281,8 @@ app/
       topology.py        → QueueTopology y declaración de la topología del consumidor
       dlq_replayer.py    → reprocesamiento de la DLQ
   config.py
-  logging_config.py      → logs JSON estructurados (Fase 9)
-  tracing.py             → setup_tracing() con OpenTelemetry (Fase 9)
-  metrics.py             → notifications_dispatched_total (Fase 9)
+  metrics.py             → notifications_dispatched_total (Fase 9); los logs JSON y las trazas vienen
+                           del paquete compartido libs/observability (ADR-040)
   main.py                → python -m app.main
   replay_dlq.py          → python -m app.replay_dlq [--all]
 demo/                    → itinerario de ejemplo, evento inválido y mensaje no JSON
