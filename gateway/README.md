@@ -90,7 +90,10 @@ El `Dockerfile` trae estos valores por defecto. Para cambiarlos se usa `-e NOMBR
 `host.docker.internal` es el nombre con el que un contenedor llega al equipo. Docker Desktop lo crea en macOS y
 Windows. En Linux hay que agregar `--add-host=host.docker.internal:host-gateway` a `docker run`. **No lo agregues en
 Docker Desktop:** allí `host-gateway` añade también una dirección IPv6 que la red de Docker no alcanza, y la mitad de
-las solicitudes terminaría en 502.
+las solicitudes terminaría en 502. En algunas instalaciones de Docker Desktop (comprobado en Windows 11, Fase 11) el
+propio `host.docker.internal` ya resuelve también a una IPv6: en el modo manual, si el gateway da 502 de forma
+intermitente, agregar a `docker run` `--add-host=host.docker.internal:<IPv4>` con la IPv4 que muestra
+`docker run --rm alpine getent ahostsv4 host.docker.internal`. Las pruebas del gateway ya lo hacen solas.
 
 ## Con Docker Compose (Fase 10)
 
@@ -281,7 +284,7 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-Resultado esperado: **40 pasan y 3 se omiten** sin el gateway real, y **43 pasan** con el gateway real y los dos
+Resultado esperado: **50 pasan y 3 se omiten** sin el gateway real, y **53 pasan** con el gateway real y los dos
 servicios encendidos. La primera vez tarda más porque descarga la imagen de Nginx.
 
 ## Problemas frecuentes
@@ -297,4 +300,4 @@ servicios encendidos. La primera vez tarda más porque descarga la imagen de Ngi
 | La mitad de las solicitudes da 502 en Docker Desktop | Se agregó `--add-host=host.docker.internal:host-gateway`: en Docker Desktop no hace falta y añade una IPv6 inalcanzable. Volver a crear el contenedor sin esa opción |
 | 429 inesperados durante una demostración | Se superó el límite de 10 r/s (por ejemplo, con un bucle de `curl`). Esperar un segundo |
 | Todas las pruebas quedan SKIPPED | Docker Desktop no está encendido |
-| En Windows, las pruebas de enrutamiento dan 502 | El contenedor no llega al eco en `127.0.0.1`. Hacer que el eco escuche en todas las interfaces: `$env:GATEWAY_TEST_ECHO_HOST = "0.0.0.0"` (PowerShell) o `set GATEWAY_TEST_ECHO_HOST=0.0.0.0` (CMD), y aceptar el aviso del firewall si aparece |
+| Las pruebas de enrutamiento dan 502 en la mitad de las solicitudes | `host.docker.internal` resuelve también a una IPv6 inalcanzable y Nginx alterna entre las dos direcciones. Desde la Fase 11 las pruebas lo evitan solas: fijan el nombre a su IPv4 con `--add-host` (ADR-042). Si persiste, comprobar con `docker run --rm alpine getent ahosts host.docker.internal` |

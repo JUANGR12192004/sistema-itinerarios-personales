@@ -108,8 +108,13 @@ def test_si_el_envio_falla_no_queda_registro(session_factory):
     assert count_rows(session_factory) == 0
 
 
-def test_handler_de_lambda_de_punta_a_punta(session_factory):
-    """Llama a handler(event, context) como lo haría la plataforma, con su engine real."""
+def test_handler_de_lambda_de_punta_a_punta(session_factory, handler_database, monkeypatch):
+    """Llama a handler(event, context) como lo haría la plataforma, con su engine real.
+
+    handler_database apunta ese engine a la base de pruebas. Sin Jaeger en las pruebas, se
+    desactiva el envío de trazas (si no, el exportador OTLP reintenta durante varios segundos).
+    """
+    monkeypatch.setattr("app.handler.setup_tracing", lambda *args, **kwargs: None)
     payload = event_payload()
 
     response = handler(payload, None)

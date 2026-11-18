@@ -220,8 +220,9 @@ source .venv/bin/activate
 pytest -v
 ```
 
-Resultado esperado: `185 passed`. pytest muestra una advertencia de Starlette sobre `httpx` en
-`TestClient`; es conocida y está pendiente para la Fase 11.
+Resultado esperado: `203 passed`, sin advertencias (la de Starlette sobre `httpx` en `TestClient` se filtra en
+`pytest.ini` desde la Fase 11, ADR-042). Incluye la prueba de contrato `tests/test_openapi_contract.py`, que compara
+la API con `docs/openapi/airport-service.json` (ver "Pruebas" en el README raíz para regenerarlo).
 
 Solo los escenarios de la Fase 2 (la API funciona, tarda, no responde, consultas repetidas), igual en
 PowerShell y en CMD (en zsh, `pytest -v tests/integration`):

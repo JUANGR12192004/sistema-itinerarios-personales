@@ -46,9 +46,15 @@ def test_health_is_not_rate_limited(rate_limited_client: httpx.Client) -> None:
 
 def test_limit_applies_to_both_services(rate_limited_client: httpx.Client) -> None:
     # El límite es por IP, no por servicio: agotarlo en /api/airports también afecta a /api/itineraries.
+    # Si fuera por servicio, /api/itineraries tendría su propia ráfaga y aceptaría 21 solicitudes
+    # seguidas. No se exige que la PRIMERA sea 429: a 10 r/s se libera una solicitud cada 100 ms, y
+    # en un equipo cargado (Docker Desktop en Windows, Fase 11) ese tiempo puede pasar entre dos
+    # solicitudes; Nginx acepta entonces una, con razón, y la prueba fallaba sin que hubiera error.
     _send_until_rate_limited(rate_limited_client)
 
-    assert rate_limited_client.get("/api/itineraries").status_code == 429
+    statuses = [rate_limited_client.get("/api/itineraries").status_code for _ in range(5)]
+
+    assert 429 in statuses
 
 
 def test_limit_recovers_after_waiting(rate_limited_client: httpx.Client) -> None:

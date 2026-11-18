@@ -1,0 +1,557 @@
+{
+  "components": {
+    "schemas": {
+      "AirportResponse": {
+        "properties": {
+          "city": {
+            "examples": [
+              "Armenia"
+            ],
+            "title": "City",
+            "type": "string"
+          },
+          "coordinates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CoordinatesResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null si la ubicación es desconocida"
+          },
+          "department": {
+            "examples": [
+              "Quindío"
+            ],
+            "title": "Department",
+            "type": "string"
+          },
+          "iata_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "AXM"
+            ],
+            "title": "Iata Code"
+          },
+          "id": {
+            "examples": [
+              1
+            ],
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "examples": [
+              "Aeropuerto Internacional El Edén"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "oaci_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "SKAR"
+            ],
+            "title": "Oaci Code"
+          },
+          "type": {
+            "examples": [
+              "Internacional"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "iata_code",
+          "oaci_code",
+          "type",
+          "city",
+          "department",
+          "coordinates"
+        ],
+        "title": "AirportResponse",
+        "type": "object"
+      },
+      "CoordinatesResponse": {
+        "properties": {
+          "latitude": {
+            "examples": [
+              4.4532428642135
+            ],
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "examples": [
+              -75.7659806671205
+            ],
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "CoordinatesResponse",
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "examples": [
+              "AIRPORT_NOT_FOUND"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "examples": [
+              {
+                "airport_id": 999
+              }
+            ],
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "examples": [
+              "El aeropuerto con id 999 no existe"
+            ],
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "Formato único de error de todos los servicios (CLAUDE.md, sección 10.2).",
+        "properties": {
+          "correlation_id": {
+            "examples": [
+              "3f2a9c1e-6b7d-4c2a-9e1f-0a1b2c3d4e5f"
+            ],
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error",
+          "correlation_id"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "service": {
+            "examples": [
+              "airport-service"
+            ],
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "MapDataResponse": {
+        "description": "Datos en formato de columnas, listos para un trazo scattergeo de Plotly.\n\nLa posición i de cada arreglo corresponde al mismo aeropuerto.",
+        "properties": {
+          "cities": {
+            "examples": [
+              [
+                "Armenia",
+                "Rionegro"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cities",
+            "type": "array"
+          },
+          "count": {
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "departments": {
+            "examples": [
+              [
+                "Quindío",
+                "Antioquia"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Departments",
+            "type": "array"
+          },
+          "iata_codes": {
+            "examples": [
+              [
+                "AXM",
+                "MDE"
+              ]
+            ],
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Iata Codes",
+            "type": "array"
+          },
+          "ids": {
+            "examples": [
+              [
+                1,
+                9
+              ]
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "latitudes": {
+            "examples": [
+              [
+                4.4532,
+                6.1645
+              ]
+            ],
+            "items": {
+              "type": "number"
+            },
+            "title": "Latitudes",
+            "type": "array"
+          },
+          "longitudes": {
+            "examples": [
+              [
+                -75.7659,
+                -75.4231
+              ]
+            ],
+            "items": {
+              "type": "number"
+            },
+            "title": "Longitudes",
+            "type": "array"
+          },
+          "names": {
+            "examples": [
+              [
+                "Aeropuerto Internacional El Edén",
+                "Aeropuerto Internacional José María Córdova"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "types": {
+            "examples": [
+              [
+                "Internacional",
+                "Internacional"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "ids",
+          "names",
+          "iata_codes",
+          "cities",
+          "departments",
+          "types",
+          "latitudes",
+          "longitudes"
+        ],
+        "title": "MapDataResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Catálogo de aeropuertos colombianos. Consulta API Colombia mediante un Adapter, con caché en Redis, timeout, retry con exponential backoff, circuit breaker y fallback.",
+    "title": "Airport Service",
+    "version": "2.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/airports": {
+      "get": {
+        "description": "Lista todos los aeropuertos colombianos, ordenados por id.",
+        "operationId": "list_airports_airports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AirportResponse"
+                  },
+                  "title": "Response List Airports Airports Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia respondió algo inesperado"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no está disponible o el circuito está abierto"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no respondió a tiempo"
+          }
+        },
+        "summary": "List Airports",
+        "tags": [
+          "airports"
+        ]
+      }
+    },
+    "/airports/map-data": {
+      "get": {
+        "description": "Devuelve los aeropuertos con coordenadas en arreglos listos para Plotly.\n\nLos aeropuertos sin ubicación conocida se excluyen.",
+        "operationId": "get_map_data_airports_map_data_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapDataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia respondió algo inesperado"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no está disponible o el circuito está abierto"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no respondió a tiempo"
+          }
+        },
+        "summary": "Get Map Data",
+        "tags": [
+          "airports"
+        ]
+      }
+    },
+    "/airports/{airport_id}": {
+      "get": {
+        "description": "Obtiene un aeropuerto por su id.",
+        "operationId": "get_airport_airports__airport_id__get",
+        "parameters": [
+          {
+            "description": "Id del aeropuerto (entero mayor que 0)",
+            "in": "path",
+            "name": "airport_id",
+            "required": true,
+            "schema": {
+              "description": "Id del aeropuerto (entero mayor que 0)",
+              "exclusiveMinimum": 0,
+              "title": "Airport Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El aeropuerto no existe"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El id no es un entero mayor que 0"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia respondió algo inesperado"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no está disponible o el circuito está abierto"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "API Colombia no respondió a tiempo"
+          }
+        },
+        "summary": "Get Airport",
+        "tags": [
+          "airports"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Indica que el servicio está en ejecución (no consulta API Colombia).",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}

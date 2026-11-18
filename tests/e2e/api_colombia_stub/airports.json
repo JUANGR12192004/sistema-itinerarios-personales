@@ -1,0 +1,17 @@
+[
+  {"id": 1, "name": "Aeropuerto Internacional El Dorado", "iataCode": "BOG", "oaciCode": "SKBO", "type": "Internacional",
+   "deparmentId": 3, "department": {"name": "Cundinamarca"}, "cityId": 149, "city": {"name": "Bogotá"},
+   "latitude": -74.1469, "longitude": 4.70159},
+  {"id": 2, "name": "Aeropuerto Internacional José María Córdova", "iataCode": "MDE", "oaciCode": "SKRG", "type": "Internacional",
+   "deparmentId": 2, "department": {"name": "Antioquia"}, "cityId": 790, "city": {"name": "Rionegro"},
+   "latitude": -75.4231, "longitude": 6.16454},
+  {"id": 5, "name": "Aeropuerto Internacional Rafael Núñez", "iataCode": "CTG", "oaciCode": "SKCG", "type": "Internacional",
+   "deparmentId": 5, "department": {"name": "Bolívar"}, "cityId": 152, "city": {"name": "Cartagena de Indias"},
+   "latitude": -75.5131, "longitude": 10.4424},
+  {"id": 30, "name": "Aeropuerto La Florida", "iataCode": "N/A", "oaciCode": "SKTQ", "type": "Nacional",
+   "deparmentId": 22, "department": {"name": "Nariño"}, "cityId": 683, "city": {"name": "Tumaco"},
+   "latitude": -78.7492, "longitude": 1.81442},
+  {"id": 43, "name": "Aeropuerto del Café", "iataCode": "N/A", "oaciCode": "N/A", "type": "En Construccion",
+   "deparmentId": 7, "department": {"name": "Caldas"}, "cityId": 314, "city": {"name": "Palestina"},
+   "latitude": 0, "longitude": 0}
+]

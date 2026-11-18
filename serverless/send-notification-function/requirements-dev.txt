@@ -8,3 +8,7 @@
 
 # Pruebas
 pytest==9.1.1
+
+# Leer docs/asyncapi/asyncapi.yaml en la prueba de contrato del consumidor (Fase 11).
+# Misma versión que llega a Itinerary Service con uvicorn[standard]. No va en la imagen.
+pyyaml==6.0.3

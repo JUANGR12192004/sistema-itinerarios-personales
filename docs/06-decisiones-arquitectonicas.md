@@ -1371,6 +1371,42 @@ Alternativas descartadas:
 - La integración continua agrega el job "Docker Compose": valida el archivo, construye las imágenes, levanta el sistema y comprueba los healthchecks, las migraciones y el recorrido por el gateway que no depende de API Colombia.
 - El `serverless/send-notification-function/.dockerignore` antiguo ya no se aplicaba desde la Fase 9 (el contexto es la raíz); lo reemplaza `Dockerfile.dockerignore`.
 
+## ADR-042 — Estrategia de pruebas (Fase 11)
+
+**Estado:** Aceptada (Fase 11).
+
+### Contexto
+
+Al terminar la Fase 10 cada componente tenía pruebas unitarias y de integración, pero quedaban huecos que la Fase 11 debía cerrar (CLAUDE.md 9.3): las pruebas de integración de Itinerary Service y de SendNotificationFunction **borraban las tablas de las bases reales** (`itinerary_db`, `notification_db`); el paquete compartido `libs/observability` no tenía pruebas propias; nada comprobaba que dos servicios siguieran entendiéndose (contratos); el recorrido completo del sistema solo se verificaba a mano, y dos advertencias de librerías de terceros ensuciaban la salida de `pytest`.
+
+### Decisión
+
+Se adopta una **pirámide de pruebas** con cinco niveles, cada uno con un propósito y un costo distintos:
+
+| Nivel | Qué prueba | Dónde | Necesita |
+|---|---|---|---|
+| Unitarias | Dominio, casos de uso, adaptadores con dobles (fakes, respx, canales falsos) | `tests/` de cada componente | Nada |
+| Integración | Un adaptador contra la infraestructura real (PostgreSQL, RabbitMQ, la función) | `tests/integration/` | El contenedor correspondiente; si no está, SKIPPED |
+| Contrato | Que dos componentes sigan entendiéndose sin importar el código del otro | `test_*contract*.py` | Nada |
+| Gateway | La configuración de Nginx en un contenedor propio contra servidores eco | `gateway/tests/` | Docker |
+| Punta a punta (E2E) | El sistema completo, como lo usa el frontend | `tests/e2e/` | Docker Compose con el simulador |
+
+1. **Base de datos propia de las pruebas de integración.** Itinerary Service y SendNotificationFunction usan `<base>_test` (`itinerary_db_test`, `notification_db_test`) en el **mismo** servidor PostgreSQL. La fixture `pg_engine` la crea si no existe (`CREATE DATABASE` en modo AUTOCOMMIT) y le aplica `alembic upgrade head` (`tests/integration/database_setup.py`). Para eso, `alembic/env.py` acepta una conexión ya abierta en `config.attributes["connection"]` (receta estándar de Alembic); sin ella funciona como antes. Un error al crear o migrar la base **falla**; solo la falta de PostgreSQL produce SKIPPED. La prueba del handler de Lambda, que arma su propio engine con `DATABASE_URL`, apunta a la base de pruebas con la fixture `handler_database`. Se descartó un esquema de pruebas (`search_path`): las migraciones y el código usan el esquema por defecto y habría que tocarlos.
+2. **Pruebas propias de `libs/observability`** (formato JSON, filtros, procesador de spans elegido en producción, instrumentadores, middleware de métricas), con su `requirements-dev.txt` (mismas versiones que los servicios) y su job de CI. Las fixtures aíslan el estado global (logger `app`, `TracerProvider`, contadores de Prometheus).
+3. **Pruebas de contrato** (*consumer-driven*, sin herramientas nuevas):
+   - HTTP: Airport Service publica su OpenAPI en `docs/openapi/airport-service.json` (su "lenguaje publicado", CLAUDE.md 8.1). El **proveedor** comprueba que coincide con su API (se regenera con `UPDATE_CONTRACTS=1`); el **consumidor** (Itinerary Service) lo lee y exige que cada respuesta documentada de `GET /airports/{airport_id}` tenga un comportamiento decidido en `HttpAirportCatalogAdapter`.
+   - Eventos: el productor ya se comparaba con `docs/asyncapi/asyncapi.yaml` (Fase 4). Ahora también el **consumidor** (la función): acepta los ejemplos del contrato, no exige campos que el contrato no garantiza (*Tolerant Reader*), ignora campos nuevos y rechaza otra `event_version`.
+4. **Pruebas E2E sobre Docker Compose** con un **simulador de API Colombia** (`tests/e2e/api_colombia_stub`, solo librería estándar, con los defectos reales del proveedor) que agrega `docker-compose.e2e.yml`. Las pruebas usan el sistema por el gateway y leen las bases con `docker compose exec ... psql`; solo dependen de `pytest` y `httpx`. Cubren CRUD, outbox → RabbitMQ → trigger → función → historial (`SENT` y `SKIPPED`), caché, errores 404/422, correlation ID, **una traza en Jaeger con los seis componentes** (el cliente envía un `traceparent` con un trace_id conocido) y métricas en Prometheus. Borran los itinerarios que crean. El job "Docker Compose" del CI las ejecuta. Se descartó Testcontainers: Compose ya describe el sistema y está en el CI.
+5. **Advertencias de terceros filtradas con precisión** en `pytest.ini`: la de Starlette (`httpx2`) por mensaje y clase `StarletteDeprecationWarning`, y la de pika 1.3.2 (`utcfromtimestamp`) por mensaje y módulo `pika.data`. No se migra a `httpx2` (cambiaría una librería aprobada, CLAUDE.md 6) ni se actualiza pika (ADR-021). Cualquier otra advertencia se sigue mostrando.
+6. **Pruebas del gateway en Docker Desktop:** `host.docker.internal` se fija a su **IPv4** con `--add-host` (se consulta con `getent ahostsv4` en un contenedor). En Windows 11 ese nombre resolvía también a una IPv6 inalcanzable y Nginx alternaba entre las dos (`proxy_next_upstream off`, ADR-009): la mitad de las solicitudes daba 502. Además, `test_limit_applies_to_both_services` ya no exige que la primera solicitud tras agotar el límite sea 429 (a 10 r/s se libera una cada 100 ms y en un equipo cargado puede pasar ese tiempo), sino un 429 entre las cinco siguientes: si el límite fuera por servicio, las cinco se aceptarían.
+
+### Consecuencias
+
+- Las pruebas de integración se pueden correr durante una demostración: no borran datos reales, y el Outbox Relay real nunca ve los eventos de las pruebas. El usuario de `DATABASE_URL` necesita permiso para crear bases (el de los contenedores de PostgreSQL lo tiene).
+- Si Airport Service cambia su API, su prueba de contrato falla hasta regenerar `docs/openapi/airport-service.json`, y el diff del PR muestra el cambio a los consumidores. Si agrega un código de respuesta, la prueba de Itinerary Service falla hasta decidir cómo tratarlo.
+- Las E2E necesitan Docker y tardan ~25 s con el sistema arriba; no reemplazan a las demás pruebas, que siguen corriendo sin servicios.
+- Con todo encendido (Fase 11): 639 pruebas en siete suites, 0 fallos, 0 omitidas, 0 advertencias. Sin servicios, las de integración quedan SKIPPED y el resto pasa.
+
 ## 2. Revisión de decisiones
 
 Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.

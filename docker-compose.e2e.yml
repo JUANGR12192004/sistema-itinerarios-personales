@@ -1,0 +1,27 @@
+# Archivo ADICIONAL de Docker Compose para las pruebas de punta a punta (Fase 11).
+#
+# Se combina con el principal; no lo reemplaza:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
+#
+# Único cambio: Airport Service consulta un SIMULADOR de API Colombia (tests/e2e/api_colombia_stub)
+# en lugar del proveedor real. Así las pruebas E2E (tests/e2e) no dependen de internet y siempre
+# ven los mismos aeropuertos. Todo lo demás (gateway, Itinerary, outbox, RabbitMQ, trigger, función,
+# bases y observabilidad) es el sistema real de docker-compose.yml.
+services:
+  api-colombia-stub:
+    image: python:3.12-slim
+    command: ["python", "/stub/server.py"]
+    volumes:
+      - ./tests/e2e/api_colombia_stub:/stub:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  airport-service:
+    environment:
+      API_COLOMBIA_BASE_URL: http://api-colombia-stub:8080/api/v1
+    depends_on:
+      api-colombia-stub:
+        condition: service_healthy
