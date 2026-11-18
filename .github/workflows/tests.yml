@@ -229,15 +229,20 @@ jobs:
   docker-compose:
     name: Docker Compose
     runs-on: ubuntu-latest
-    # Construir las seis imágenes y levantar 15 contenedores tarda unos minutos
+    # Construir las seis imágenes y levantar 16 contenedores tarda unos minutos
     timeout-minutes: 25
+    # Desde la Fase 11 todos los comandos "docker compose" del job combinan el archivo principal con
+    # docker-compose.e2e.yml, que agrega el simulador de API Colombia: el sistema completo se prueba
+    # de punta a punta sin depender de internet.
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.e2e.yml
 
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
 
       # Detecta errores de sintaxis, anclas mal escritas o referencias a servicios inexistentes
-      - name: Validar docker-compose.yml
+      - name: Validar docker-compose.yml y docker-compose.e2e.yml
         run: docker compose config --quiet
 
       # Las imágenes instalan requirements-lock.txt (con hashes, regla S8544 de SonarCloud).
@@ -266,8 +271,7 @@ jobs:
             done
           done
 
-      # No se crea un itinerario real: validaría los aeropuertos contra API Colombia (internet),
-      # y una falla externa haría fallar el CI sin que el sistema tenga un error.
+      # Comprobaciones de infraestructura; el recorrido funcional lo hacen las pruebas E2E (paso siguiente)
       - name: Comprobar migraciones, colas, métricas y aislamiento
         run: |
           set -euo pipefail
@@ -304,6 +308,21 @@ jobs:
             echo "  ERROR: airport-service llegó a itinerary-postgres"; exit 1
           fi
           echo "  aislada"
+
+      - name: Instalar Python 3.12 para las pruebas E2E
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/e2e/requirements.txt
+
+      # Recorrido completo por el gateway: CRUD, outbox → RabbitMQ → trigger → función → historial,
+      # caché, errores, correlation ID, una traza en Jaeger con los seis componentes y métricas (Fase 11)
+      - name: Pruebas de punta a punta (E2E)
+        working-directory: tests/e2e
+        run: |
+          pip install -r requirements.txt
+          pytest -v
 
       - name: Mostrar el estado y los logs si algo falló
         if: failure()

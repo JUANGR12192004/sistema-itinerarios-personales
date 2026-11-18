@@ -1,0 +1,4 @@
+# Pruebas de punta a punta (Fase 11): hablan con el sistema levantado por Docker Compose.
+# Solo HTTP (httpx) y el comando docker (subprocess) para leer las bases: sin drivers de BD ni AMQP.
+pytest==9.1.1
+httpx==0.28.1
