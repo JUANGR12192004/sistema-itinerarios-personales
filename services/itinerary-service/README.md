@@ -169,8 +169,8 @@ que Compose publica igual que los contenedores manuales.
 
 ## Orden de arranque del sistema completo (modo manual)
 
-Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en el
-[README raíz](../../README.md#arranque-manual-modo-desarrollo):
+Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en
+[`docs/07-ejecucion-manual.md`](../../docs/07-ejecucion-manual.md):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (**este servicio**, `alembic upgrade head`) y `notification_db`.

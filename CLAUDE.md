@@ -805,6 +805,19 @@ y una sola pausa al final.
 | **11C** | `docker-compose.e2e.yml` con el simulador de API Colombia, `tests/e2e` y su paso en el job "Docker Compose" | 14 E2E pasan dos veces seguidas y no dejan itinerarios |
 | **11D** | Filtro de advertencias, ADR-042, README raíz (sección "Pruebas") y de los componentes, estado de CLAUDE.md | Siete suites sin fallos, sin omitidas y sin advertencias con todo encendido |
 
+### 12.11. Plan de la Fase 12 (entregas)
+
+Rama `fase-12-documentacion`. Una pausa al final de cada entrega, antes del commit. Reglas acordadas: el README no queda
+con secciones vacías entre entregas; en "Arquitectura" cada concepto es corto (qué es y por qué se usa, dónde está en el
+código y enlace al documento de `docs/` que lo explica); el contenido que sale del README se mueve, no se borra; los
+totales de pruebas se confirman ejecutándolas.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **12A** | Diagramas de clases (Airport, Itinerary API, Outbox Relay, función) y relacional (`itinerary_db`, `notification_db`) en `docs/05`, sacados del código y de las migraciones; `docs/07-ejecucion-manual.md`, `docs/08-demostraciones.md` y `docs/10-historial-de-fases.md` con el contenido movido del README; README con el contenido existente en el nuevo orden; enlaces actualizados | Los 15 diagramas de `docs/05` se dibujan sin errores; ningún enlace interno roto |
+| **12B** | README completo (arquitectura por conceptos, diagramas, variables de entorno, endpoints por el gateway, eventos, limitaciones conocidas, resumen de ADR), verificación de la documentación contra el código con la lista de contradicciones, totales de pruebas ejecutándolas, grupos C (estados de ADR) y D (CLAUDE.md 7.5, 7.6 y 12; resúmenes del README) | Cada contradicción listada y corregida; totales de pruebas confirmados |
+| **12C** | `docs/evidencias/` (índice de capturas y referencias en el README), `docs/09-guia-sustentacion.md`, revisión final de enlaces y del orden de lectura, estado de CLAUDE.md | Ningún enlace roto; orden de lectura revisado |
+
 ## 13. Estándares de código
 
 - Type hints en todas las funciones.
@@ -1209,4 +1222,18 @@ pytest -v
     fase. Los grupos C y D quedan para la Fase 12.
   - Verificación: pruebas que comparan el AsyncAPI con el código (Itinerary 5, función 10, trigger 6) pasan; ningún
     archivo del repositorio tiene caracteres de control.
-- **Siguiente:** Fase 12 (Documentación y entrega).
+- **Fase 12 (Documentación y entrega):** en curso en la rama `fase-12-documentacion` (plan en la sección 12.11).
+  - Entrega **12A**: `docs/05` con diagramas de clases (sección 3: Airport con los roles del Adapter y los
+    Decorators, Itinerary API, Outbox Relay y función) y relacional (sección 4: `itinerary_db` y `notification_db`,
+    índices, restricciones y referencias entre bases), índice al inicio y secciones renumeradas (secuencia 5,
+    resiliencia 6, despliegue 7). Del README raíz salieron, sin cambios de fondo: el arranque manual y "Qué pasa si se
+    omite un paso" a `docs/07-ejecucion-manual.md`; las demostraciones de punta a punta y de observabilidad a
+    `docs/08-demostraciones.md`; los resúmenes "Fase 2" a "Fase 11" a `docs/10-historial-de-fases.md`. El README
+    queda con el contenido existente en el nuevo orden (descripción, arquitectura, instalación y ejecución, pruebas,
+    documentación adicional, desarrollo por fases, Claude Code y contexto académico con los datos del equipo).
+    Enlaces actualizados en `docs/02`, `docs/05` y los README de Airport, Itinerary, la función y el trigger.
+    Comprobado: los 15 diagramas de `docs/05` se dibujan sin errores con Mermaid 11.
+  - Pendientes para la 12B (se conservaron al mover el texto): totales de pruebas del README anteriores a
+    `fix/limpieza-config`, `prometheus.yml` en el resumen de la Fase 9 (con Compose es `prometheus.compose.yml`),
+    "estará compuesto" en "Alcance" y "lo hará el frontend" en `docs/08`.
+- **Siguiente:** entrega 12B.

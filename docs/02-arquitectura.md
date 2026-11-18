@@ -239,7 +239,7 @@ docker compose up -d --build
 
 **Aislamiento de datos.** Cada PostgreSQL está solo en su red (`itinerary-data` o `notification-data`) junto con los contenedores de su servicio dueño. Así la propiedad de datos (sección 4) no depende solo de una convención: los demás contenedores ni siquiera resuelven el nombre de esa base.
 
-**Modo manual.** Para desarrollar un componente con recarga automática, se puede seguir ejecutando con `uvicorn` desde su entorno virtual (pasos del `README.md` raíz), pero no a la vez que Compose, porque usan los mismos puertos.
+**Modo manual.** Para desarrollar un componente con recarga automática, se puede seguir ejecutando con `uvicorn` desde su entorno virtual (pasos de [`07-ejecucion-manual.md`](07-ejecucion-manual.md)), pero no a la vez que Compose, porque usan los mismos puertos.
 
 ## 8. Principios de diseño
 
