@@ -1,0 +1,378 @@
+# =============================================================================
+# Sistema de Itinerarios Personales — Docker Compose (Fase 10, ADR-041)
+#
+# Levanta TODO el sistema con un solo comando, desde la raíz del repositorio:
+#   docker compose up -d --build
+# Detenerlo (conserva los datos de PostgreSQL y RabbitMQ en volúmenes):
+#   docker compose down
+# Detenerlo y BORRAR los datos:
+#   docker compose down -v
+#
+# Reemplaza los 9 pasos manuales del README (docker run + 4 terminales con uvicorn).
+# Los puertos publicados en el equipo son los de CLAUDE.md, sección 7.6, así que las
+# demostraciones, Swagger y las pruebas de integración siguen usando las mismas URL.
+#
+# Dentro de Compose, cada contenedor llega a los demás por el NOMBRE DEL SERVICIO
+# (DNS interno de Docker): airport-service:8001, rabbitmq:5672, jaeger:4317...
+# Ya no se usa host.docker.internal.
+#
+# Credenciales: son las de desarrollo local que ya documenta el README (usuario y clave
+# iguales al nombre de la base). Nunca usar estos valores en un entorno real.
+# =============================================================================
+
+name: sistema-itinerarios
+
+# --- Fragmentos reutilizables (anclas de YAML) -------------------------------
+# Las claves que empiezan por "x-" son ignoradas por Compose: sirven para no repetir
+# configuración. "<<: *nombre" copia el fragmento dentro de un servicio.
+
+# Variables comunes de los cuatro procesos Python (logs y trazas, Fase 9).
+# OTEL_EXPORTER_OTLP_ENDPOINT es la variable estándar de OpenTelemetry: el exportador
+# OTLP la lee solo (sin cambiar código). Sin ella intentaría localhost:4317, que dentro
+# de un contenedor es el propio contenedor, no Jaeger.
+x-python-env: &python-env
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OTEL_ENABLED: ${OTEL_ENABLED:-true}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+
+# La misma imagen de Itinerary Service se usa para la API, el relay y las migraciones.
+# Los tres servicios declaran el mismo build y el mismo nombre de imagen: Docker
+# reutiliza la caché de capas, así que la imagen se construye realmente una sola vez.
+x-itinerary-image: &itinerary-image
+  build:
+    context: .
+    dockerfile: services/itinerary-service/Dockerfile
+  image: sistema-itinerarios/itinerary-service:local
+
+x-itinerary-env: &itinerary-env
+  <<: *python-env
+  DATABASE_URL: postgresql+psycopg://itinerary:itinerary@itinerary-postgres:5432/itinerary_db
+  AIRPORT_SERVICE_URL: http://airport-service:8001
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+
+# Healthcheck de los servicios FastAPI. La imagen python:3.12-slim no trae curl,
+# así que se usa Python: urlopen lanza una excepción (código de salida 1) si /health
+# no responde 200 en 2 s.
+x-healthcheck-timing: &healthcheck-timing
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 15s
+
+services:
+
+  # ===========================================================================
+  # Infraestructura
+  # ===========================================================================
+
+  # PostgreSQL de Itinerary Service (ADR-004, ADR-016). Solo está en la red
+  # itinerary-data: ningún otro componente puede conectarse a esta base.
+  itinerary-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: itinerary
+      POSTGRES_PASSWORD: itinerary
+      POSTGRES_DB: itinerary_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - itinerary-pgdata:/var/lib/postgresql/data
+    networks:
+      - itinerary-data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "itinerary", "-d", "itinerary_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # PostgreSQL del historial de notificaciones (ADR-029). Solo en notification-data.
+  notification-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: notification
+      POSTGRES_PASSWORD: notification
+      POSTGRES_DB: notification_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - notification-pgdata:/var/lib/postgresql/data
+    networks:
+      - notification-data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "notification", "-d", "notification_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # RabbitMQ (ADR-005, ADR-021). hostname fijo: RabbitMQ guarda sus datos en una carpeta
+  # con el nombre del nodo; si el nombre cambiara en cada arranque, "perdería" las colas
+  # durables guardadas en el volumen.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      # Listo cuando acepta conexiones AMQP (no basta con que el proceso exista)
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # Redis: caché de Airport Service (ADR-007). Sin volumen: la caché se puede perder.
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Migraciones (contenedores de una sola ejecución)
+  # ===========================================================================
+  # Aplican "alembic upgrade head" y terminan. Los servicios que usan la base esperan a
+  # que terminen con código 0 (condition: service_completed_successfully). Si una
+  # migración falla, esos servicios no arrancan y el error se ve con:
+  #   docker compose logs itinerary-migrations
+
+  itinerary-migrations:
+    <<: *itinerary-image
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *itinerary-env
+      OTEL_ENABLED: "false"
+    networks:
+      - itinerary-data
+    depends_on:
+      itinerary-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  notification-migrations:
+    build:
+      context: .
+      dockerfile: serverless/send-notification-function/Dockerfile.migrations
+    image: sistema-itinerarios/notification-migrations:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://notification:notification@notification-postgres:5432/notification_db
+    networks:
+      - notification-data
+    depends_on:
+      notification-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ===========================================================================
+  # Microservicios
+  # ===========================================================================
+
+  airport-service:
+    build:
+      context: .
+      dockerfile: services/airport-service/Dockerfile
+    image: sistema-itinerarios/airport-service:local
+    environment:
+      <<: *python-env
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      # Sin Redis el servicio funciona sin caché (ADR-007): basta con que haya arrancado.
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2)"]
+      <<: *healthcheck-timing
+    restart: unless-stopped
+
+  itinerary-service:
+    <<: *itinerary-image
+    environment:
+      <<: *itinerary-env
+    ports:
+      - "8002:8002"
+    networks:
+      - default
+      - itinerary-data
+    # No depende de airport-service: si Airport no está, POST /itineraries responde 503
+    # (ADR-012). Tampoco de RabbitMQ: desde la Fase 5 la API solo escribe en la outbox.
+    depends_on:
+      itinerary-migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=2)"]
+      <<: *healthcheck-timing
+    restart: unless-stopped
+
+  # Outbox Relay (ADR-025): misma imagen que la API, otro comando.
+  # stop_signal SIGINT: "docker compose stop" le envía la misma señal que Ctrl+C, y el relay
+  # termina de forma ordenada (except KeyboardInterrupt). Con SIGTERM, Python como proceso 1
+  # del contenedor la ignoraría y Docker lo mataría a los 10 s.
+  outbox-relay:
+    <<: *itinerary-image
+    command: ["python", "-m", "app.outbox_relay"]
+    environment:
+      <<: *itinerary-env
+    ports:
+      - "9101:9101"
+    networks:
+      - default
+      - itinerary-data
+    depends_on:
+      itinerary-migrations:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    stop_signal: SIGINT
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Sistema de notificaciones (Fase 6): función FaaS + Event Trigger
+  # ===========================================================================
+
+  # SendNotificationFunction (ADR-008): imagen de AWS Lambda con el Runtime Interface Emulator.
+  # El RIE escucha en el puerto 8080 del contenedor; en el equipo se publica en 9000.
+  send-notification-function:
+    build:
+      context: .
+      dockerfile: serverless/send-notification-function/Dockerfile
+    image: sistema-itinerarios/send-notification-function:local
+    environment:
+      <<: *python-env
+      DATABASE_URL: postgresql+psycopg://notification:notification@notification-postgres:5432/notification_db
+    ports:
+      - "9000:8080"
+    networks:
+      - default
+      - notification-data
+    depends_on:
+      notification-migrations:
+        condition: service_completed_successfully
+    # Sin healthcheck: la única forma de comprobar la función es invocarla, y eso ejecutaría
+    # el handler. El trigger tolera que no esté lista (reintenta sin límite, ADR-031).
+    restart: unless-stopped
+
+  # Event Trigger (ADR-031): consume la cola e invoca la función por su nombre de servicio.
+  # Declara la cola, la DLX y la DLQ al conectarse (ADR-032).
+  # Reprocesar la DLQ:  docker compose run --rm event-trigger python -m app.replay_dlq --all
+  event-trigger:
+    build:
+      context: .
+      dockerfile: serverless/event-trigger/Dockerfile
+    image: sistema-itinerarios/event-trigger:local
+    environment:
+      <<: *python-env
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      FUNCTION_INVOKE_URL: http://send-notification-function:8080/2015-03-31/functions/function/invocations
+    ports:
+      - "9102:9102"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      send-notification-function:
+        condition: service_started
+    stop_signal: SIGINT
+    restart: unless-stopped
+
+  # ===========================================================================
+  # API Gateway + Frontend (Fases 7 y 8)
+  # ===========================================================================
+
+  # Nginx resuelve los nombres de los upstreams y de Jaeger AL ARRANCAR (ADR-009): si un
+  # nombre no existe, el gateway no inicia. depends_on "service_started" garantiza que los
+  # contenedores existan (y por tanto sus nombres en el DNS de Docker). No se espera a que
+  # estén "healthy": mientras un servicio arranca, sus rutas responden 502 UPSTREAM_UNAVAILABLE
+  # y el frontend ya está disponible, igual que en la Fase 7.
+  api-gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: sistema-itinerarios/api-gateway:local
+    environment:
+      AIRPORT_SERVICE_UPSTREAM: airport-service:8001
+      ITINERARY_SERVICE_UPSTREAM: itinerary-service:8002
+      OTEL_EXPORTER_OTLP_HOST: jaeger
+      GATEWAY_OTEL_TRACE: ${GATEWAY_OTEL_TRACE:-on}
+      GATEWAY_RATE_LIMIT: ${GATEWAY_RATE_LIMIT:-10r/s}
+      GATEWAY_RATE_BURST: ${GATEWAY_RATE_BURST:-20}
+    ports:
+      - "8000:8000"
+    depends_on:
+      airport-service:
+        condition: service_started
+      itinerary-service:
+        condition: service_started
+      jaeger:
+        condition: service_started
+    healthcheck:
+      # La imagen Alpine de Nginx no trae curl, pero sí wget (BusyBox)
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/health"]
+      <<: *healthcheck-timing
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Observabilidad (Fase 9)
+  # ===========================================================================
+
+  # Jaeger 2 (ADR-039): recibe trazas OTLP por gRPC en 4317 y muestra la interfaz en 16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    command: ["--set", "receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317"]
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    restart: unless-stopped
+
+  # Prometheus (ADR-038): consulta los /metrics de los cuatro procesos Python cada 15 s,
+  # usando los nombres de los servicios (prometheus.compose.yml).
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    volumes:
+      - ./observability/prometheus/prometheus.compose.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # Grafana (ADR-038): datasource y dashboard cargados al arrancar (provisioning).
+  # El datasource apunta a http://prometheus:9090, el nombre del servicio de arriba.
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
+# --- Redes -------------------------------------------------------------------
+# default: red común de todos los componentes (la crea Compose).
+# itinerary-data y notification-data aíslan cada base de datos: solo los contenedores
+# del servicio dueño están en esa red. Así la regla "ningún servicio lee ni escribe la
+# base de datos de otro" la impone también la infraestructura, no solo la convención.
+networks:
+  itinerary-data:
+  notification-data:
+
+# --- Volúmenes ---------------------------------------------------------------
+# Guardan los datos entre "docker compose down" y "up". "docker compose down -v" los borra.
+volumes:
+  itinerary-pgdata:
+  notification-pgdata:
+  rabbitmq-data:

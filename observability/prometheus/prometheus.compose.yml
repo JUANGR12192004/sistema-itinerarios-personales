@@ -1,0 +1,38 @@
+# Configuración de Prometheus para Docker Compose (Fase 10, ADR-038 y ADR-041).
+#
+# Igual que prometheus.yml, pero los destinos son los NOMBRES DE LOS SERVICIOS de
+# docker-compose.yml: dentro de la red de Compose, Docker resuelve cada nombre a la
+# dirección del contenedor (DNS interno). docker-compose.yml monta este archivo como
+# /etc/prometheus/prometheus.yml.
+#
+# prometheus.yml se conserva para el modo manual (servicios con uvicorn en el equipo y
+# Prometheus con docker run), donde los destinos son host.docker.internal.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Airport Service (FastAPI, puerto 8001)
+  - job_name: airport-service
+    static_configs:
+      - targets: ["airport-service:8001"]
+    metrics_path: /metrics
+
+  # Itinerary Service — API FastAPI (puerto 8002)
+  - job_name: itinerary-service
+    static_configs:
+      - targets: ["itinerary-service:8002"]
+    metrics_path: /metrics
+
+  # Itinerary Service — Outbox Relay (contenedor aparte con la misma imagen, puerto 9101)
+  - job_name: itinerary-service-relay
+    static_configs:
+      - targets: ["outbox-relay:9101"]
+    metrics_path: /
+
+  # Event Trigger (contenedor aparte, puerto 9102)
+  - job_name: event-trigger
+    static_configs:
+      - targets: ["event-trigger:9102"]
+    metrics_path: /
