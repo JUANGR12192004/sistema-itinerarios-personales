@@ -1,6 +1,20 @@
 
 # 05. Diagramas arquitectónicos
 
+Todos los diagramas están en Mermaid (GitHub los dibuja directamente) y describen el sistema **tal como está
+implementado**: los diagramas de clases salen del código de `app/` de cada componente y el relacional, de las
+migraciones de Alembic.
+
+| Sección | Diagrama | Qué responde |
+|---|---|---|
+| [1](#1-arquitectura-general) | Arquitectura general | ¿Qué piezas hay y cómo se conectan? |
+| [2](#2-diagrama-de-componentes) | Componentes | ¿Qué capas y puertos tiene cada componente? |
+| [3](#3-diagramas-de-clases) | Clases | ¿Qué clases implementan el dominio, los puertos y los adaptadores? |
+| [4](#4-diagrama-relacional) | Relacional | ¿Qué tablas hay y en qué base vive cada una? |
+| [5](#5-secuencia-de-creación-de-un-itinerario) | Secuencia | ¿Qué pasa, en orden, al crear un itinerario? (y 5.1 fallos del consumidor, 5.2 gateway) |
+| [6](#6-flujo-de-resiliencia-de-airport-service) | Resiliencia | ¿Qué hace Airport Service cuando API Colombia falla? |
+| [7](#7-despliegue-con-docker-compose-fase-10) | Despliegue | ¿Qué contenedores, redes y puertos hay? (y 7.1 observabilidad) |
+
 ## 1. Arquitectura general
 
 ```mermaid
@@ -146,7 +160,574 @@ El mismo puerto `EventPublisher` tiene dos adaptadores, uno en cada proceso: en 
 
 En el sistema de notificaciones (Fase 6), el Event Trigger separa la **política** (`DeliveryHandler`, capa de aplicación) de los adaptadores: el consumidor de RabbitMQ y el cliente HTTP de la función (ADR-031). La función sigue la arquitectura hexagonal por dentro: el handler de Lambda es el adaptador de entrada, como una ruta FastAPI (ADR-028).
 
-## 3. Secuencia de creación de un itinerario
+## 3. Diagramas de clases
+
+Un diagrama por componente con lógica de negocio. Se muestran las clases del dominio, los puertos, los casos de uso y
+los adaptadores; se omiten las rutas FastAPI, los esquemas Pydantic de la API y las excepciones.
+
+Cómo leerlos:
+
+| En el diagrama | Significado |
+|---|---|
+| `«Puerto»` sobre el nombre | Clase abstracta (`ABC`) de la capa `application`: el contrato que usa el caso de uso |
+| Línea punteada con punta de triángulo vacío | La clase **implementa** el puerto |
+| Flecha continua | La clase **usa** a la otra (la recibe en su constructor) |
+| Flecha punteada con punta abierta | La clase **crea o lee** objetos del otro tipo |
+| Rombo relleno | Composición: una clase es parte de la otra (`Coordinates` dentro de `Airport`) |
+| Rombo vacío con la etiqueta `inner` | El Decorator envuelve a otro objeto del mismo puerto |
+| Método subrayado | Método de clase (`@classmethod`), por ejemplo `Itinerary.create(...)` |
+
+Los diagramas se leen de izquierda a derecha: a la izquierda están quienes **usan** o **implementan** (casos de
+uso y adaptadores) y a la derecha, aquello de lo que dependen (puertos y dominio). Esa es la **regla de
+dependencias** de la arquitectura hexagonal: los casos de uso solo apuntan a puertos y al dominio, los adaptadores de
+`infrastructure` apuntan hacia los puertos que implementan y ninguna flecha sale del dominio hacia afuera.
+
+### 3.1. Airport Service: patrón Adapter y Decorators
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Airport {
+        <<Entidad del dominio>>
+        +id: int
+        +name: str
+        +iata_code: str | None
+        +oaci_code: str | None
+        +type: str
+        +city: str
+        +department: str
+        +coordinates: Coordinates | None
+        +has_location() bool
+    }
+    class Coordinates {
+        <<Objeto de valor>>
+        +latitude: float
+        +longitude: float
+    }
+    Airport *-- "0..1" Coordinates
+
+    class AirportProvider {
+        <<Puerto · Target>>
+        +list_airports() list~Airport~
+        +get_airport_by_id(airport_id) Airport
+    }
+    class ListAirports {
+        <<Caso de uso · Client>>
+        +execute() list~Airport~
+    }
+    class GetAirportById {
+        <<Caso de uso · Client>>
+        +execute(airport_id) Airport
+    }
+    class GetAirportMapData {
+        <<Caso de uso · Client>>
+        +execute() list~Airport~
+    }
+    ListAirports --> AirportProvider
+    GetAirportById --> AirportProvider
+    GetAirportMapData --> AirportProvider
+
+    class ApiColombiaAirportAdapter {
+        <<Adapter>>
+        +list_airports() list~Airport~
+        +get_airport_by_id(airport_id) Airport
+    }
+    class ApiColombiaClient {
+        <<Adaptee>>
+        +fetch_airports() JSON
+        +fetch_airport(airport_id) JSON | None
+    }
+    class ApiColombiaAirportDto {
+        <<DTO externo · Pydantic>>
+        +id: int
+        +name: str
+        +iata_code: str | None ← iataCode
+        +oaci_code: str | None ← oaciCode
+        +type: str
+        +department_id: int | None ← deparmentId
+        +department: name
+        +city: name
+        +latitude: float
+        +longitude: float
+    }
+    class mapper {
+        <<Módulo de traducción>>
+        +to_airport(dto) Airport
+        +has_swapped_coordinates(dto) bool
+    }
+    ApiColombiaAirportAdapter ..|> AirportProvider
+    ApiColombiaAirportAdapter --> ApiColombiaClient
+    ApiColombiaAirportAdapter ..> mapper
+    mapper ..> ApiColombiaAirportDto
+    mapper ..> Airport
+
+    class ResilientAirportProvider {
+        <<Decorator · Fase 2>>
+        +list_airports() list~Airport~
+        +get_airport_by_id(airport_id) Airport
+    }
+    class CircuitBreaker {
+        +state: CircuitState
+        +call(operation)
+    }
+    class RetryPolicy {
+        +run(operation)
+        +delay_before_retry(retry_number) float
+    }
+    ResilientAirportProvider ..|> AirportProvider
+    ResilientAirportProvider o-- AirportProvider : inner
+    ResilientAirportProvider --> CircuitBreaker
+    ResilientAirportProvider --> RetryPolicy
+
+    class CachedAirportProvider {
+        <<Decorator · Fase 2>>
+        +list_airports() list~Airport~
+        +get_airport_by_id(airport_id) Airport
+    }
+    class CacheStore {
+        <<Puerto de infraestructura>>
+        +get(key) str | None
+        +set(key, value, ttl_seconds)
+    }
+    class RedisCacheStore
+    CachedAirportProvider ..|> AirportProvider
+    CachedAirportProvider o-- AirportProvider : inner
+    CachedAirportProvider --> CacheStore
+    RedisCacheStore ..|> CacheStore
+```
+
+| Rol del patrón Adapter | Clase | Capa |
+|---|---|---|
+| Target (la interfaz que esperan los casos de uso) | `AirportProvider` | `application/ports.py` |
+| Client (quien usa el Target) | `ListAirports`, `GetAirportById`, `GetAirportMapData` | `application/use_cases.py` |
+| Adapter (traduce la interfaz externa a la interna) | `ApiColombiaAirportAdapter` + funciones de `mapper.py` | `infrastructure/api_colombia/` |
+| Adaptee (la interfaz externa incompatible) | `ApiColombiaClient` y el JSON de API Colombia (`ApiColombiaAirportDto`) | `infrastructure/api_colombia/` |
+
+`main.py` (`build_airport_provider`) arma la cadena `CachedAirportProvider(ResilientAirportProvider(ApiColombiaAirportAdapter(ApiColombiaClient)))`.
+Los tres implementan el mismo puerto, así que los casos de uso no saben si hay caché ni resiliencia (patrón
+Decorator, ADR-007 y ADR-014). `ApiColombiaAirportDto` es el único lugar donde aparece el nombre externo con error
+ortográfico (`deparmentId`); `mapper.py` corrige las coordenadas intercambiadas, convierte `"N/A"` en `None` y
+deja `coordinates = None` cuando llegan `0, 0` (capa anticorrupción).
+
+### 3.2. Itinerary Service: API
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Itinerary {
+        <<Raíz de agregado>>
+        +id: UUID
+        +traveler_name: str
+        +traveler_email: str | None
+        +departure_airport_id: int
+        +arrival_airport_id: int
+        +travel_date: datetime
+        +duration_minutes: int
+        +created_at: datetime
+        +updated_at: datetime
+        +create(...)$ Itinerary
+        +update(...) None
+    }
+    class ItineraryCreatedEvent {
+        <<Evento de integración v1>>
+        +event_id: UUID
+        +occurred_at: datetime
+        +correlation_id: str
+        +itinerary_id: UUID
+        +traveler_name: str
+        +traveler_email: str | None
+        +departure_airport_id: int
+        +arrival_airport_id: int
+        +travel_date: datetime
+        +duration_minutes: int
+        +from_itinerary(itinerary, correlation_id)$ ItineraryCreatedEvent
+        +from_dict(payload)$ ItineraryCreatedEvent
+        +to_dict() dict
+    }
+    ItineraryCreatedEvent ..> Itinerary : se construye desde
+
+    class ItineraryRepository {
+        <<Puerto>>
+        +save(itinerary)
+        +get_by_id(itinerary_id) Itinerary | None
+        +list_all() list~Itinerary~
+        +delete(itinerary_id)
+    }
+    class AirportCatalog {
+        <<Puerto>>
+        +verify_exists(airport_id)
+    }
+    class UnitOfWork {
+        <<Puerto>>
+        +commit()
+    }
+    class EventPublisher {
+        <<Puerto>>
+        +publish(event)
+    }
+
+    class CreateItineraryUseCase {
+        <<Caso de uso>>
+        +execute(command) Itinerary
+    }
+    class UpdateItineraryUseCase {
+        <<Caso de uso>>
+        +execute(itinerary_id, command) Itinerary
+    }
+    class GetItineraryUseCase {
+        <<Caso de uso>>
+        +execute(itinerary_id) Itinerary
+    }
+    class ListItinerariesUseCase {
+        <<Caso de uso>>
+        +execute() list~Itinerary~
+    }
+    class DeleteItineraryUseCase {
+        <<Caso de uso>>
+        +execute(itinerary_id)
+    }
+    CreateItineraryUseCase --> ItineraryRepository
+    CreateItineraryUseCase --> AirportCatalog
+    CreateItineraryUseCase --> UnitOfWork
+    CreateItineraryUseCase --> EventPublisher
+    CreateItineraryUseCase ..> ItineraryCreatedEvent : crea
+    UpdateItineraryUseCase --> ItineraryRepository
+    UpdateItineraryUseCase --> AirportCatalog
+    GetItineraryUseCase --> ItineraryRepository
+    ListItinerariesUseCase --> ItineraryRepository
+    DeleteItineraryUseCase --> ItineraryRepository
+
+    class SqlAlchemyItineraryRepository {
+        <<Adaptador · PostgreSQL>>
+    }
+    class HttpAirportCatalogAdapter {
+        <<Adaptador · HTTP>>
+        +verify_exists(airport_id)
+    }
+    class SqlAlchemyUnitOfWork {
+        <<Adaptador · PostgreSQL>>
+        +commit()
+    }
+    class OutboxEventPublisher {
+        <<Adaptador · Outbox>>
+        +publish(event)
+    }
+    class OutboxMessage {
+        <<Aplicación · Fase 5>>
+        +id: UUID
+        +payload: dict
+        +published_at: datetime | None
+        +traceparent: str | None
+        +from_event(event, traceparent)$ OutboxMessage
+    }
+    SqlAlchemyItineraryRepository ..|> ItineraryRepository
+    HttpAirportCatalogAdapter ..|> AirportCatalog
+    SqlAlchemyUnitOfWork ..|> UnitOfWork
+    OutboxEventPublisher ..|> EventPublisher
+    OutboxEventPublisher ..> OutboxMessage : guarda en outbox_events
+    SqlAlchemyItineraryRepository ..> Itinerary : guarda en itineraries
+```
+
+`CreateItineraryUseCase` es el caso de uso central: valida los dos aeropuertos con `AirportCatalog`
+(`HttpAirportCatalogAdapter` llama a `GET /airports/{id}` de Airport Service), crea el `Itinerary` con
+`Itinerary.create(...)` (reglas del dominio), lo guarda, registra el `ItineraryCreatedEvent` con `EventPublisher` y
+**después** hace `commit` con `UnitOfWork`. Como `OutboxEventPublisher` usa la misma sesión de SQLAlchemy que el
+repositorio, el itinerario y el evento se confirman en la misma transacción (Transactional Outbox, ADR-026).
+
+El evento vive en `application/events.py` y no en el dominio: es un contrato público con otros servicios, no una
+regla del negocio (ADR-020). `OutboxMessage` es la fila de `outbox_events` vista desde la aplicación.
+
+### 3.3. Itinerary Service: Outbox Relay
+
+El relay es otro proceso (`python -m app.outbox_relay`) con el mismo código del servicio. Reutiliza los puertos
+`EventPublisher` y `UnitOfWork` con otros adaptadores.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class OutboxRelay {
+        <<Aplicación>>
+        -batch_size: int
+        +run_once() RelayResult
+    }
+    class RelayResult {
+        +published: int
+        +failed: int
+        +dead: int
+    }
+    class OutboxRepository {
+        <<Puerto>>
+        +get_pending(limit) list~OutboxMessage~
+        +mark_published(message_id, published_at)
+        +mark_failed(message_id, error)
+        +mark_dead(message_id, failed_at, error)
+    }
+    class EventPublisher {
+        <<Puerto>>
+        +publish(event)
+    }
+    class UnitOfWork {
+        <<Puerto>>
+        +commit()
+    }
+    class OutboxMessage {
+        <<Aplicación>>
+        +id: UUID
+        +payload: dict
+        +attempts: int
+        +failed_at: datetime | None
+        +traceparent: str | None
+    }
+    class ItineraryCreatedEvent {
+        <<Evento de integración v1>>
+        +from_dict(payload)$ ItineraryCreatedEvent
+    }
+    OutboxRelay --> OutboxRepository
+    OutboxRelay --> EventPublisher
+    OutboxRelay --> UnitOfWork
+    OutboxRelay ..> RelayResult : devuelve
+    OutboxRepository ..> OutboxMessage
+    OutboxRelay ..> ItineraryCreatedEvent : reconstruye desde payload
+
+    class SqlAlchemyOutboxRepository {
+        <<Adaptador · PostgreSQL>>
+        FOR UPDATE SKIP LOCKED
+    }
+    class RabbitMQEventPublisher {
+        <<Adaptador · RabbitMQ>>
+        exchange itinerary.events
+        routing key itinerary.created
+        +publish(event)
+    }
+    class SqlAlchemyUnitOfWork {
+        <<Adaptador · PostgreSQL>>
+        +commit()
+    }
+    SqlAlchemyOutboxRepository ..|> OutboxRepository
+    RabbitMQEventPublisher ..|> EventPublisher
+    SqlAlchemyUnitOfWork ..|> UnitOfWork
+```
+
+En cada ciclo, `run_once` lee hasta `batch_size` pendientes, reconstruye cada evento con
+`ItineraryCreatedEvent.from_dict`, lo publica y lo marca (`mark_published`); si RabbitMQ falla, `mark_failed` y se
+detiene el lote; si el mensaje es ilegible, `mark_dead` y sigue con el siguiente (ADR-025, ADR-027). Al final hace
+un solo `commit`.
+
+### 3.4. SendNotificationFunction
+
+```mermaid
+classDiagram
+    direction LR
+
+    class handler {
+        <<Adaptador de entrada · Lambda>>
+        +handler(event, context) dict
+        +process_event(event, run) dict
+    }
+    class ItineraryCreatedEventSchema {
+        <<Esquema Pydantic del contrato v1>>
+        +parse_event(raw) ItineraryCreatedEvent
+    }
+    class ItineraryCreatedEvent {
+        <<Aplicación · solo lectura>>
+        +event_id: UUID
+        +correlation_id: str
+        +itinerary_id: UUID
+        +traveler_name: str
+        +traveler_email: str | None
+        +departure_airport_id: int
+        +arrival_airport_id: int
+        +travel_date: datetime
+        +duration_minutes: int
+    }
+    handler ..> ItineraryCreatedEventSchema : valida
+    ItineraryCreatedEventSchema ..> ItineraryCreatedEvent : crea
+    handler --> NotifyItineraryCreatedUseCase
+
+    class NotifyItineraryCreatedUseCase {
+        <<Caso de uso>>
+        +execute(event) NotificationResult
+    }
+    class NotificationResult {
+        +status: ProcessingStatus
+        +event_id: UUID
+        +notification_id: UUID | None
+        +notification_status: NotificationStatus | None
+    }
+    class ProcessingStatus {
+        <<enumeration>>
+        PROCESSED
+        ALREADY_PROCESSED
+        REJECTED
+    }
+    NotifyItineraryCreatedUseCase ..> NotificationResult : devuelve
+    NotificationResult --> ProcessingStatus
+
+    class NotificationRecord {
+        <<Entidad del dominio>>
+        +id: UUID
+        +event_id: UUID
+        +itinerary_id: UUID
+        +recipient: str | None
+        +channel: str
+        +message: str
+        +status: NotificationStatus
+        +status_reason: str | None
+        +correlation_id: str | None
+        +processed_at: datetime
+        +create(...)$ NotificationRecord
+        +should_be_sent() bool
+    }
+    class NotificationStatus {
+        <<enumeration>>
+        SENT
+        SKIPPED
+    }
+    NotificationRecord --> NotificationStatus
+    NotifyItineraryCreatedUseCase ..> NotificationRecord : crea
+
+    class NotificationHistoryRepository {
+        <<Puerto>>
+        +add_if_absent(record) bool
+    }
+    class NotificationSender {
+        <<Puerto>>
+        +send(recipient, message)
+    }
+    class UnitOfWork {
+        <<Puerto>>
+        +commit()
+    }
+    NotifyItineraryCreatedUseCase --> NotificationHistoryRepository
+    NotifyItineraryCreatedUseCase --> NotificationSender
+    NotifyItineraryCreatedUseCase --> UnitOfWork
+
+    class SqlAlchemyNotificationHistoryRepository {
+        <<Adaptador · PostgreSQL>>
+        INSERT ... ON CONFLICT DO NOTHING
+    }
+    class SimulatedEmailSender {
+        <<Adaptador · correo simulado>>
+    }
+    class SqlAlchemyUnitOfWork {
+        <<Adaptador · PostgreSQL>>
+    }
+    SqlAlchemyNotificationHistoryRepository ..|> NotificationHistoryRepository
+    SimulatedEmailSender ..|> NotificationSender
+    SqlAlchemyUnitOfWork ..|> UnitOfWork
+```
+
+`handler` y `parse_event` son funciones (no clases), pero cumplen el papel de adaptador de entrada: igual que una
+ruta FastAPI, reciben la entrada de la plataforma, la convierten al modelo de la aplicación y llaman al caso de uso
+(ADR-028). Un evento que no cumple el contrato produce `InvalidEventError` y la respuesta `REJECTED`; un fallo de
+PostgreSQL produce `TransientError`.
+
+El caso de uso es **idempotente**: `add_if_absent` inserta con `ON CONFLICT (event_id) DO NOTHING` y devuelve
+`False` si el evento ya estaba; en ese caso responde `ALREADY_PROCESSED` sin volver a enviar (ADR-030). La función
+tiene su **propia** clase `ItineraryCreatedEvent`: no importa código de Itinerary Service, solo comparten el contrato
+publicado en AsyncAPI.
+
+## 4. Diagrama relacional
+
+El sistema tiene **dos bases de datos PostgreSQL independientes**, cada una propiedad de un solo componente
+(ADR-004, ADR-016, ADR-029). Airport Service no tiene base relacional: su fuente de verdad es API Colombia y solo
+usa Redis como caché. Las tablas salen de las migraciones de Alembic (`services/itinerary-service/alembic/versions/`
+y `serverless/send-notification-function/alembic/versions/`); cada base tiene además la tabla `alembic_version`,
+que Alembic usa para saber qué migración está aplicada.
+
+### 4.1. `itinerary_db` (Itinerary Service, contenedor `itinerary-postgres`, puerto 5433)
+
+```mermaid
+erDiagram
+    itineraries {
+        uuid id PK
+        varchar traveler_name "NOT NULL, 255"
+        varchar traveler_email "NULL, 255"
+        integer departure_airport_id "NOT NULL, id del catálogo"
+        integer arrival_airport_id "NOT NULL, id del catálogo"
+        timestamptz travel_date "NOT NULL"
+        integer duration_minutes "NOT NULL"
+        timestamptz created_at "NOT NULL"
+        timestamptz updated_at "NOT NULL"
+    }
+    outbox_events {
+        uuid id PK "= event_id del evento"
+        varchar aggregate_type "NOT NULL, itinerary"
+        uuid aggregate_id "NOT NULL, id del itinerario"
+        varchar event_type "NOT NULL, itinerary.created"
+        integer event_version "NOT NULL, 1"
+        jsonb payload "NOT NULL, evento completo"
+        timestamptz occurred_at "NOT NULL"
+        timestamptz published_at "NULL mientras está pendiente"
+        integer attempts "NOT NULL, DEFAULT 0"
+        text last_error "NULL"
+        timestamptz failed_at "NULL, fallo permanente"
+        varchar traceparent "NULL, 55, contexto W3C"
+    }
+    itineraries |o..o| outbox_events : "aggregate_id (sin clave foránea)"
+```
+
+| Migración | Qué hace |
+|---|---|
+| `a3f1e2b4c5d0` (Fase 3) | Crea `itineraries` |
+| `b7c2d9e1f4a6` (Fase 5) | Crea `outbox_events` y el índice parcial `ix_outbox_events_pending` |
+| `c4d8e2f6a9b1` (Fase 5) | Agrega `failed_at` y redefine el índice parcial (ADR-027) |
+| `e6f0a4b8c1d9` (Fase 9) | Agrega `traceparent` (ADR-037) |
+
+- **Índice parcial `ix_outbox_events_pending`** sobre `occurred_at`, solo con las filas
+  `published_at IS NULL AND failed_at IS NULL`: contiene únicamente los eventos pendientes, que son los que busca el
+  relay en orden de llegada. Los eventos publicados se conservan, pero no ocupan el índice.
+- **Sin clave foránea entre `outbox_events` y `itineraries`.** Cada itinerario creado tiene un evento
+  (`aggregate_id` = `itineraries.id`), pero la relación es lógica: al borrar un itinerario su evento se conserva,
+  porque el evento describe algo que ya ocurrió y puede estar pendiente de publicar.
+- **Los aeropuertos se referencian por id** (`departure_airport_id`, `arrival_airport_id`): el catálogo vive en otro
+  contexto (Airport Service), así que no hay tabla de aeropuertos ni clave foránea (CLAUDE.md, sección 8.1).
+
+### 4.2. `notification_db` (SendNotificationFunction, contenedor `notification-postgres`, puerto 5434)
+
+```mermaid
+erDiagram
+    notification_history {
+        uuid id PK
+        uuid event_id UK "NOT NULL, clave de idempotencia"
+        uuid itinerary_id "NOT NULL, id del itinerario"
+        varchar recipient "NULL si no hay correo, 255"
+        varchar channel "NOT NULL, simulated-email"
+        text message "NOT NULL"
+        varchar status "NOT NULL, SENT o SKIPPED"
+        text status_reason "NULL, motivo de SKIPPED"
+        varchar correlation_id "NULL, 255"
+        timestamptz processed_at "NOT NULL"
+    }
+```
+
+| Migración | Qué hace |
+|---|---|
+| `d1e5f7a3b9c2` (Fase 6) | Crea `notification_history` con sus dos restricciones |
+
+- **`uq_notification_history_event_id`** (único sobre `event_id`): es lo que hace idempotente a la función. Si el
+  mismo evento llega dos veces, el segundo `INSERT ... ON CONFLICT (event_id) DO NOTHING` no inserta nada (ADR-030).
+- **`ck_notification_history_status`**: `status IN ('SENT', 'SKIPPED')`.
+- **`itinerary_id` está en otra base** (`itinerary_db`): no puede haber clave foránea entre bases. La función solo
+  conoce lo que trae el evento.
+
+### 4.3. Referencias entre bases
+
+| Columna | Apunta a | Cómo se mantiene |
+|---|---|---|
+| `itineraries.departure_airport_id` / `arrival_airport_id` | Aeropuerto de API Colombia (Airport Service) | Itinerary Service lo valida por HTTP antes de guardar |
+| `outbox_events.aggregate_id` | `itineraries.id` (misma base) | Se escribe en la misma transacción que el itinerario |
+| `notification_history.itinerary_id` | `itineraries.id` (otra base) | Llega en el evento `ItineraryCreatedEvent` |
+| `notification_history.event_id` | `outbox_events.id` (otra base) | Es el mismo `event_id` del evento |
+| `notification_history.correlation_id` | El `X-Correlation-ID` de la solicitud original | Viaja en el evento |
+
+Ningún servicio lee ni escribe la base de otro (CLAUDE.md, sección 7.2): la única forma de que un dato pase de una
+base a la otra es el evento.
+
+## 5. Secuencia de creación de un itinerario
 
 ```mermaid
 sequenceDiagram
@@ -214,9 +795,9 @@ sequenceDiagram
     end
 ```
 
-**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados, y la función es idempotente con `event_id` (ADR-030). En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 a 8), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`. Los fallos del lado del consumidor (función o base de datos caídas, evento inválido, reprocesamiento de la DLQ) están en la sección 3.1.
+**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados, y la función es idempotente con `event_id` (ADR-030). En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 a 8), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`. Los fallos del lado del consumidor (función o base de datos caídas, evento inválido, reprocesamiento de la DLQ) están en la sección 5.1.
 
-## 3.1. Fallos en el consumidor: reintentos, DLQ y reprocesamiento (Fase 6)
+### 5.1. Fallos en el consumidor: reintentos, DLQ y reprocesamiento (Fase 6)
 
 ```mermaid
 sequenceDiagram
@@ -249,7 +830,7 @@ sequenceDiagram
     end
 ```
 
-## 3.2. Recorrido de una solicitud por el API Gateway (Fase 7)
+### 5.2. Recorrido de una solicitud por el API Gateway (Fase 7)
 
 ```mermaid
 flowchart TD
@@ -272,7 +853,7 @@ flowchart TD
 
 Los errores del gateway (404, 413, 429, 502 y 504) usan el formato único de errores y llevan el mismo `correlation_id` en el cuerpo y en el header. El gateway no reintenta: los reintentos están en los servicios (Fase 2) y reintentar un `POST` podría duplicar un itinerario (ADR-009).
 
-## 4. Flujo de resiliencia de Airport Service
+## 6. Flujo de resiliencia de Airport Service
 
 ```mermaid
 flowchart TD
@@ -293,7 +874,7 @@ flowchart TD
 
 Orden aceptado en la Fase 2 (ADR-014): caché → circuit breaker → retry con backoff → llamada con timeout → fallback. El circuit breaker envuelve al retry, así que una consulta cuenta como un solo fallo cuando se agotaron sus reintentos. Un 404 no se reintenta, no se guarda en caché, no abre el circuito ni activa el fallback.
 
-## 5. Despliegue con Docker Compose (Fase 10)
+## 7. Despliegue con Docker Compose (Fase 10)
 
 Cada caja es un servicio de `docker-compose.yml`; el puerto es el publicado en el equipo. Las bases de datos
 solo están en su red (`itinerary-data`, `notification-data`); todo lo demás comparte la red `default` (ADR-041).
@@ -375,9 +956,9 @@ flowchart LR
     P[prometheus] -->|iniciado| G[grafana]
 ```
 
-Hasta la Fase 9 cada contenedor se creaba con `docker run` y los procesos de Python se ejecutaban desde su entorno virtual, con el gateway llegando a ellos por `host.docker.internal`. Ese modo manual sigue documentado en el `README.md` raíz para desarrollar un componente con recarga automática.
+Hasta la Fase 9 cada contenedor se creaba con `docker run` y los procesos de Python se ejecutaban desde su entorno virtual, con el gateway llegando a ellos por `host.docker.internal`. Ese modo manual sigue documentado en [`07-ejecucion-manual.md`](07-ejecucion-manual.md) para desarrollar un componente con recarga automática.
 
-## 5.1. Flujo de datos de observabilidad (Fase 9)
+### 7.1. Flujo de datos de observabilidad (Fase 9)
 
 ```mermaid
 flowchart LR
@@ -426,7 +1007,7 @@ flowchart LR
 
 El `correlation_id` viaja en el header `X-Correlation-ID` desde el gateway hasta los logs del Outbox Relay y del Event Trigger, y queda guardado en `notification_history`. El `traceparent` W3C une los spans en una sola traza en Jaeger: el gateway lo inyecta, el Itinerary Service lo guarda en `outbox_events` (ADR-037) y el relay lo restaura al publicar en RabbitMQ.
 
-## 6. Consideraciones
+## 8. Consideraciones
 
 - Los diagramas representan el sistema implementado al cierre de la Fase 11. Si el código cambia, el diagrama afectado se actualiza en el mismo pull request.
 - Los nombres de endpoints, colas y contratos coinciden con la implementación; los contratos los verifican las pruebas de contrato (`docs/openapi/airport-service.json` y `docs/asyncapi/asyncapi.yaml`, ADR-042).
