@@ -1099,8 +1099,8 @@ pytest -v
       Gateway: **50 pasan, 3 omitidas** (smoke, sin el gateway real).
     - `docs/06` ampliado con ADR-036 (corrección) y ADR-040 (nuevo). `CLAUDE.md` sección 6, 7.5, 9.1 y 15
       actualizados. READMEs con nota sobre `libs/observability`.
-- **Fase 10 (Docker y Docker Compose):** completada y **fusionada en `main`** (PR #23, merge `58d16e6`). Etiqueta
-  `fase-10` pendiente. La rama `fase-10-docker-compose` se conserva como archivo de solo lectura. ADR-041 aceptada
+- **Fase 10 (Docker y Docker Compose):** completada y **fusionada en `main`** (PR #23, merge `58d16e6`) con la
+  **etiqueta `fase-10`** (creada en el cierre de la Fase 11). La rama `fase-10-docker-compose` se conserva como archivo de solo lectura. ADR-041 aceptada
   (sección 9.1).
   - Entrega **10A**: Dockerfiles de Airport Service, Itinerary Service (una imagen para la API, el relay y las
     migraciones), Event Trigger y `Dockerfile.migrations` de la función, con `Dockerfile.dockerignore` por imagen.
@@ -1136,9 +1136,11 @@ pytest -v
   `requirements-migrations.txt`, que siguen siendo los archivos que edita el equipo. El job "Docker Compose" ejecuta
   `python3 scripts/lock_requirements.py --check`. ADR-041 actualizada. La imagen de la función (`Dockerfile`, base de
   AWS Lambda) no tenía la alerta y no cambia.
-- **Fase 11 (Pruebas):** completada en la rama `fase-11-pruebas` (pendiente de PR y merge). ADR-042 aceptada
-  (sección 9.1). Antes de empezar: PR #25 (`fix/sonarcloud-require-hashes`) fusionado; SonarCloud en `main` con Quality
-  Gate OK, seguridad A y 0 vulnerabilidades. Etiqueta `fase-10` todavía pendiente.
+- **Fase 11 (Pruebas):** completada y **fusionada en `main`** (PR #26, merge `9261cc4`) con la **etiqueta `fase-11`**.
+  La rama `fase-11-pruebas` se conserva como archivo de solo lectura. ADR-042 aceptada (sección 9.1). Antes de empezar:
+  PR #25 (`fix/sonarcloud-require-hashes`) fusionado; SonarCloud en `main` con Quality Gate OK, seguridad A y 0
+  vulnerabilidades. La 11A cerró además el pendiente de que las pruebas de integración usaban y borraban las bases
+  reales (`itinerary_db`, `notification_db`).
   - Entrega **11A** (commit `381b1b9`): bases `itinerary_db_test` y `notification_db_test` creadas y migradas por las
     pruebas; la prueba del handler de Lambda apunta a la base de pruebas (antes usaba la real; ahora tarda 6 s en lugar
     de 91 s porque no intenta exportar trazas). `libs/observability`: 18 pruebas, `requirements-dev.txt`, job de CI.
@@ -1156,4 +1158,12 @@ pytest -v
   - Verificación (2026-11-18, Windows 11, sistema completo con el simulador): libs/observability 18, Airport 203,
     Itinerary 195, función 70, Event Trigger 86, gateway 53 y E2E 14: **639 pasan, 0 fallos, 0 omitidas, 0
     advertencias**. Sin servicios: Itinerary 170 pasan y 25 omitidas; función 64 pasan y 6 omitidas.
+- **Cierre de la Fase 11** (rama `docs/cierre-fase-11`, 2026-11-18):
+  - Etiquetas anotadas `fase-10` (sobre `58d16e6`) y `fase-11` (sobre `9261cc4`) creadas y subidas.
+  - Ramas auxiliares ya fusionadas borradas en GitHub: `docs/cierre-fase-9`, `fix/gateway-404-json`,
+    `fix/sonarcloud-dockerfiles` y `fix/sonarcloud-require-hashes`. Las ramas `fase-*` se conservan.
+  - Decisiones de la 9.3 resueltas: se mantiene la limitación de la IP de los servicios en el gateway con Compose
+    (ADR-041) y se borró `serverless/send-notification-function/.dockerignore` (sin efecto desde la Fase 9).
+    `GenerateItineraryReportFunction` no se implementa por alcance (ADR-043). La 9.3 queda solo con la protección
+    de `main`, que configura el dueño del repositorio en GitHub.
 - **Siguiente:** Fase 12 (Documentación y entrega).

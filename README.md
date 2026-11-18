@@ -112,8 +112,8 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 7 | API Gateway | Completada |
 | 8 | Frontend | Completada |
 | 9 | Observabilidad | Completada |
-| 10 | Docker y Docker Compose | Completada (rama `fase-10-docker-compose`) |
-| 11 | Pruebas | Completada (rama `fase-11-pruebas`) |
+| 10 | Docker y Docker Compose | Completada |
+| 11 | Pruebas | Completada |
 | 12 | Documentación y entrega | Pendiente |
 
 **Última fase completada:** Fase 11 — Pruebas. **Siguiente:** Fase 12 — Documentación y entrega.
@@ -735,7 +735,8 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | `fase-7-api-gateway` | Fase 7 — API Gateway con Nginx (enrutamiento, rate limiting, correlation ID, propagación de `Authorization`) | `fase-7` |
 | `fase-8-frontend` | Fase 8 — Frontend (mapa con Plotly JS, CRUD de itinerarios, estáticos servidos por Nginx) | `fase-8` |
 | `fase-9-observabilidad` | Fase 9 — Observabilidad (logs JSON, OpenTelemetry y Jaeger, Prometheus y Grafana, `libs/observability`) | `fase-9` |
-| `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` (al fusionar) |
+| `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` |
+| `fase-11-pruebas` | Fase 11 — Pruebas (bases de integración propias, contratos HTTP y de eventos, punta a punta sobre Docker Compose) | `fase-11` |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.
