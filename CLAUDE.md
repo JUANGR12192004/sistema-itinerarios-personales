@@ -1192,4 +1192,21 @@ pytest -v
     **50 pasan, 3 omitidas**; `docker compose build` de las seis imágenes, `docker compose config` (con y sin
     `docker-compose.e2e.yml`) y `nginx -t` correctos. Los entornos virtuales de este equipo estaban desactualizados
     (anteriores a la Fase 9) y se reinstalaron con `pip install -r`.
+  - Fusionada en `main` (PR #28, merge `d94a2e4`).
+- **Rama `docs/correcciones-documentacion`** (grupo A de texto y grupo B, solo documentación):
+  - AsyncAPI 1.2.0: header AMQP `traceparent` documentado como opcional (`event_version` sigue obligatorio); el
+    payload y la `event_version` del evento no cambian.
+  - README raíz: carácter de control (BEL) en `.venv\Scripts\activate` de las pruebas E2E. CLAUDE.md sección 6:
+    `pyyaml==6.0.3` (prueba de contrato de la función).
+  - ADR desactualizados: notas `*Actualización (Fase N, ADR-X):*` sin reescribir lo decidido (ADR-009, 016, 029,
+    034, 035, 036, 038 y 039); nombre `OTelContextFilter` corregido en ADR-040 y en esta sección.
+  - Documentos alineados con el código: imagen `nginx:1.30.6-alpine-otel` (README raíz y del gateway, fila de
+    ADR-009), `libs/observability` en lugar de `app/logging_config.py` y `app/tracing.py` (docs/02 y README de los
+    componentes), `notification-data` en Compose (fila de ADR-029, `.env.example` de la función), textos en futuro
+    o preliminares ya cumplidos (docs/01 a docs/05, README del gateway), 7.4 con `OutboxEventPublisher` y 10.1 con los
+    504 de Airport (ADR-014) e Itinerary (ADR-019).
+  - Se mantuvo sin cambios la lista de criterios de la Fase 0 en `docs/01` (sección 9): describe cómo se aprobó esa
+    fase. Los grupos C y D quedan para la Fase 12.
+  - Verificación: pruebas que comparan el AsyncAPI con el código (Itinerary 5, función 10, trigger 6) pasan; ningún
+    archivo del repositorio tiene caracteres de control.
 - **Siguiente:** Fase 12 (Documentación y entrega).
