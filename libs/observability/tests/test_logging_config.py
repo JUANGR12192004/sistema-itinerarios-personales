@@ -2,6 +2,7 @@
 
 import json
 import logging
+from io import StringIO
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
@@ -78,6 +79,30 @@ def test_el_filtro_otel_copia_trace_id_y_span_id_del_span_activo() -> None:
     assert record.trace_id == format(context.trace_id, "032x")
     assert record.span_id == format(context.span_id, "016x")
     assert len(record.trace_id) == 32 and len(record.span_id) == 16
+
+
+def test_un_log_dentro_de_un_span_sale_en_json_con_su_trace_id_y_span_id() -> None:
+    """Recorrido completo: filtros + formato en un handler, como los usa configure_logging."""
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(OTelContextFilter())
+    handler.addFilter(CorrelationIdFilter())
+    handler.setFormatter(AppJsonFormatter("servicio-prueba"))
+    logger = logging.getLogger("app.prueba.span")
+    logger.propagate = False
+    logger.addHandler(handler)
+    tracer = TracerProvider().get_tracer("prueba")
+
+    try:
+        with tracer.start_as_current_span("operacion") as span:
+            logger.warning("dentro del span")
+            context = span.get_span_context()
+    finally:
+        logger.removeHandler(handler)
+
+    data = json.loads(stream.getvalue())
+    assert data["trace_id"] == format(context.trace_id, "032x")
+    assert data["span_id"] == format(context.span_id, "016x")
 
 
 def test_configure_logging_escribe_json_en_el_logger_app(

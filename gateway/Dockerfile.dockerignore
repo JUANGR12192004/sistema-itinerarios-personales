@@ -1,8 +1,13 @@
-# Solo deja pasar lo necesario para la imagen del gateway.
+# Solo deja pasar lo necesario para la imagen del gateway (lista blanca).
 # Se aplica al construir con: docker build -f gateway/Dockerfile .
 # (BuildKit ≥ v23: .dockerignore junto al Dockerfile, no en el contexto raíz)
+#
+# Se nombra cada archivo o carpeta que copia el Dockerfile. Un patrón como "!gateway/"
+# volvería a incluir TODA la carpeta (gateway/.venv, tests/, .pytest_cache, .env).
+# Hoy BuildKit solo transfiere lo que nombran los COPY, así que no llegaba a la imagen;
+# la lista exacta evita que entre si cambia el Dockerfile o se construye sin BuildKit.
 *
-!gateway/
+!gateway/nginx.conf
 !gateway/templates/
 !gateway/templates/**
 !frontend/

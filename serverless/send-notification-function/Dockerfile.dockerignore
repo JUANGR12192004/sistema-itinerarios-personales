@@ -5,9 +5,14 @@
 # en la raíz del contexto o junto al Dockerfile con este nombre: el antiguo
 # serverless/send-notification-function/.dockerignore ya no se aplicaba, y el build enviaba
 # todo el repositorio (incluidos los .venv de cada componente). Este archivo lo corrige (Fase 10).
+#
+# De libs/observability solo pasa lo que pip necesita para instalar el paquete (pyproject.toml y
+# el código). El Dockerfile hace COPY libs/: con "!libs/observability/**" entraban en la imagen
+# también su .venv (unos 70 MB), tests/ y .pytest_cache (corregido en fix/limpieza-config).
 *
-!libs/observability/
-!libs/observability/**
+!libs/observability/pyproject.toml
+!libs/observability/observability/
+!libs/observability/observability/**
 !serverless/send-notification-function/requirements.txt
 !serverless/send-notification-function/app/
 !serverless/send-notification-function/app/**
