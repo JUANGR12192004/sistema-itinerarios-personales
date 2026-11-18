@@ -68,7 +68,8 @@ airport-service/
 ├── .env.example
 ├── pytest.ini
 ├── Dockerfile                   imagen del servicio (Fase 10)
-├── requirements-runtime.txt     dependencias de ejecución: las que instala la imagen
+├── requirements-runtime.txt     dependencias de ejecución (versiones directas que edita el equipo)
+├── requirements-lock.txt        las mismas + transitivas, con hashes: lo que instala la imagen
 └── requirements.txt             las de ejecución + libs/observability + pruebas (entorno virtual y CI)
 ```
 
@@ -120,7 +121,7 @@ Opcional: copiar `.env.example` como `.env` para cambiar la configuración
 (`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD, `cp .env.example .env` en zsh).
 
 `pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
-instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado. Las dependencias de ejecución están en `requirements-runtime.txt`, que `requirements.txt` incluye con `-r`; la imagen Docker instala solo ese archivo (Fase 10).
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado. Las dependencias de ejecución están en `requirements-runtime.txt`, que `requirements.txt` incluye con `-r`; la imagen Docker no lo instala directamente, sino `requirements-lock.txt`: todas las dependencias (también las transitivas) con versión exacta y hash SHA-256, instaladas con `pip install --require-hashes` (regla S8544 de SonarCloud). **Si cambias una versión en `requirements-runtime.txt`, regenera el lock** desde la raíz del repositorio, con Docker encendido: `python scripts/lock_requirements.py` (en macOS, `python3`); el job "Docker Compose" del CI falla si el lock quedó desactualizado.
 
 ### Redis (Fase 2)
 

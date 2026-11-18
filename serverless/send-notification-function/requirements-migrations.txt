@@ -1,7 +1,9 @@
 # Dependencias de la imagen de MIGRACIONES del historial (Dockerfile.migrations, Fase 10).
 # Las de la función (alembic/env.py importa su configuración y sus modelos) + Alembic.
-# Todas con versión fija (==): el Dockerfile las instala con "pip install --only-binary :all:"
-# (solo paquetes ya compilados, sin ejecutar scripts de instalación; reglas S8541 y S8544 de SonarCloud).
+# Todas con versión fija (==). El Dockerfile NO instala este archivo: instala requirements-lock.txt,
+# generado a partir de él con todas las dependencias (también las transitivas) y sus hashes.
+# Si cambias una versión aquí, regenera el lock desde la raíz: python scripts/lock_requirements.py
+# (regla S8544 de SonarCloud).
 -r requirements.txt
 
 # Migraciones del historial: se aplican aparte, no en cada invocación (ADR-029)

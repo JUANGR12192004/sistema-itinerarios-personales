@@ -1,6 +1,8 @@
 # Dependencias de EJECUCIÓN del Event Trigger: las que van dentro de la imagen Docker (Fase 10).
-# Todas con versión fija (==): el Dockerfile las instala con "pip install --only-binary :all:"
-# (solo paquetes ya compilados, sin ejecutar scripts de instalación; reglas S8541 y S8544 de SonarCloud).
+# Todas con versión fija (==). El Dockerfile NO instala este archivo: instala requirements-lock.txt,
+# generado a partir de él con todas las dependencias (también las transitivas) y sus hashes.
+# Si cambias una versión aquí, regenera el lock desde la raíz: python scripts/lock_requirements.py
+# (regla S8544 de SonarCloud).
 # Para el entorno virtual del equipo se usa requirements.txt, que incluye este archivo
 # más libs/observability y las herramientas de pruebas.
 
