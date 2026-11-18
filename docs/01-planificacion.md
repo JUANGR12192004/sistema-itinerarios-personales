@@ -6,7 +6,7 @@
 - **Nombre:** Sistema de Itinerarios Personales.
 - **Asignatura:** Arquitecturas de Software Emergentes.
 - **Tipo:** Proyecto académico de software distribuido.
-- **Estado:** Planificación y arquitectura.
+- **Estado:** Planificación y arquitectura (Fase 0, completada). Este documento conserva la planificación original; el estado actual del proyecto está en el `README.md` raíz y en la sección 15 de `CLAUDE.md`, y los cambios de diseño posteriores, en `06-decisiones-arquitectonicas.md`.
 - **Repositorio:** sistema-itinerarios-personales.
 
 ## 2. Problema y propósito
@@ -95,6 +95,8 @@ Los siguientes requisitos representan objetivos de diseño que deberán verifica
 - **Manejo de errores:** devolver respuestas HTTP apropiadas y registrar fallos.
 
 Los objetivos cuantitativos de rendimiento, disponibilidad y latencia se definirán cuando exista información suficiente para establecer valores medibles.
+
+*Actualización (cierre de la Fase 11):* no se fijaron valores objetivo. Desde la Fase 9 el sistema sí los puede medir: el dashboard de Grafana muestra la latencia p50/p95/p99 y las solicitudes por código de respuesta de cada servicio (ADR-038).
 
 ## 7. Restricciones de diseño
 

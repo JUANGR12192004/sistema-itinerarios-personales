@@ -474,9 +474,8 @@ app/
     airport_client/    → HttpAirportCatalogAdapter (llama a Airport Service)
     messaging/         → RabbitMQEventPublisher y topología de RabbitMQ (los usa el relay)
   api/                 → Rutas, esquemas Pydantic, manejador de errores, dependencias
-  logging_config.py    → Logs JSON estructurados (Fase 9)
-  tracing.py           → setup_tracing() con OpenTelemetry (Fase 9)
-  metrics.py           → Métricas Prometheus + middleware HTTP (Fase 9)
+  metrics.py           → Contador de negocio itineraries_created_total (Fase 9); las métricas HTTP,
+                         los logs JSON y las trazas vienen de libs/observability (ADR-040)
   main.py              → Creación de la app FastAPI
   outbox_relay.py      → Proceso del Outbox Relay (python -m app.outbox_relay)
 alembic/               → Migraciones de base de datos

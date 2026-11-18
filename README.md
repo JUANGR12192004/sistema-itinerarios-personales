@@ -43,7 +43,7 @@ La implementación se desarrolla progresivamente, siguiendo las fases definidas 
 | Persistencia | PostgreSQL (una base por servicio) |
 | ORM y migraciones | SQLAlchemy y Alembic |
 | Comunicación síncrona | HTTP / REST |
-| API Gateway | Nginx (imagen oficial `nginx:1.30.6-alpine`, ADR-009) |
+| API Gateway | Nginx (imagen oficial `nginx:1.30.6-alpine-otel`, con el módulo de OpenTelemetry; ADR-009 y ADR-036) |
 | Mensajería | RabbitMQ (pika) |
 | Caché | Redis |
 | Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
@@ -689,7 +689,7 @@ PowerShell y CMD:
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait
 cd tests\e2e
 py -3.12 -m venv .venv
-.venv\Scriptsctivate
+.venv\Scripts\activate
 pip install -r requirements.txt
 pytest -v
 ```

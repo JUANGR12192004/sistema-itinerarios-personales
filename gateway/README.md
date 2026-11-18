@@ -2,15 +2,16 @@
 
 Punto único de entrada del Sistema de Itinerarios Personales (Fase 7, [ADR-009](../docs/06-decisiones-arquitectonicas.md);
 Fase 8, [ADR-033](../docs/06-decisiones-arquitectonicas.md)).
-Es **Nginx** en Docker con la imagen oficial `nginx:1.30.6-alpine` (arm64 y amd64), una plantilla de configuración
-y los archivos estáticos del frontend (`frontend/`).
+Es **Nginx** en Docker con la imagen oficial `nginx:1.30.6-alpine-otel` (arm64 y amd64; incluye el módulo de
+OpenTelemetry desde la Fase 9, [ADR-036](../docs/06-decisiones-arquitectonicas.md)), un `nginx.conf` propio que carga
+ese módulo, una plantilla de configuración y los archivos estáticos del frontend (`frontend/`).
 
 El gateway **no tiene lógica de negocio**: solo enruta, reenvía headers, aplica timeouts, sirve el frontend
 y responde sus propios errores en el formato único del proyecto. Las reglas de negocio están en cada servicio.
 
 ```mermaid
 flowchart LR
-    C["Cliente<br/>(curl, Frontend en la Fase 8)"] -->|"HTTP :8000"| GW["API Gateway (Nginx)"]
+    C["Cliente<br/>(navegador con el frontend, curl)"] -->|"HTTP :8000"| GW["API Gateway (Nginx)"]
     GW -->|"/api/airports/... → /airports/..."| AS["Airport Service :8001"]
     GW -->|"/api/itineraries/... → /itineraries/..."| IS["Itinerary Service :8002"]
     IS -->|"HTTP interno (no pasa por el gateway)"| AS

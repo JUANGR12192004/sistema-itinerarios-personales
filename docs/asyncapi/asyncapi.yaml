@@ -11,7 +11,7 @@ asyncapi: 3.0.0
 
 info:
   title: Eventos de Itinerary Service
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Eventos de integración que Itinerary Service publica en RabbitMQ y que consume el
     sistema de notificaciones (Event Trigger + SendNotificationFunction).
@@ -25,6 +25,9 @@ info:
 
     Versión 1.1.0 de este documento: se completa la operación de recepción y se agrega
     el canal de la DLQ. El contrato del evento (versión 1) no cambia.
+
+    Versión 1.2.0 de este documento: se documenta el header AMQP `traceparent`, que se
+    envía desde la Fase 9 (ADR-035, ADR-037). El payload y la `event_version` no cambian.
 
 defaultContentType: application/json
 
@@ -176,10 +179,23 @@ components:
       headers:
         type: object
         description: Headers AMQP del mensaje.
+        required:
+          - event_version
         properties:
           event_version:
             type: integer
             const: 1
+          traceparent:
+            type: string
+            description: |
+              Contexto de traza W3C Trace Context (Fase 9, ADR-035 y ADR-037). El Outbox Relay
+              restaura la traza de la solicitud original (columna `traceparent` de la outbox) y la
+              instrumentación de pika lo agrega al publicar. El Event Trigger lo lee para continuar
+              la misma traza hasta la función. Es opcional: con las trazas desactivadas
+              (`OTEL_ENABLED=false`) no se envía, y el consumidor procesa el mensaje igual.
+            pattern: '^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+            examples:
+              - 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
       payload:
         $ref: '#/components/schemas/ItineraryCreatedEventPayload'
       examples:

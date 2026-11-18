@@ -269,6 +269,14 @@ Nginx cumple todos los requisitos de la fase con configuración declarativa. Su 
 - En zsh, las URL con `?` deben ir entre comillas en `curl` (si no, zsh intenta expandirlas como un patrón de archivos).
 - Si el nombre de un servicio resuelve a **varias direcciones**, Nginx reparte las solicitudes entre ellas y, con `max_fails=0` y `proxy_next_upstream off`, una dirección inalcanzable produce 502 en esa parte de las solicitudes. Se detectó en la 7B: en Docker Desktop, `--add-host=host.docker.internal:host-gateway` agrega también una IPv6 que la red de Docker no alcanza, y la mitad de las solicitudes daba 502. Por eso esa opción solo se usa en Linux. Hoy no afecta: sin esa opción, Docker Desktop resuelve `host.docker.internal` solo a IPv4, y en la Fase 10 los nombres de los contenedores resuelven a una sola IPv4. Si cambiara (por ejemplo, una red de Docker con IPv6), habría que revisar esos dos parámetros.
 
+### Actualizaciones
+
+El texto anterior es la decisión de la Fase 7. Cambios posteriores:
+
+- *Actualización (Fase 8, ADR-033):* `/` ya no es un texto: sirve el frontend (`location / { try_files ... }`) y una ruta inexistente responde 404 `ROUTE_NOT_FOUND` en JSON. El contexto de build pasa a la raíz del repositorio (`docker build -f gateway/Dockerfile .`) y el `Dockerfile` copia también `frontend/`. El frontend se sirve desde el mismo origen, así que sigue sin hacer falta CORS.
+- *Actualización (Fase 9, ADR-036):* la imagen base es **`nginx:1.30.6-alpine-otel`** (con `ngx_otel_module`) y el `Dockerfile` copia además un `gateway/nginx.conf` propio que carga el módulo.
+- *Actualización (Fase 10, ADR-041):* en Docker Compose las direcciones son los nombres de los contenedores (`airport-service:8001`, `itinerary-service:8002`). La resolución de nombres sigue siendo al arrancar: el gateway espera solo a que los contenedores existan (`service_started`), y si uno se recrea con otra IP hay que reiniciar el gateway (limitación mantenida en el cierre de la Fase 11, ADR-041).
+
 ## ADR-010 — Observabilidad
 
 **Estado:** Aceptada para el diseño.
@@ -464,6 +472,8 @@ Mantener contenedores independientes refuerza la propiedad exclusiva de los dato
 ### Consecuencias
 
 Hasta la Fase 10 cada servicio levanta su propio contenedor manualmente. El `docker-compose.yml` de la Fase 10 los declarará todos juntos.
+
+*Actualización (Fase 10, ADR-041):* `docker-compose.yml` declara `itinerary-postgres` y `notification-postgres`, cada uno con su volumen y en su propia red (`itinerary-data`, `notification-data`), a la que solo se conecta su servicio dueño. El modo manual con `docker run` se conserva para desarrollo.
 
 ## ADR-017 — travel_date con zona horaria
 
@@ -911,6 +921,8 @@ El historial de notificaciones necesita persistencia propia, separada de la base
 - Hay que aplicar la migración antes de la primera invocación. Si no se aplica, la función falla con un error que no es `TransientError` (ADR-028).
 - Hasta la Fase 10 el contenedor y la red se crean a mano.
 
+*Actualización (Fase 10, ADR-041):* en Docker Compose la migración corre como el contenedor de una sola ejecución `notification-migrations` (imagen `Dockerfile.migrations`, con Alembic; la imagen de la función sigue sin él), y la función y su base se conectan por la red `notification-data`, que reemplaza a `notification-net`. La red `notification-net` sigue existiendo solo en el modo manual de desarrollo.
+
 ## ADR-030 — Idempotencia y destinatario de la notificación (Fase 6)
 
 **Estado:** Aceptada (Fase 6, entrega 6A). Cambia los estados de `NotificationRecord` (sección 8.3 de `CLAUDE.md`).
@@ -1133,6 +1145,8 @@ Los logs de texto plano no se pueden filtrar ni agregar de forma programática. 
 - La función `configure_logging(log_level, service_name)` en `app/logging_config.py` configura el logger raíz `app` con los tres elementos anteriores y es idempotente (solo aplica si no hay handlers previos). Se llama desde el punto de ensamblaje de cada componente (`main.py` o el proceso).
 - Variable `LOG_LEVEL` (por defecto `INFO`).
 
+*Actualización (cierre de la Fase 9, ADR-040):* los `app/logging_config.py` de cada componente se reemplazaron por el módulo compartido `observability.logging_config` del paquete `libs/observability`; las funciones y los filtros son los mismos.
+
 ### Justificación
 
 JSON permite filtrar por `correlation_id` o `trace_id` sin expresiones regulares y es el formato que esperan las plataformas de observabilidad (Loki, CloudWatch, etc.). El patrón compartido entre componentes simplifica el mantenimiento y la explicación.
@@ -1156,6 +1170,8 @@ El sistema distribuye el procesamiento de una operación entre el gateway, dos s
 - La función `setup_tracing(service_name)` en `app/tracing.py` es idempotente y se llama desde el punto de ensamblaje de cada componente.
   - En modo **producción** (variable `OTEL_ENABLED` no es `"false"`): `OTLPSpanExporter` con `BatchSpanProcessor`, que envía los spans en lotes al backend de Jaeger por OTLP gRPC. El endpoint se configura con la variable estándar `OTEL_EXPORTER_OTLP_ENDPOINT` (por defecto `http://localhost:4317`).
   - En modo **pruebas**: `InMemorySpanExporter` con `SimpleSpanProcessor`. Las pruebas no necesitan Jaeger.
+
+*Actualización (cierre de la Fase 9, ADR-040):* `setup_tracing` vive en el módulo compartido `observability.tracing` de `libs/observability` (en lugar de un `app/tracing.py` por componente) y recibe la lista de instrumentadores que usa cada componente. La instrumentación no es un solo paquete `opentelemetry-instrumentation`: cada componente instala solo los que necesita, todos en la versión `0.66b2` (`-fastapi`, `-httpx`, `-sqlalchemy`, `-pika` y `-logging`), además de `opentelemetry-exporter-otlp-proto-grpc==1.45.2`.
 - Cada componente instrumenta sus propias dependencias:
 
 | Componente | Librerías instrumentadas |
@@ -1208,6 +1224,8 @@ Reutiliza la imagen oficial sin necesidad de compilar Nginx con el módulo. El t
 - La imagen `nginx:1.30.6-alpine-otel` puede cambiar de versión de Nginx en el futuro. Hay que verificar la compatibilidad del módulo al actualizar.
 - En la Fase 10 (Docker Compose), `OTEL_EXPORTER_OTLP_HOST` cambiará por el nombre del contenedor de Jaeger.
 
+*Actualización (Fase 10, ADR-041):* hecho. En `docker-compose.yml` el gateway usa `OTEL_EXPORTER_OTLP_HOST: jaeger`; `host.docker.internal` queda como valor por defecto del `Dockerfile` para el modo manual.
+
 ## ADR-037 — Columna `traceparent` en `outbox_events` para propagar el contexto de traza (Fase 9)
 
 **Estado:** Aceptada (Fase 9, entrega 9B).
@@ -1258,6 +1276,8 @@ La métrica de negocio `itineraries_created_total` responde la pregunta "¿funci
 ### Consecuencias
 
 - Los puertos 9101 y 9102 deben estar accesibles desde el contenedor de Prometheus. En la Fase 10 (Docker Compose) se usarán los nombres de los contenedores en lugar de `host.docker.internal`.
+
+*Actualización (Fase 10, ADR-041):* hecho. En Docker Compose, Prometheus usa `observability/prometheus/prometheus.compose.yml`, con los destinos por nombre de servicio (`airport-service:8001`, `itinerary-service:8002`, `outbox-relay:9101`, `event-trigger:9102`). `prometheus.yml` se conserva para el modo manual con `host.docker.internal`. Grafana monta los dashboards en `/var/lib/grafana/dashboards` y su datasource apunta a `prometheus:9090`.
 - En las pruebas, el `CollectorRegistry` global de Prometheus acumula métricas entre tests si no se limpia. Los tests que verifican métricas usan un registry propio.
 
 ## ADR-039 — Jaeger como backend de trazas (Fase 9)
@@ -1283,6 +1303,8 @@ Jaeger 2.x acepta el protocolo OTLP directamente, sin el Jaeger Agent ni el Coll
 ### Consecuencias
 
 - En la Fase 10 (Docker Compose), el endpoint de Jaeger cambiará de `host.docker.internal:4317` a `jaeger:4317` (nombre del contenedor dentro de la red de Docker).
+
+  *Actualización (Fase 10, ADR-041):* hecho. Los cuatro procesos Python reciben `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317` y el gateway `OTEL_EXPORTER_OTLP_HOST=jaeger`, sin cambios de código.
 - El almacenamiento en memoria no es adecuado para producción: habría que configurar un backend persistente (Elasticsearch, Cassandra o el almacenamiento de Jaeger en S3).
 
 ---
@@ -1298,7 +1320,7 @@ Al terminar la Fase 9, los cuatro componentes Python (Airport Service, Itinerary
 ### Decisión
 
 - Se crea el paquete Python **`libs/observability/`** (patrón _Microservice Chassis_) con tres módulos:
-  - `observability.logging_config`: `configure_logging`, `set_correlation_id`, `AppJsonFormatter`, `CorrelationIdFilter`, `OtelContextFilter`.
+  - `observability.logging_config`: `configure_logging`, `set_correlation_id`, `AppJsonFormatter`, `CorrelationIdFilter`, `OTelContextFilter`.
   - `observability.tracing`: `setup_tracing(service_name, exporter=None, instrumentors=None, batch=True)`. El parámetro `instrumentors` acepta `["fastapi", "httpx", "sqlalchemy", "pika"]`; cada componente declara solo los que usa. `batch=False` fuerza `SimpleSpanProcessor` (necesario en la Lambda, que puede suspenderse antes de que el `BatchSpanProcessor` vacíe su cola).
   - `observability.metrics`: `metrics_middleware`, `metrics_app`, `HTTP_REQUESTS`, `HTTP_DURATION` (compartidos por Airport e Itinerary Service). Los contadores de negocio propios de cada componente siguen en su propio `app/metrics.py`.
 - Se elimina `app/logging_config.py` y `app/tracing.py` de los cuatro componentes. Las importaciones pasan de `from app.logging_config` a `from observability.logging_config`.

@@ -7,6 +7,8 @@ Definir los conceptos principales del negocio, sus responsabilidades y los lími
 
 Esta definición es preliminar y deberá validarse durante la implementación.
 
+*Actualización (cierre de la Fase 11):* el modelo se validó al implementar las Fases 1 a 11. Los ajustes respecto a esta definición inicial están registrados como decisiones: reglas de negocio del itinerario (ADR-015), `travel_date` con zona horaria (ADR-017), `traveler_email` opcional (ADR-018) y estados `SENT`/`SKIPPED` de `NotificationRecord` (ADR-030). La sección 8 de `CLAUDE.md` resume el modelo vigente.
+
 ## 2. Dominio principal
 
 El dominio principal es la planificación y gestión de itinerarios de viaje.

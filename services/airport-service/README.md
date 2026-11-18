@@ -61,8 +61,8 @@ airport-service/
 │   │   └── cache/               almacén Redis, serialización, estado X-Cache y CachedAirportProvider
 │   ├── api/                     rutas, esquemas, errores, dependencias, correlation ID y header X-Cache
 │   ├── config.py                configuración por variables de entorno
-│   ├── logging_config.py        logs en consola
-│   └── main.py                  ensamblaje de la aplicación (composition root)
+│   └── main.py                  ensamblaje de la aplicación (composition root); logs JSON, trazas y
+│                                métricas HTTP vienen del paquete compartido libs/observability (ADR-040)
 ├── tests/                       pruebas de dominio, Adapter, resiliencia, caché, casos de uso y API
 │   └── integration/             escenarios de la Fase 2 con la cadena completa
 ├── .env.example
