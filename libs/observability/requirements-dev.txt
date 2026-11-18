@@ -1,0 +1,20 @@
+# Entorno de PRUEBAS del paquete compartido libs/observability (Fase 11).
+# El paquete no declara dependencias (pyproject.toml): las aporta el entorno de cada componente.
+# Aquí se instalan las mismas versiones fijas que usan Airport e Itinerary Service, para probar
+# el paquete solo, sin ningún servicio.
+-e .
+
+# Logs JSON (ADR-034)
+python-json-logger==4.2.0
+
+# Trazas (ADR-035): SDK, exportador OTLP (solo se construye, no se conecta) e instrumentación de logs
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
+opentelemetry-instrumentation-logging==0.66b2
+
+# Métricas HTTP (ADR-038): middleware FastAPI y TestClient (usa httpx)
+prometheus-client==0.21.1
+fastapi==0.162.0
+httpx==0.28.1
+
+pytest==9.1.1

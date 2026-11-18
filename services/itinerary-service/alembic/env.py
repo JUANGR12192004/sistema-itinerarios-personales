@@ -8,6 +8,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine import Connection
 
 from app.config import get_settings
 from app.infrastructure.persistence.models import Base
@@ -37,19 +38,32 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Aplica las migraciones conectándose a la base de datos."""
+    """Aplica las migraciones conectándose a la base de datos.
+
+    Si quien invoca a Alembic ya trae una conexión abierta (config.attributes["connection"]),
+    se usa esa: así las pruebas de integración migran su propia base de pruebas (Fase 11).
+    """
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        _run_migrations(connection)
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        _run_migrations(connection)
+
+
+def _run_migrations(connection: Connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():

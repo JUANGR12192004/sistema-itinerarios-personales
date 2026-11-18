@@ -4,6 +4,7 @@
 # Hay un job por servicio o componente (Airport Service, Itinerary Service, desde la
 # Fase 6 SendNotificationFunction y el Event Trigger, y desde la Fase 7 el API Gateway).
 # Desde la Fase 10, el job "Docker Compose" levanta el sistema completo y lo comprueba.
+# Desde la Fase 11, el job "libs/observability" prueba el paquete compartido por separado.
 # Para agregar uno en una fase siguiente, copiar el job "airport-service" y cambiar su
 # nombre y la carpeta (en working-directory y en cache-dependency-path).
 
@@ -85,6 +86,36 @@ jobs:
       - name: Ejecutar pruebas
         env:
           DATABASE_URL: postgresql+psycopg://localhost:5433/itinerary_db
+        run: pytest -v
+
+  observability:
+    name: libs/observability
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: libs/observability
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            libs/observability/requirements-dev.txt
+            libs/observability/pyproject.toml
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Paquete compartido (ADR-040): se prueba solo, sin ningún servicio (Fase 11)
+      - name: Ejecutar pruebas
         run: pytest -v
 
   send-notification-function:

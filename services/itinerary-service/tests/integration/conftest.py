@@ -1,6 +1,7 @@
 """Fixtures de infraestructura para las pruebas de integración.
 
-pg_engine                  — engine de sesión; yield None si PostgreSQL no está disponible.
+pg_engine                  — engine de la base de PRUEBAS (itinerary_db_test, creada y migrada al
+                             empezar); yield None si PostgreSQL no está disponible.
 db_session                 — sesión por prueba con limpieza de itineraries y outbox_events.
 rabbitmq_parameters        — parámetros de conexión; SKIPPED (una sola vez) si RabbitMQ no responde.
 rabbitmq_channel           — canal real para cada prueba.
@@ -18,10 +19,9 @@ pytest, sus colas se vacían antes y después de cada prueba, y se borra al term
 pueden correr durante una demostración sin vaciar ni desenlazar las colas reales. Se declara una
 sola vez porque en RabbitMQ declarar y borrar colas tarda.
 
-LIMITACIÓN (base de datos, pendiente en CLAUDE.md): db_session usa la base real itinerary_db y
-BORRA todas las filas de itineraries y outbox_events antes y después de cada prueba. Además, si el
-Outbox Relay real está encendido, puede publicar en la cola real los eventos que crean las pruebas.
-Antes de correrlas: detener el Outbox Relay y no tener datos de demostración que se quieran conservar.
+AISLAMIENTO DE POSTGRESQL (Fase 11): las pruebas NO usan la base real itinerary_db, sino
+itinerary_db_test en el mismo servidor (ver tests/integration/database_setup.py). Vaciar sus tablas no
+borra datos de una demostración, y el Outbox Relay real no ve los eventos que crean las pruebas.
 """
 
 from dataclasses import dataclass
@@ -31,7 +31,7 @@ import pika
 import pytest
 from pika.adapters.blocking_connection import BlockingChannel
 from pika.exceptions import AMQPError
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -41,34 +41,23 @@ from app.infrastructure.messaging.topology import (
     ROUTING_KEY_ITINERARY_CREATED,
     declare_exchange,
 )
+from tests.integration.database_setup import prepare_test_database
 
 # Espera máxima (segundos) para conectar y operar con RabbitMQ en las pruebas
 RABBITMQ_TIMEOUT_SECONDS = 2.0
 
-# Espera máxima (segundos) para comprobar si PostgreSQL está disponible. Sin este límite,
-# psycopg espera hasta 130 s por cada dirección de localhost (::1 y 127.0.0.1 en Windows).
-CONNECT_TIMEOUT_SECONDS = 2
-
 
 @pytest.fixture(scope="session")
 def pg_engine():
-    """Crea el engine una sola vez por sesión de pytest.
+    """Prepara la base de pruebas una sola vez por sesión de pytest.
 
     Si PostgreSQL no responde, devuelve None; db_session se encarga de saltar
     cada prueba individualmente para que aparezcan como SKIPPED en el reporte.
     """
-    settings = get_settings()
-    try:
-        engine = create_engine(
-            settings.database_url,
-            connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS},
-        )
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        yield engine
+    engine = prepare_test_database(get_settings().database_url)
+    yield engine
+    if engine is not None:
         engine.dispose()
-    except Exception:
-        yield None
 
 
 @pytest.fixture
@@ -79,8 +68,7 @@ def db_session(pg_engine):
     SKIPPED, no como FAILED, para que el CI siga en verde sin base de datos.
 
     Limpieza: elimina todos los registros de itineraries y outbox_events antes y
-    después de cada prueba para garantizar aislamiento entre tests. Requiere las
-    migraciones aplicadas (`alembic upgrade head`).
+    después de cada prueba para garantizar aislamiento entre tests (en la base de pruebas).
     """
     if pg_engine is None:
         pytest.skip("PostgreSQL no disponible — omitiendo prueba de integración")

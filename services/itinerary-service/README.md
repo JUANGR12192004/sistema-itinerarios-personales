@@ -251,22 +251,22 @@ pytest -v
 # Solo pruebas unitarias y de API (sin PostgreSQL ni RabbitMQ)
 pytest -v tests\domain tests\application tests\infrastructure tests\api tests\test_config.py tests\test_outbox_relay_process.py
 
-# Solo pruebas de integración (requieren PostgreSQL con `alembic upgrade head`, y RabbitMQ)
+# Solo pruebas de integración (requieren PostgreSQL y RabbitMQ; la base de pruebas se migra sola)
 pytest -v tests\integration
 ```
 
-Resultado esperado: **169 passed** con PostgreSQL y RabbitMQ; **144 passed, 25 skipped** sin ellos.
+Resultado esperado: **188 passed** con PostgreSQL y RabbitMQ; **163 passed, 25 skipped** sin ellos.
 
 **RabbitMQ:** las pruebas de integración **no tocan** la cola real `notification.itinerary-created` ni su DLQ.
 Usan una topología propia con nombres únicos (`test-<id>.itinerary.events`, `test-<id>.notification.itinerary-created`,
 etc.), declarada una vez por sesión de pytest y **borrada al terminar** (mismo criterio que las pruebas del Event
 Trigger). Se pueden correr durante una demostración sin perder los mensajes que esperan en la cola o en la DLQ.
 
-> **Limitación (base de datos):** las pruebas de integración usan la base real `itinerary_db` y **borran** las filas
-> de `itineraries` y `outbox_events` antes y después de cada prueba. Además, si el **Outbox Relay** está encendido,
-> puede publicar en la cola real los eventos que crean las pruebas. Antes de correrlas, detén el Outbox Relay y no
-> las ejecutes contra datos de demostración que quieras conservar. Está registrado como pendiente en `CLAUDE.md`
-> (sección 9.3).
+**PostgreSQL (Fase 11):** las pruebas de integración **no tocan** la base real `itinerary_db`. Al empezar, crean
+(si no existe) la base `itinerary_db_test` en el mismo servidor y le aplican las migraciones con Alembic
+(`tests/integration/database_setup.py`); después vacían sus tablas antes y después de cada prueba. Se pueden correr
+durante una demostración, con el Outbox Relay encendido: el relay lee la base real y nunca ve los eventos de las
+pruebas. El usuario de `DATABASE_URL` necesita permiso para crear bases (el de `itinerary-postgres` lo tiene).
 
 ## Endpoints
 

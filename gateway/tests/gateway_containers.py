@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,11 +19,6 @@ REPO_DIR = GATEWAY_DIR.parent
 TEST_IMAGE = "api-gateway:test"
 CONTAINER_PREFIX = "api-gateway-test-"
 
-# En Docker Desktop (macOS y Windows) host.docker.internal ya existe y apunta solo a una IPv4.
-# En Linux (el CI) hay que agregarlo: "host-gateway" es la IP del equipo vista desde el contenedor.
-# NO se agrega en Docker Desktop: allí "host-gateway" añade también una IPv6 que la red de Docker
-# no puede alcanzar, y Nginx repartiría las solicitudes entre las dos (la mitad con 502).
-HOST_ARGS = ["--add-host=host.docker.internal:host-gateway"] if sys.platform.startswith("linux") else []
 
 DOCKER_TIMEOUT_SECONDS = 30
 BUILD_TIMEOUT_SECONDS = 300  # la primera vez descarga la imagen de Nginx
@@ -71,9 +67,28 @@ def build_test_image() -> str:
     return TEST_IMAGE
 
 
+@cache
+def host_args(image: str) -> tuple[str, ...]:
+    """Argumentos de `docker run` para que host.docker.internal sea SOLO una IPv4 del equipo.
+
+    Nginx convierte un nombre con varias direcciones en varios servidores del upstream y los
+    alterna; con proxy_next_upstream off (ADR-009), una dirección inalcanzable da 502 en la mitad
+    de las solicitudes. Por eso:
+    - Linux (el CI): host.docker.internal no existe; "host-gateway" es la IP del equipo.
+    - Docker Desktop (macOS y Windows): el nombre ya existe, pero en algunas instalaciones
+      (comprobado en Windows 11, Fase 11) resuelve también a una IPv6 que no llega al equipo.
+      Se pregunta su IPv4 a un contenedor y se fija con --add-host.
+    """
+    if sys.platform.startswith("linux"):
+        return ("--add-host=host.docker.internal:host-gateway",)
+    result = docker("run", "--rm", "--entrypoint", "getent", image, "ahostsv4", "host.docker.internal")
+    addresses = result.stdout.split()
+    return (f"--add-host=host.docker.internal:{addresses[0]}",) if addresses else ()
+
+
 def run_nginx_command(image: str, *nginx_args: str) -> subprocess.CompletedProcess[str]:
     """Ejecuta `nginx <args>` en un contenedor temporal (la imagen aplica la plantilla antes)."""
-    return docker("run", "--rm", *HOST_ARGS, image, "nginx", *nginx_args)
+    return docker("run", "--rm", *host_args(image), image, "nginx", *nginx_args)
 
 
 def start_gateway(image: str, environment: dict[str, str]) -> RunningGateway:
@@ -81,7 +96,7 @@ def start_gateway(image: str, environment: dict[str, str]) -> RunningGateway:
     name = f"{CONTAINER_PREFIX}{uuid4().hex[:8]}"
     env_args = [arg for key, value in environment.items() for arg in ("-e", f"{key}={value}")]
     # "127.0.0.1::8000": Docker elige un puerto libre del equipo, solo accesible desde el equipo.
-    result = docker("run", "-d", "--name", name, "-p", "127.0.0.1::8000", *HOST_ARGS, *env_args, image)
+    result = docker("run", "-d", "--name", name, "-p", "127.0.0.1::8000", *host_args(image), *env_args, image)
     if result.returncode != 0:
         raise RuntimeError(f"No se pudo arrancar el gateway de prueba:\n{result.stderr}")
 

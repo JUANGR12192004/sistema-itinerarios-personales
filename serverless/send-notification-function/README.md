@@ -211,8 +211,9 @@ Con el entorno virtual activado (igual en PowerShell, CMD y zsh):
 pytest -v
 ```
 
-Resultado esperado: **60 passed** con `notification-postgres` y la migración aplicada; **54 passed, 6 skipped** sin
-él. Las pruebas de integración **borran** las filas de `notification_history`.
+Resultado esperado: **60 passed** con `notification-postgres`; **54 passed, 6 skipped** sin él. Las pruebas de
+integración **no tocan** la base real `notification_db` (Fase 11): crean y migran `notification_db_test` en el mismo
+servidor (`tests/integration/database_setup.py`) y solo vacían `notification_history` en esa base.
 
 ## Posibles errores
 
