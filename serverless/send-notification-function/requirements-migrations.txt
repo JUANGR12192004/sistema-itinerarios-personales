@@ -1,0 +1,8 @@
+# Dependencias de la imagen de MIGRACIONES del historial (Dockerfile.migrations, Fase 10).
+# Las de la función (alembic/env.py importa su configuración y sus modelos) + Alembic.
+# Todas con versión fija (==): el Dockerfile las instala con "pip install --only-binary :all:"
+# (solo paquetes ya compilados, sin ejecutar scripts de instalación; reglas S8541 y S8544 de SonarCloud).
+-r requirements.txt
+
+# Migraciones del historial: se aplican aparte, no en cada invocación (ADR-029)
+alembic==1.16.1

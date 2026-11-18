@@ -10,22 +10,26 @@ FROM python:3.12-slim
 
 # PYTHONDONTWRITEBYTECODE: no crear __pycache__ (el usuario del contenedor no puede escribir en /app).
 # PYTHONUNBUFFERED: los logs JSON salen al instante en `docker compose logs`.
+# PYTHONPATH: el paquete compartido libs/observability (ADR-040) es código Python puro y sin
+# dependencias propias, así que basta con copiarlo y ponerlo en el PYTHONPATH: no se instala con pip.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/libs/observability
 
-# Se reproduce la estructura del repositorio para que la línea
-# "-e ../../libs/observability" de requirements.txt funcione sin cambios:
-#   /app/libs/observability
-#   /app/services/airport-service   ← directorio de trabajo
 WORKDIR /app/services/airport-service
 
 # Primero las dependencias y después el código: si solo cambia app/, Docker reutiliza
 # la capa de "pip install" (caché de capas) y el build tarda segundos.
-COPY libs/observability /app/libs/observability
-COPY services/airport-service/requirements.txt .
-RUN pip install -r requirements.txt
+# - requirements-runtime.txt: solo dependencias de ejecución, todas con versión fija (sin pytest
+#   ni respx, que están en requirements.txt para el entorno virtual).
+# - --only-binary :all: solo acepta paquetes ya compilados (wheels): pip no ejecuta scripts de
+#   instalación de terceros durante el build (reglas S8541 y S8544 de SonarCloud).
+COPY services/airport-service/requirements-runtime.txt .
+RUN pip install --only-binary :all: -r requirements-runtime.txt
+
+COPY libs/observability/observability /app/libs/observability/observability
 
 COPY services/airport-service/app ./app
 

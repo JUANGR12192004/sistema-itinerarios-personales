@@ -67,7 +67,9 @@ airport-service/
 │   └── integration/             escenarios de la Fase 2 con la cadena completa
 ├── .env.example
 ├── pytest.ini
-└── requirements.txt
+├── Dockerfile                   imagen del servicio (Fase 10)
+├── requirements-runtime.txt     dependencias de ejecución: las que instala la imagen
+└── requirements.txt             las de ejecución + libs/observability + pruebas (entorno virtual y CI)
 ```
 
 ## Requisitos
@@ -118,7 +120,7 @@ Opcional: copiar `.env.example` como `.env` para cambiar la configuración
 (`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD, `cp .env.example .env` en zsh).
 
 `pip install -r requirements.txt` instala también el paquete compartido `libs/observability` como
-instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado.
+instalación editable (línea `-e ../../libs/observability`). No hace falta instalarlo por separado. Las dependencias de ejecución están en `requirements-runtime.txt`, que `requirements.txt` incluye con `-r`; la imagen Docker instala solo ese archivo (Fase 10).
 
 ### Redis (Fase 2)
 
