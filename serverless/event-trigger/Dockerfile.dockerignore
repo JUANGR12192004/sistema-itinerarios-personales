@@ -1,0 +1,12 @@
+# Solo deja pasar lo necesario para la imagen del Event Trigger.
+# Se aplica al construir con: docker build -f serverless/event-trigger/Dockerfile .
+*
+!libs/observability/
+!libs/observability/**
+!serverless/event-trigger/requirements.txt
+!serverless/event-trigger/app/
+!serverless/event-trigger/app/**
+
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info

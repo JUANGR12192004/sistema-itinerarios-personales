@@ -3,6 +3,7 @@
 # Se ejecuta en cada pull request hacia main y en cada push a main.
 # Hay un job por servicio o componente (Airport Service, Itinerary Service, desde la
 # Fase 6 SendNotificationFunction y el Event Trigger, y desde la Fase 7 el API Gateway).
+# Desde la Fase 10, el job "Docker Compose" levanta el sistema completo y lo comprueba.
 # Para agregar uno en una fase siguiente, copiar el job "airport-service" y cambiar su
 # nombre y la carpeta (en working-directory y en cache-dependency-path).
 
@@ -189,3 +190,85 @@ jobs:
       # gateway contra servidores eco. Las pruebas smoke (gateway real) quedan SKIPPED.
       - name: Ejecutar pruebas
         run: pytest -v
+
+  docker-compose:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    # Construir las seis imágenes y levantar 15 contenedores tarda unos minutos
+    timeout-minutes: 25
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      # Detecta errores de sintaxis, anclas mal escritas o referencias a servicios inexistentes
+      - name: Validar docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Construir las imágenes
+        run: docker compose build
+
+      - name: Levantar el sistema
+        run: docker compose up -d
+
+      # Espera hasta 3 minutos a que el gateway llegue a Itinerary Service con la base migrada.
+      # GET /api/itineraries responde 200 solo si funcionan el gateway, la API, PostgreSQL y la migración.
+      - name: Esperar a que el sistema esté listo
+        run: |
+          for url in http://localhost:8000/health http://localhost:8001/health http://localhost:8000/api/itineraries; do
+            echo "Esperando $url"
+            for i in $(seq 1 60); do
+              if curl -fsS -o /dev/null "$url"; then echo "  listo"; break; fi
+              if [ "$i" -eq 60 ]; then echo "  no respondió a tiempo"; exit 1; fi
+              sleep 3
+            done
+          done
+
+      # No se crea un itinerario real: validaría los aeropuertos contra API Colombia (internet),
+      # y una falla externa haría fallar el CI sin que el sistema tenga un error.
+      - name: Comprobar migraciones, colas, métricas y aislamiento
+        run: |
+          set -euo pipefail
+
+          echo "1. Las dos migraciones terminaron con código 0"
+          for svc in itinerary-migrations notification-migrations; do
+            code=$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose ps -aq "$svc")")
+            echo "  $svc: $code"; test "$code" = "0"
+          done
+
+          echo "2. Las tablas existen"
+          docker compose exec -T itinerary-postgres psql -U itinerary -d itinerary_db -tAc "SELECT count(*) FROM outbox_events"
+          docker compose exec -T notification-postgres psql -U notification -d notification_db -tAc "SELECT count(*) FROM notification_history"
+
+          echo "3. El Event Trigger declaró su cola y su DLQ (ADR-032)"
+          for i in $(seq 1 30); do
+            queues=$(docker compose exec -T rabbitmq rabbitmqctl list_queues -q name)
+            if echo "$queues" | grep -qx "notification.itinerary-created" && echo "$queues" | grep -qx "notification.itinerary-created.dlq"; then break; fi
+            if [ "$i" -eq 30 ]; then echo "$queues"; exit 1; fi
+            sleep 2
+          done
+          echo "  colas declaradas"
+
+          echo "4. Métricas del relay (9101) y del trigger (9102)"
+          curl -fsS http://localhost:9101/ | grep -q outbox_relay_cycles_total
+          curl -fsS http://localhost:9102/ | grep -q notifications_dispatched_total
+
+          echo "5. Un error de validación de Itinerary Service pasa por el gateway sin cambios (422)"
+          status=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -d '{}')
+          echo "  $status"; test "$status" = "422"
+
+          echo "6. Airport Service no ve la base de Itinerary Service (redes separadas)"
+          if docker compose exec -T airport-service python -c "import socket; socket.create_connection(('itinerary-postgres', 5432), 2)"; then
+            echo "  ERROR: airport-service llegó a itinerary-postgres"; exit 1
+          fi
+          echo "  aislada"
+
+      - name: Mostrar el estado y los logs si algo falló
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 80
+
+      - name: Detener y borrar los contenedores y volúmenes
+        if: always()
+        run: docker compose down -v

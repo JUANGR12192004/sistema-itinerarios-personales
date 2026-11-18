@@ -1,0 +1,38 @@
+# Imagen de las MIGRACIONES del historial de notificaciones (Fase 10).
+#
+# ¿Por qué una imagen aparte? La imagen de la función (Dockerfile) no incluye Alembic a propósito
+# (ADR-029): las migraciones no se aplican en cada invocación, sino una vez, como un paso del
+# despliegue. En Docker Compose este paso es un contenedor de una sola ejecución
+# (notification-migrations) que aplica "alembic upgrade head" y termina; la función espera a
+# que termine bien antes de arrancar.
+#
+# Es lo mismo que hace el equipo desde el entorno virtual (README, paso "Migraciones"), pero dentro
+# de un contenedor: no hace falta tener Python instalado para levantar el sistema.
+#
+# El contexto de build es la RAÍZ del repositorio (requirements-dev.txt usa libs/observability):
+#   docker build -t notification-migrations -f serverless/send-notification-function/Dockerfile.migrations .
+# El .dockerignore asociado es serverless/send-notification-function/Dockerfile.migrations.dockerignore.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Misma estructura del repositorio, para que "-e ../../libs/observability" funcione sin cambios.
+WORKDIR /app/serverless/send-notification-function
+
+# requirements-dev.txt = dependencias de la función + Alembic (con su versión fijada, sin duplicarla aquí)
+COPY libs/observability /app/libs/observability
+COPY serverless/send-notification-function/requirements.txt serverless/send-notification-function/requirements-dev.txt ./
+RUN pip install -r requirements-dev.txt
+
+# alembic/env.py importa app.config (DATABASE_URL) y los modelos de app.infrastructure.persistence
+COPY serverless/send-notification-function/app ./app
+COPY serverless/send-notification-function/alembic ./alembic
+COPY serverless/send-notification-function/alembic.ini .
+
+RUN useradd --system --no-create-home appuser
+USER appuser
+
+CMD ["alembic", "upgrade", "head"]

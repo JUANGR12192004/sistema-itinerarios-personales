@@ -216,11 +216,30 @@ Los cuatro componentes exponen métricas en formato Prometheus (`prometheus-clie
 
 **Prometheus** (puerto 9090) consulta los cuatro endpoints cada 15 segundos. **Grafana** (puerto 3000) muestra un dashboard preconfigurado con cuatro paneles: negocio (itinerarios creados, notificaciones, relay), solicitudes HTTP por servicio (rate y distribución), latencia (p50/p95/p99 por servicio) y detalle del relay y el trigger. El datasource y el dashboard se cargan al arrancar Grafana desde `observability/grafana/provisioning/`.
 
-## 7. Despliegue
+## 7. Despliegue (Fase 10, ADR-041)
 
-Docker y Docker Compose facilitarán el entorno de desarrollo local.
+El sistema completo se levanta con **Docker Compose** desde la raíz del repositorio:
 
-La orquestación completa se construirá en su fase específica, cuando los componentes ya se hayan implementado y probado individualmente.
+```
+docker compose up -d --build
+```
+
+`docker-compose.yml` declara 15 servicios. Cada contenedor llega a los demás por el **nombre del servicio** (DNS interno de Docker), y los puertos publicados en el equipo son los de siempre (8000, 8001, 8002, 5433, 5434, 5672, 15672, 6379, 9000, 9101, 9102, 16686, 9090, 3000).
+
+| Grupo | Servicios de Compose | Imagen |
+|---|---|---|
+| Infraestructura | `itinerary-postgres`, `notification-postgres`, `rabbitmq`, `redis` | Oficiales (`postgres:16-alpine`, `rabbitmq:3.13-management`, `redis:7.4-alpine`) |
+| Migraciones (una sola ejecución) | `itinerary-migrations`, `notification-migrations` | Imagen de Itinerary Service con `alembic upgrade head`; `Dockerfile.migrations` de la función |
+| Microservicios | `airport-service`, `itinerary-service`, `outbox-relay` | Propias (`python:3.12-slim`); la API y el relay comparten imagen |
+| Notificaciones | `send-notification-function`, `event-trigger` | Imagen de AWS Lambda con el RIE; imagen propia del trigger |
+| Entrada | `api-gateway` (sirve también el frontend) | `nginx:1.30.6-alpine-otel` |
+| Observabilidad | `jaeger`, `prometheus`, `grafana` | Oficiales |
+
+**Orden de arranque.** Lo impone `depends_on` con condiciones: las migraciones esperan a que su PostgreSQL esté `healthy`; la API, el relay y la función esperan a que su migración termine con éxito; el relay y el trigger esperan a RabbitMQ `healthy`. El gateway solo espera a que los servicios existan: mientras arrancan, responde 502 `UPSTREAM_UNAVAILABLE`.
+
+**Aislamiento de datos.** Cada PostgreSQL está solo en su red (`itinerary-data` o `notification-data`) junto con los contenedores de su servicio dueño. Así la propiedad de datos (sección 4) no depende solo de una convención: los demás contenedores ni siquiera resuelven el nombre de esa base.
+
+**Modo manual.** Para desarrollar un componente con recarga automática, se puede seguir ejecutando con `uvicorn` desde su entorno virtual (pasos del `README.md` raíz), pero no a la vez que Compose, porque usan los mismos puertos.
 
 ## 8. Principios de diseño
 

@@ -47,9 +47,23 @@ Son límites de la plataforma local, no del código (ADR-008).
 > El RIE responde **HTTP 200 también cuando la función falla**: el error solo se ve en el cuerpo (`errorType`).
 > Si la función supera su timeout (10 s), responde HTTP 200 con el texto `Task timed out after 10.00 seconds`.
 
-## Orden de arranque del sistema completo
+## Con Docker Compose (Fase 10)
 
-La función es el paso **4** del orden completo, que está explicado en el [README raíz](../../README.md#orden-de-arranque):
+Desde la raíz del repositorio, `docker compose up -d --build` levanta el sistema completo, incluidos:
+
+| Servicio de Compose | Imagen | Qué hace |
+|---|---|---|
+| `notification-migrations` | `Dockerfile.migrations` (Python + Alembic) | Aplica `alembic upgrade head` a `notification_db` y termina. La imagen de la función sigue sin Alembic (ADR-029) |
+| `send-notification-function` | `Dockerfile` (AWS Lambda + RIE) | La función, publicada en el puerto 9000. Arranca solo cuando la migración terminó con éxito |
+
+Dentro de Compose la función llega a su base por `notification-postgres:5432`. La base solo está en la red
+`notification-data`, que reemplaza a la red manual `notification-net` (ADR-041). Las invocaciones a mano de la
+sección [Invocarla a mano](#invocarla-a-mano) funcionan igual (puerto 9000). Logs:
+`docker compose logs -f send-notification-function`.
+
+## Orden de arranque del sistema completo (modo manual)
+
+La función es el paso **4** del orden completo, que está explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (Itinerary Service) y `notification_db` (**esta función**, `alembic upgrade head`).

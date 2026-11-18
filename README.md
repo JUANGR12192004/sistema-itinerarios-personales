@@ -49,7 +49,7 @@ La implementación se desarrolla progresivamente, siguiendo las fases definidas 
 | Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
 | Frontend | HTML, CSS, JavaScript |
 | Visualización | Plotly JS |
-| Contenedores | Docker y Docker Compose |
+| Contenedores | Docker y Docker Compose (`docker-compose.yml` en la raíz, ADR-041) |
 | Observabilidad | OpenTelemetry, Jaeger, Prometheus y Grafana |
 | Documentación API | Swagger / OpenAPI y AsyncAPI |
 | Pruebas | pytest, TestClient de FastAPI y respx |
@@ -112,12 +112,29 @@ Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
 | 7 | API Gateway | Completada |
 | 8 | Frontend | Completada |
 | 9 | Observabilidad | Completada |
-| 10 a 12 | Docker Compose, pruebas y documentación | Pendientes |
+| 10 | Docker y Docker Compose | Completada (rama `fase-10-docker-compose`) |
+| 11 y 12 | Pruebas y documentación | Pendientes |
 
-**Última fase completada:** Fase 9 — Observabilidad (PR #21, merge `d9ed023`). **Siguiente:** Fase 10 — Docker Compose.
+**Última fase completada:** Fase 10 — Docker y Docker Compose. **Siguiente:** Fase 11 — Pruebas.
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+
+### Fase 10 — Docker y Docker Compose
+
+Todo el sistema se levanta con **un solo comando**: `docker compose up -d --build` (ADR-041). Solo hace falta Docker
+Desktop; Python 3.12 sigue haciendo falta para desarrollar y ejecutar las pruebas. Ver
+[Arranque con Docker Compose](#arranque-con-docker-compose-recomendado).
+
+| Pieza | Qué hace |
+|---|---|
+| Imágenes propias | Airport Service, Itinerary Service (una imagen para la API, el relay y las migraciones), Event Trigger y migraciones de notificaciones, sobre `python:3.12-slim` con usuario sin privilegios |
+| Migraciones automáticas | `itinerary-migrations` y `notification-migrations` aplican `alembic upgrade head` y terminan; la API, el relay y la función esperan a que terminen con éxito |
+| Orden de arranque con healthchecks | `depends_on` espera a que PostgreSQL y RabbitMQ estén listos: ya no hay que seguir el orden a mano |
+| Redes por base de datos | Cada PostgreSQL solo es visible para los contenedores de su servicio dueño |
+| Mismos puertos de siempre | Gateway 8000, servicios 8001/8002, bases 5433/5434, RabbitMQ 5672/15672, Jaeger 16686, Prometheus 9090, Grafana 3000 |
+| Observabilidad incluida | Jaeger, Prometheus (`prometheus.compose.yml`) y Grafana con el dashboard cargado al arrancar |
+| CI | Job "Docker Compose": valida el archivo, construye las imágenes, levanta el sistema y comprueba los healthchecks y el gateway |
 
 ### Fase 9 — Observabilidad
 
@@ -205,11 +222,85 @@ Airport Service tolera los fallos de API Colombia sin cambiar sus casos de uso n
 
 Orden: caché → circuit breaker → retry con backoff → llamada con timeout → fallback. Si Redis no está disponible, el servicio sigue funcionando sin caché. Decisiones en ADR-007 y ADR-014 (`docs/06-decisiones-arquitectonicas.md`).
 
-## Orden de arranque
+## Arranque con Docker Compose (recomendado)
 
-Hasta la Fase 10 (Docker Compose) el sistema se levanta a mano. El orden importa porque cada paso necesita los
-anteriores. La instalación de cada componente (entorno virtual, `.env`) está en su README; aquí está el orden para
-levantarlo todo.
+Desde la Fase 10 todo el sistema (15 contenedores) se levanta con Docker Compose. Requisito: **Docker Desktop**
+encendido (en Windows con WSL 2; en Mac con Apple Silicon las imágenes se construyen para `arm64` sin opciones
+adicionales). Los comandos son **iguales en PowerShell, CMD y la Terminal de macOS (zsh)** y se ejecutan desde la
+raíz del repositorio (o cualquier subcarpeta: Compose busca `docker-compose.yml` hacia arriba).
+
+**Si antes se usó el modo manual**, detener esos contenedores, porque ocupan los mismos puertos:
+
+```
+docker stop api-gateway send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis grafana prometheus jaeger
+```
+
+**Levantar todo** (la primera vez construye las imágenes, unos minutos; las siguientes, segundos):
+
+```
+docker compose up -d --build
+docker compose ps
+```
+
+Listo cuando las dos migraciones aparecen `Exited (0)` y `airport-service`, `itinerary-service` y `api-gateway`
+aparecen `healthy`. Entonces:
+
+| Qué | Dónde |
+|---|---|
+| Frontend (mapa y CRUD) | http://localhost:8000 |
+| Swagger de Airport e Itinerary Service | http://localhost:8001/docs y http://localhost:8002/docs |
+| Panel de RabbitMQ (`guest` / `guest`) | http://localhost:15672 |
+| Jaeger | http://localhost:16686 |
+| Prometheus (destinos) | http://localhost:9090/targets |
+| Grafana (`admin` / `admin`) | http://localhost:3000 |
+
+**Comandos del día a día:**
+
+| Acción | Comando |
+|---|---|
+| Ver el estado | `docker compose ps -a` |
+| Ver los logs de un componente (Ctrl+C para salir) | `docker compose logs -f outbox-relay` |
+| Detener y encender un componente | `docker compose stop event-trigger` / `docker compose start event-trigger` |
+| Reconstruir tras un cambio de código | `docker compose up -d --build airport-service` |
+| Consultar una base | `docker compose exec itinerary-postgres psql -U itinerary -d itinerary_db` |
+| Reprocesar la DLQ | `docker compose run --rm event-trigger python -m app.replay_dlq --all` |
+| Detener todo (conserva los datos) | `docker compose down` |
+| Detener todo y **borrar** los datos | `docker compose down -v` |
+
+Variables opcionales (nivel de log, trazas, rate limit del gateway, usuario de Grafana): copiar `.env.example` como
+`.env` en la raíz (`Copy-Item` en PowerShell, `copy` en CMD, `cp` en zsh). Sin `.env` se usan los mismos valores
+por defecto.
+
+### Qué hace Compose por nosotros
+
+La tabla [Qué pasa si se omite un paso](#qué-pasa-si-se-omite-un-paso) describe los errores del modo manual. Con
+Compose, `depends_on` impone el orden: las migraciones esperan a su PostgreSQL, la API, el relay y la función esperan
+a que su migración termine con éxito, y el relay y el trigger esperan a RabbitMQ. Si un componente se detiene después,
+el comportamiento es el de esa tabla (por ejemplo, con `docker compose stop event-trigger` los mensajes se acumulan en
+la cola). Detalles en ADR-041 y en el diagrama de despliegue de [`docs/05-diagramas.md`](docs/05-diagramas.md).
+
+### Problemas frecuentes
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `Bind for 0.0.0.0:5433 failed: port is already allocated` | Hay contenedores del modo manual (o un `uvicorn`) en ese puerto | Detenerlos (comando de arriba) o cerrar el `uvicorn` |
+| `dependency failed to start: ... itinerary-migrations exited (1)` | La migración falló | `docker compose logs itinerary-migrations` |
+| 502 `UPSTREAM_UNAVAILABLE` justo después de `up` | El servicio aún está arrancando | Esperar a que `docker compose ps` lo muestre `healthy` |
+| 502 tras reconstruir un servicio (`up --build <servicio>`) | El contenedor nuevo puede tener otra IP y Nginx guardó la anterior (ADR-041) | `docker compose restart api-gateway` |
+| Los datos del modo manual no aparecen | Compose usa sus propios volúmenes | Es lo esperado; las bases empiezan vacías |
+
+## Arranque manual (modo desarrollo)
+
+Antes de la Fase 10 el sistema se levantaba solo a mano. Sigue siendo útil para **desarrollar un componente** con
+recarga automática o depurarlo desde el entorno virtual, pero no a la vez que Docker Compose (mismos puertos). El
+orden importa porque cada paso necesita los anteriores. La instalación de cada componente (entorno virtual, `.env`)
+está en su README; aquí está el orden para levantarlo todo.
+
+> **Combinar los dos modos:** se puede tener casi todo en Compose y un componente en el equipo, siempre que ningún
+> contenedor necesite llamar a ese componente (los contenedores lo buscan por su nombre de servicio, no en el
+> equipo). Funciona con el **Outbox Relay** y el **Event Trigger**: `docker compose stop outbox-relay` y después
+> `python -m app.outbox_relay` desde el entorno virtual, con su `.env` de siempre (`localhost:5433`,
+> `localhost:5672`). No funciona con Airport o Itinerary Service, porque el gateway los llama por su nombre.
 
 ### 1. Contenedores de infraestructura
 
@@ -380,7 +471,9 @@ Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notif
 
 ## Demostración de observabilidad
 
-Requisitos: los nueve pasos del orden de arranque, incluyendo el paso 2 (Jaeger, Prometheus y Grafana).
+Requisitos: el sistema levantado con Docker Compose (incluye Jaeger, Prometheus y Grafana), o los nueve pasos del
+arranque manual incluyendo el paso 2. Con Compose, el archivo del itinerario está en
+`serverless\event-trigger\demo\create-itinerary.json`: ejecutar el `curl` desde `serverless\event-trigger`.
 
 ### Seguir una solicitud de punta a punta en Jaeger
 
@@ -413,7 +506,22 @@ Los mismos datos en bruto están en Prometheus (<http://localhost:9090>): buscar
 ## Demostración de punta a punta
 
 Recorrido completo: **gateway** → crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial.
-Requisitos: los nueve pasos del orden de arranque. Las solicitudes entran por el gateway
+Requisitos: el sistema levantado con Docker Compose o con los nueve pasos del arranque manual.
+
+> **Con Docker Compose** los contenedores tienen otros nombres (`sistema-itinerarios-<servicio>-1`), así que en los
+> comandos de abajo se cambia:
+>
+> | Modo manual | Docker Compose |
+> |---|---|
+> | `docker exec notification-postgres ...` | `docker compose exec notification-postgres ...` |
+> | `docker exec itinerary-postgres ...` | `docker compose exec itinerary-postgres ...` |
+> | `docker logs api-gateway` / `docker logs send-notification-function` | `docker compose logs api-gateway` / `docker compose logs send-notification-function` |
+> | Logs del relay y del trigger en su terminal | `docker compose logs -f outbox-relay event-trigger` |
+> | `python -m app.replay_dlq` | `docker compose run --rm event-trigger python -m app.replay_dlq` |
+>
+> Los `curl` no cambian.
+
+Las solicitudes entran por el gateway
 (`http://localhost:8000/api/itineraries`), igual que lo hará el frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
 PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
 `docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
@@ -554,6 +662,8 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | `fase-6-serverless` | Fase 6 — SendNotificationFunction (AWS Lambda + RIE), Event Trigger, DLQ y su reprocesamiento | `fase-6` |
 | `fase-7-api-gateway` | Fase 7 — API Gateway con Nginx (enrutamiento, rate limiting, correlation ID, propagación de `Authorization`) | `fase-7` |
 | `fase-8-frontend` | Fase 8 — Frontend (mapa con Plotly JS, CRUD de itinerarios, estáticos servidos por Nginx) | `fase-8` |
+| `fase-9-observabilidad` | Fase 9 — Observabilidad (logs JSON, OpenTelemetry y Jaeger, Prometheus y Grafana, `libs/observability`) | `fase-9` |
+| `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` (al fusionar) |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.

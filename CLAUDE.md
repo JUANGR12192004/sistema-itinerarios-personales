@@ -554,6 +554,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Frontend (Fase 8, ADR-033) | Vanilla HTML/CSS/JS con ES modules, sin build toolchain, servido como estáticos por Nginx desde `frontend/` (copiado en la imagen del gateway, `location / { try_files ... }`, rutas no encontradas → 404 `ROUTE_NOT_FOUND` en JSON). Mapa de aeropuertos con `scattergeo` de Plotly 4.3.0 (bundle parcial `plotly-geo.min.js`, 1.4 MB, local para uso sin internet, marcado como binario en `.gitattributes`). CRUD de itinerarios con formulario y tabla; `datetime-local` → ISO 8601 con offset del navegador (ADR-017). Todo texto de datos con `textContent` (nunca `innerHTML`). Errores del gateway con `correlation_id` y botón "Copiar" en 5xx. Pruebas pytest en `gateway/tests` (misma suite del gateway). El contexto de build del gateway cambia a la raíz del repositorio: `docker build -t api-gateway -f gateway/Dockerfile .` |
 | Instrumentación del gateway (Fase 9, ADR-036) | Imagen `nginx:1.30.6-alpine-otel` con `ngx_otel_module`. Se provee `gateway/nginx.conf` propio con `load_module modules/ngx_otel_module.so;` antes del bloque `events {}` (la imagen no lo carga por defecto). `otel_trace_context propagate` inyecta el `traceparent` del span hijo al upstream; no se usa `proxy_set_header traceparent` (sobrescribiría el span hijo con el original del cliente). |
 | Paquete compartido de observabilidad (cierre Fase 9, ADR-040) | `libs/observability`: Microservice Chassis Pattern con logging, trazas y métricas HTTP comunes. Instalado con `-e ../../libs/observability` en cada `requirements.txt`. El Dockerfile de SendNotificationFunction cambia el contexto de build a la raíz del repositorio para incluir `libs/`. Los Dockerfiles de Airport e Itinerary Service harán lo mismo en la Fase 10. |
+| Docker Compose (Fase 10, ADR-041) | `docker-compose.yml` en la raíz (proyecto `sistema-itinerarios`, 15 servicios) con los puertos de la sección 7.6. Imágenes propias sobre `python:3.12-slim` con usuario `appuser`, contexto de build en la raíz y `Dockerfile.dockerignore` por imagen (lista blanca): Airport Service, Itinerary Service (**una imagen para la API, `outbox-relay` e `itinerary-migrations`**), Event Trigger y `Dockerfile.migrations` de la función (imagen de la función sin Alembic, ADR-029). Dentro de la imagen se reproduce la estructura del repositorio para que `-e ../../libs/observability` funcione sin cambios. Migraciones como contenedores de una sola ejecución (`service_completed_successfully`); healthchecks de PostgreSQL, RabbitMQ, Redis, servicios FastAPI (Python `urllib`) y gateway (`wget`); el gateway solo espera `service_started`. Redes `itinerary-data` y `notification-data` (cada base solo con su servicio dueño; reemplaza a `notification-net`). `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317`. Observabilidad siempre activa; Prometheus con `prometheus.compose.yml` (`prometheus.yml` se conserva para el modo manual). `stop_signal: SIGINT` en el relay y el trigger. Volúmenes para las dos bases y RabbitMQ (`hostname: rabbitmq`). `.env.example` en la raíz con variables opcionales. Modo manual conservado para desarrollo. Job de CI "Docker Compose" |
 
 ### 9.2. Propuestas (confirmar con el usuario antes de implementarlas)
 
@@ -568,6 +569,9 @@ ADR-020 y ADR-021).
 | Advertencia de Starlette en las pruebas | `pytest` muestra `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` (detectada en la entrega 1C). Por ahora **no se oculta ni se instala `httpx2`**. Opciones: migrar a `httpx2`, fijar versiones que no la emitan, o filtrarla documentando el motivo | Fase 11 |
 | Base de datos de las pruebas de integración de Itinerary Service | El fixture `db_session` usa la base real `itinerary_db` y **borra** las filas de `itineraries` y `outbox_events` antes y después de cada prueba; con el Outbox Relay real encendido, este puede publicar en la cola real los eventos que crean las pruebas (detectado en `fix/aislar-pruebas-itinerary`; por decisión del usuario, por ahora solo se documenta). Opciones: una base de pruebas propia (por ejemplo `itinerary_db_test` en el mismo contenedor, migrada por las pruebas), o un esquema de pruebas | Antes de la Fase 11, o antes si molesta en las demostraciones |
 | Advertencia de pika en las pruebas del Event Trigger | `pytest` muestra `DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated` desde `pika/data.py` (detectada en la entrega 6B, al leer el header `x-death` de un mensaje de la DLQ). Viene de pika 1.3.2, no del código del proyecto. Por ahora **no se oculta**. Opciones: actualizar pika si una versión la corrige (revisando ADR-021), o filtrarla documentando el motivo | Fase 11 |
+| Dependencias de pruebas en las imágenes (Fase 10) | Los `requirements.txt` de Airport, Itinerary y el Event Trigger mezclan dependencias de ejecución y de pruebas (`pytest`, `respx`), así que sus imágenes las incluyen. Opciones: separarlas en `requirements-dev.txt` (como la función) y ajustar CI y README, o dejarlo así | Fase 11 |
+| IP de los servicios en el gateway con Compose (Fase 10) | Nginx resuelve los upstreams al arrancar: si un contenedor de servicio se recrea con otra IP, el gateway da 502 hasta reiniciarlo (documentado en ADR-041). Opciones: `resolver 127.0.0.11` con variables en `proxy_pass` (cambia ADR-009 y las pruebas del gateway), o mantener la limitación documentada | Cuando el equipo lo decida |
+| `.dockerignore` antiguo de la función (Fase 10) | `serverless/send-notification-function/.dockerignore` no se aplica desde la Fase 9 (contexto en la raíz); lo reemplaza `Dockerfile.dockerignore`. Propuesta: borrarlo (requiere aprobación, sección 3.3) | Cuando el equipo lo apruebe |
 
 Cuando una decisión se confirme, actualiza esta sección y `docs/06-decisiones-arquitectonicas.md`
 (explicando el cambio antes de hacerlo).
@@ -775,6 +779,16 @@ Rama `fase-8-frontend`. Una pausa al final de cada entrega, antes del commit.
 | **8C** | CRUD de itinerarios: `itineraries.js` con formulario 2 columnas, desplegables de aeropuertos, tabla, editar inline, eliminar con `confirm()`, `datetime-local` → ISO 8601 con offset, errores con `correlation_id` y botón copiar | Crear, editar y eliminar itinerarios; errores del servicio en banner |
 
 ---
+
+### 12.9. Plan de la Fase 10 (entregas)
+
+Rama `fase-10-docker-compose`. Una pausa al final de cada entrega.
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **10A** | Dockerfiles de Airport Service, Itinerary Service (API, relay y migraciones), Event Trigger y `Dockerfile.migrations` de la función, con un `Dockerfile.dockerignore` por imagen (incluido el de la imagen de la función) | Las cinco imágenes se construyen; contexto de build pequeño; `whoami` → `appuser` |
+| **10B** | `docker-compose.yml` (15 servicios, migraciones de una sola ejecución, healthchecks, redes por base, volúmenes, `stop_signal: SIGINT`), `prometheus.compose.yml`, `.env.example` en la raíz | `docker compose up -d --build`: migraciones `Exited (0)`, servicios `healthy`, recorrido de punta a punta por el gateway hasta `notification_history` |
+| **10C** | ADR-041, `docs/02` (sección 7), `docs/05` (despliegue y orden de arranque), README raíz (arranque con Compose, modo manual, demostraciones con Compose), README de los cinco componentes, job de CI "Docker Compose", estado de CLAUDE.md | Job "Docker Compose" pasa en el PR |
 
 ## 13. Estándares de código
 
@@ -1026,7 +1040,7 @@ pytest -v
     `default_type`. Corregido en la rama `fix/gateway-404-json` con `types { }` vacío en las seis ubicaciones
     que devuelven JSON de error (ver sección 9.1 ADR-033 y el PR de corrección). Total tras el fix:
     **48 pasan, 3 omitidas** (smoke, sin el gateway real).
-- **Fase 9 (Observabilidad):** completada y **fusionada en `main`** (PR #21, merge `d9ed023`). Etiqueta `fase-9` pendiente de crear sobre ese commit. La rama `fase-9-observabilidad` se conserva como archivo de solo lectura.
+- **Fase 9 (Observabilidad):** completada y **fusionada en `main`** (PR #21, merge `d9ed023`) con la **etiqueta `fase-9`** sobre ese commit. La rama `fase-9-observabilidad` se conserva como archivo de solo lectura.
   - Entrega **9A** completada: ADR-034 a ADR-036. Logs JSON estructurados con `python-json-logger==4.2.0` en los cuatro
     componentes Python: `configure_logging(log_level, service_name)` en `app/logging_config.py`; `JsonFormatter` con campos
     `timestamp`, `level`, `service`, `correlation_id`, `trace_id`, `span_id`, `logger`, `message`; `CorrelationIdFilter`
@@ -1072,4 +1086,21 @@ pytest -v
       Gateway: **50 pasan, 3 omitidas** (smoke, sin el gateway real).
     - `docs/06` ampliado con ADR-036 (corrección) y ADR-040 (nuevo). `CLAUDE.md` sección 6, 7.5, 9.1 y 15
       actualizados. READMEs con nota sobre `libs/observability`.
-- **Siguiente:** Fase 10 (Docker Compose).
+- **Fase 10 (Docker y Docker Compose):** entregas completadas en la rama `fase-10-docker-compose` (sin PR todavía).
+  ADR-041 aceptada (sección 9.1).
+  - Entrega **10A**: Dockerfiles de Airport Service, Itinerary Service (una imagen para la API, el relay y las
+    migraciones), Event Trigger y `Dockerfile.migrations` de la función, con `Dockerfile.dockerignore` por imagen.
+    Se agregó también el de la imagen de la función: desde la Fase 9 su build enviaba todo el repositorio.
+  - Entrega **10B**: `docker-compose.yml` (15 servicios), `observability/prometheus/prometheus.compose.yml` y
+    `.env.example` en la raíz. Corrige dos detalles del modo manual de la Fase 9 que solo funcionan en una red
+    Docker: el datasource de Grafana (`prometheus:9090`) y el montaje de los dashboards en `/var/lib/grafana/dashboards`;
+    además, las trazas de la función ahora llegan a Jaeger (`OTEL_EXPORTER_OTLP_ENDPOINT`).
+  - Entrega **10C**: ADR-041 en `docs/06`, `docs/02` sección 7, `docs/05` (diagrama de despliegue con redes y orden de
+    arranque), README raíz (arranque con Compose como forma recomendada, arranque manual como modo de desarrollo,
+    equivalencias de comandos en las demostraciones, ramas `fase-9` y `fase-10`), README de los cinco componentes y
+    job de CI "Docker Compose" (validar, construir, levantar, comprobar migraciones, colas, métricas, 422 por el
+    gateway y aislamiento de redes; sin llamar a API Colombia).
+  - Validación: el equipo donde se escribió la fase **no tenía Docker**; `docker-compose.yml` y el workflow se
+    validaron con un script (YAML, dependencias, redes, Dockerfiles, montajes y puertos). La verificación con
+    `docker compose up` queda para el equipo y para el job de CI del PR.
+- **Siguiente:** Fase 11 (Pruebas).

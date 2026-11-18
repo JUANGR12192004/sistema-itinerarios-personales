@@ -293,22 +293,36 @@ flowchart TD
 
 Orden aceptado en la Fase 2 (ADR-014): caché → circuit breaker → retry con backoff → llamada con timeout → fallback. El circuit breaker envuelve al retry, así que una consulta cuenta como un solo fallo cuando se agotaron sus reintentos. Un 404 no se reintenta, no se guarda en caché, no abre el circuito ni activa el fallback.
 
-## 5. Despliegue previsto
+## 5. Despliegue con Docker Compose (Fase 10)
+
+Cada caja es un servicio de `docker-compose.yml`; el puerto es el publicado en el equipo. Las bases de datos
+solo están en su red (`itinerary-data`, `notification-data`); todo lo demás comparte la red `default` (ADR-041).
 
 ```mermaid
 flowchart TB
-    subgraph Local["Entorno local con Docker Compose"]
-        FRONT[Frontend]
-        GATE["API Gateway (Nginx)<br/>api-gateway :8000"]
-        AIR[Airport Service :8001]
-        ITIN[Itinerary Service :8002]
-        PG[("PostgreSQL itinerarios<br/>itinerary-postgres :5433")]
-        RED[(Redis :6379)]
-        RAB["RabbitMQ<br/>itinerary-rabbitmq :5672 / :15672"]
-        RELAY["Outbox Relay<br/>(métricas :9101)"]
-        TRIG["Event Trigger<br/>(métricas :9102)"]
-        FUNC["SendNotificationFunction<br/>imagen Lambda + RIE :9000"]
-        NPG[("PostgreSQL notificaciones<br/>notification-postgres :5434")]
+    subgraph Local["docker compose up -d --build (proyecto sistema-itinerarios)"]
+        FRONT[Frontend en el navegador]
+        GATE["api-gateway (Nginx + frontend) :8000"]
+        AIR[airport-service :8001]
+        ITIN[itinerary-service :8002]
+        RED[(redis :6379)]
+        RAB["rabbitmq :5672 / :15672"]
+        RELAY["outbox-relay<br/>(misma imagen que itinerary-service, métricas :9101)"]
+        TRIG["event-trigger<br/>(métricas :9102)"]
+        FUNC["send-notification-function<br/>imagen Lambda + RIE :9000"]
+
+        subgraph IDATA["red itinerary-data"]
+            PG[("itinerary-postgres :5433")]
+            IMIG["itinerary-migrations<br/>(una sola ejecución)"]
+        end
+
+        subgraph NDATA["red notification-data"]
+            NPG[("notification-postgres :5434")]
+            NMIG["notification-migrations<br/>(una sola ejecución)"]
+        end
+
+        IMIG -->|alembic upgrade head| PG
+        NMIG -->|alembic upgrade head| NPG
 
         subgraph OBS["Stack de observabilidad (Fase 9)"]
             JAEGER["Jaeger :16686<br/>(OTLP gRPC :4317)"]
@@ -327,7 +341,7 @@ flowchart TB
         RELAY --> RAB
         RAB --> TRIG
         TRIG --> FUNC
-        FUNC -->|red notification-net| NPG
+        FUNC --> NPG
 
         GATE -.->|trazas OTLP gRPC| JAEGER
         AIR -.->|trazas OTLP gRPC| JAEGER
@@ -342,7 +356,26 @@ flowchart TB
     end
 ```
 
-El despliegue completo se definirá y validará en la Fase 10. Hasta entonces, cada contenedor se crea con `docker run` y los procesos de Python (servicios, relay y trigger) se ejecutan desde su entorno virtual. El gateway (contenedor `api-gateway`) llega a los servicios del equipo por `host.docker.internal`; en la Fase 10 usará los nombres de los contenedores; el orden de arranque está en el `README.md` raíz.
+Orden de arranque que impone `depends_on` (las flechas se leen "espera a"):
+
+```mermaid
+flowchart LR
+    IP[(itinerary-postgres)] -->|healthy| IM[itinerary-migrations]
+    IM -->|terminó con éxito| IS[itinerary-service]
+    IM -->|terminó con éxito| OR[outbox-relay]
+    RMQ[rabbitmq] -->|healthy| OR
+    RMQ -->|healthy| ET[event-trigger]
+    NP[(notification-postgres)] -->|healthy| NM[notification-migrations]
+    NM -->|terminó con éxito| FN[send-notification-function]
+    FN -->|iniciado| ET
+    R[redis] -->|iniciado| AS[airport-service]
+    AS -->|iniciado| GW[api-gateway]
+    IS -->|iniciado| GW
+    J[jaeger] -->|iniciado| GW
+    P[prometheus] -->|iniciado| G[grafana]
+```
+
+Hasta la Fase 9 cada contenedor se creaba con `docker run` y los procesos de Python se ejecutaban desde su entorno virtual, con el gateway llegando a ellos por `host.docker.internal`. Ese modo manual sigue documentado en el `README.md` raíz para desarrollar un componente con recarga automática.
 
 ## 5.1. Flujo de datos de observabilidad (Fase 9)
 

@@ -131,11 +131,19 @@ docker run -d --name airport-redis -p 6379:6379 redis:7.4-alpine
 Las siguientes veces: `docker start airport-redis`. Para detenerlo: `docker stop airport-redis`.
 Comprobar que responde: `docker exec airport-redis redis-cli ping` (debe mostrar `PONG`).
 
-En la Fase 10, Redis se levantará con Docker Compose junto con el resto del sistema.
+Desde la Fase 10, Redis se levanta también con Docker Compose junto con el resto del sistema (servicio `redis`).
 
-## Orden de arranque del sistema completo
+## Con Docker Compose (Fase 10)
 
-Airport Service es el paso **5** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+Desde la raíz del repositorio, `docker compose up -d --build` levanta el sistema completo, incluido este servicio
+(servicio `airport-service`, imagen `services/airport-service/Dockerfile`, puerto 8001). Dentro de Compose usa
+`redis://redis:6379/0` y envía las trazas a `jaeger:4317`. Tras un cambio en el código:
+`docker compose up -d --build airport-service`. Logs: `docker compose logs -f airport-service`. Detalles en el
+[README raíz](../../README.md#arranque-con-docker-compose-recomendado) y en ADR-041.
+
+## Orden de arranque del sistema completo (modo manual)
+
+Airport Service es el paso **5** del orden completo, explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
 contenedores → observabilidad → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
 Event Trigger → API Gateway. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
 crear itinerarios.

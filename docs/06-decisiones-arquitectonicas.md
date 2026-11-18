@@ -1314,7 +1314,57 @@ El patrón _Microservice Chassis_ consolida la infraestructura transversal (logs
 ### Consecuencias
 
 - Los cuatro componentes dependen ahora de `libs/observability`. Un cambio que rompa la API del paquete afecta a todos; es conveniente mantener la interfaz estable.
-- En la Fase 10 (Docker Compose), los Dockerfiles de Airport Service e Itinerary Service también deberán copiar `libs/` y hacer `pip install libs/observability` (igual que ya hace SendNotificationFunction). El gateway no tiene Python, así que no le afecta.
+- En la Fase 10 (Docker Compose), los Dockerfiles de Airport Service e Itinerary Service también deberán copiar `libs/` y hacer `pip install libs/observability` (igual que ya hace SendNotificationFunction). El gateway no tiene Python, así que no le afecta. **Hecho en la Fase 10 (ADR-041).**
+
+## ADR-041 — Despliegue local con Docker Compose (Fase 10)
+
+**Estado:** Aceptada (Fase 10).
+
+### Contexto
+
+Hasta la Fase 9 el sistema se levantaba con nueve pasos manuales: cinco contenedores con `docker run`, dos imágenes construidas a mano, migraciones desde los entornos virtuales y cuatro procesos Python en cuatro terminales. El orden importaba (un paso omitido producía 500, eventos esperando en la outbox o mensajes en la DLQ) y la demostración dependía de que cada integrante tuviera Python, los entornos virtuales y los `.env` preparados. Varias decisiones anteriores dejaron tareas explícitas para esta fase: nombres de contenedor en lugar de `host.docker.internal` (ADR-009, ADR-036, ADR-038, ADR-039), migraciones como contenedor de una sola ejecución (ADR-029) y Dockerfiles con `libs/observability` (ADR-040).
+
+### Decisión
+
+- **Un `docker-compose.yml` en la raíz** (proyecto `sistema-itinerarios`) levanta los 15 servicios con `docker compose up -d --build`. Los puertos publicados son los de la tabla de puertos de CLAUDE.md (7.6), así que las URL, Swagger, las demostraciones y las pruebas de integración no cambian.
+- **Una imagen por componente**, todas con el contexto de build en la raíz del repositorio (necesitan `libs/observability`) y un `Dockerfile.dockerignore` propio que solo deja pasar lo necesario:
+  - `services/airport-service/Dockerfile`, `serverless/event-trigger/Dockerfile`: `python:3.12-slim`, usuario sin privilegios `appuser`.
+  - `services/itinerary-service/Dockerfile`: **una imagen con tres usos** (API, Outbox Relay y migraciones), que solo cambian el comando.
+  - `serverless/send-notification-function/Dockerfile.migrations`: imagen aparte con Alembic para `notification_db`; la imagen de la función sigue sin Alembic (ADR-029).
+  - Dentro de cada imagen se reproduce la estructura del repositorio (`/app/libs/observability` y `/app/<carpeta del componente>`), para que la línea `-e ../../libs/observability` de `requirements.txt` funcione sin cambios.
+- **Migraciones automáticas**: `itinerary-migrations` y `notification-migrations` aplican `alembic upgrade head` y terminan. La API, el relay y la función esperan con `depends_on: condition: service_completed_successfully`; las migraciones esperan a su base con `service_healthy` (`pg_isready`).
+- **Orden de arranque con healthchecks**: PostgreSQL (`pg_isready`), RabbitMQ (`rabbitmq-diagnostics check_port_connectivity`), Redis (`redis-cli ping`), Airport e Itinerary Service (`GET /health` con Python, la imagen slim no trae curl) y el gateway (`wget` de BusyBox). El relay y el trigger esperan a RabbitMQ `healthy`.
+- **El gateway no espera a que los servicios estén `healthy`**, solo a que existan (`service_started`): Nginx resuelve los nombres al arrancar (ADR-009) y basta con que el contenedor exista en el DNS de Docker. Mientras un servicio arranca, sus rutas responden 502 `UPSTREAM_UNAVAILABLE` y el frontend ya está disponible, como en la Fase 7.
+- **Itinerary Service no depende de Airport Service ni de RabbitMQ** para arrancar: si Airport no está, responde 503 (ADR-012); desde la Fase 5 la API solo escribe en la outbox.
+- **Redes**: todos los componentes comparten la red `default` de Compose. Cada base de datos está **solo** en su red (`itinerary-data`, `notification-data`) junto con los contenedores de su servicio dueño: la regla "ningún servicio lee ni escribe la base de otro" la impone también la infraestructura. `notification-data` reemplaza a la red manual `notification-net` (ADR-029).
+- **Configuración por `environment`** en `docker-compose.yml` con nombres de servicio (`airport-service:8001`, `rabbitmq:5672`, `jaeger:4317`). Las trazas usan la variable estándar `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317` (sin cambios de código). Un `.env.example` en la raíz documenta las variables opcionales (`LOG_LEVEL`, `OTEL_ENABLED`, rate limit del gateway, usuario de Grafana); Compose trae los mismos valores por defecto.
+- **Observabilidad siempre activa** en Compose. Prometheus usa `observability/prometheus/prometheus.compose.yml` (destinos por nombre de servicio); `prometheus.yml` se conserva para el modo manual. Grafana monta `observability/grafana/dashboards` en `/var/lib/grafana/dashboards`, la ruta que espera su provisioning.
+- **Parada ordenada**: el relay y el trigger usan `stop_signal: SIGINT` (la señal de Ctrl+C, que ya manejan con `KeyboardInterrupt`). Con SIGTERM, Python como proceso 1 del contenedor no tiene manejador y el kernel ignora la señal: Docker lo mataría a los 10 s.
+- **Volúmenes** para PostgreSQL (dos) y RabbitMQ (con `hostname: rabbitmq` fijo, porque RabbitMQ guarda los datos en una carpeta con el nombre del nodo). Redis, Prometheus y Grafana no tienen volumen: sus datos se pueden regenerar.
+- **Política de reinicio** `unless-stopped` para los procesos de larga vida; `"no"` para las migraciones.
+- **Modo manual conservado**: los pasos con `docker run` y entornos virtuales siguen documentados para desarrollar un componente con recarga automática o depurarlo.
+
+### Justificación
+
+Docker Compose es la herramienta prevista desde la Fase 0 para el entorno local: describe en un solo archivo, legible en la sustentación, qué contenedores existen, cómo se conectan y en qué orden arrancan. Las condiciones de `depends_on` convierten la tabla "Qué pasa si se omite un paso" del README en reglas que Docker cumple solo. Mantener los puertos de siempre evita cambiar demostraciones, pruebas y documentación de fases anteriores. Una sola imagen para la API, el relay y las migraciones de Itinerary Service evita builds duplicados del mismo código.
+
+Alternativas descartadas:
+
+| Alternativa | Por qué no |
+|---|---|
+| Ejecutar `alembic upgrade head` al arrancar la API | Con varias réplicas competirían por migrar; mezcla un paso de despliegue con el arranque del proceso |
+| Un Dockerfile por proceso (API y relay) | Mismo código y dependencias: duplicaría el build sin aportar nada |
+| Esperar a que los servicios estén `healthy` antes del gateway | Un servicio caído dejaría también sin frontend; el gateway ya responde 502 en JSON mientras tanto |
+| Kubernetes / Docker Swarm | Fuera del alcance del curso; Compose basta para un entorno local con un nodo |
+
+### Consecuencias
+
+- Un integrante solo necesita Docker Desktop y Git para levantar y demostrar el sistema (Python 3.12 sigue haciendo falta para desarrollar y ejecutar las pruebas).
+- Las bases de Compose son volúmenes nuevos: los datos de los contenedores manuales no pasan a Compose. No se pueden usar los dos modos a la vez (mismos puertos).
+- Nginx guarda la IP de cada servicio al arrancar: si un contenedor de servicio se **recrea** (`docker compose up` tras un cambio, no `stop`/`start`), su IP puede cambiar y el gateway respondería 502 hasta `docker compose restart api-gateway`. Resolverlo con `resolver 127.0.0.11` y variables en `proxy_pass` cambiaría ADR-009; se documenta como limitación.
+- Las imágenes Python incluyen `pytest` y `respx`, porque los `requirements.txt` mezclan dependencias de ejecución y de pruebas. Separarlos (como ya hace la función con `requirements-dev.txt`) queda para la Fase 11 si el tamaño de las imágenes importa.
+- La integración continua agrega el job "Docker Compose": valida el archivo, construye las imágenes, levanta el sistema y comprueba los healthchecks, las migraciones y el recorrido por el gateway que no depende de API Colombia.
+- El `serverless/send-notification-function/.dockerignore` antiguo ya no se aplicaba desde la Fase 9 (el contexto es la raíz); lo reemplaza `Dockerfile.dockerignore`.
 
 ## 2. Revisión de decisiones
 

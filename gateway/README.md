@@ -92,7 +92,22 @@ Windows. En Linux hay que agregar `--add-host=host.docker.internal:host-gateway`
 Docker Desktop:** allí `host-gateway` añade también una dirección IPv6 que la red de Docker no alcanza, y la mitad de
 las solicitudes terminaría en 502.
 
-## Ejecutar
+## Con Docker Compose (Fase 10)
+
+Desde la raíz del repositorio, `docker compose up -d --build` levanta el gateway (servicio `api-gateway`, puerto
+8000) junto con el resto del sistema. Compose le pasa `AIRPORT_SERVICE_UPSTREAM=airport-service:8001`,
+`ITINERARY_SERVICE_UPSTREAM=itinerary-service:8002` y `OTEL_EXPORTER_OTLP_HOST=jaeger`; el rate limit y el tracing se
+cambian desde el `.env` de la raíz (`GATEWAY_RATE_LIMIT`, `GATEWAY_RATE_BURST`, `GATEWAY_OTEL_TRACE`). Tras un cambio
+en `templates/` o en `frontend/`: `docker compose up -d --build api-gateway`.
+
+Nginx resuelve los nombres de los servicios al arrancar: si un servicio se **recrea** (por ejemplo con
+`up --build`), su IP puede cambiar y el gateway respondería 502 hasta `docker compose restart api-gateway` (ADR-041).
+Con `stop` y `start` el contenedor conserva su IP.
+
+Las pruebas de `gateway/tests` no cambian: levantan sus propios contenedores del gateway contra servidores eco. Las
+pruebas *smoke* se ejecutan contra el gateway de Compose si está en `http://localhost:8000`.
+
+## Ejecutar (modo manual)
 
 Requisitos: Docker Desktop encendido, y Airport Service (8001) e Itinerary Service (8002) corriendo con uvicorn, según
 sus README. Los comandos `docker` son **idénticos en PowerShell, CMD y zsh** y se ejecutan desde la raíz del repositorio.
