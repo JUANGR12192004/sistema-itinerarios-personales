@@ -209,6 +209,13 @@ jobs:
       - name: Validar docker-compose.yml
         run: docker compose config --quiet
 
+      # Las imágenes instalan requirements-lock.txt (con hashes, regla S8544 de SonarCloud).
+      # Si alguien cambió una versión en requirements-runtime.txt (o requirements-migrations.txt)
+      # sin regenerar el lock, la imagen instalaría la versión anterior sin avisar: este paso lo detecta.
+      # Usa el Python del runner (solo librería estándar, sin Docker ni red).
+      - name: Comprobar que los requirements-lock.txt estén al día
+        run: python3 scripts/lock_requirements.py --check
+
       - name: Construir las imágenes
         run: docker compose build
 

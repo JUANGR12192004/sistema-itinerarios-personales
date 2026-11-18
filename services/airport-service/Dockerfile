@@ -22,12 +22,15 @@ WORKDIR /app/services/airport-service
 
 # Primero las dependencias y después el código: si solo cambia app/, Docker reutiliza
 # la capa de "pip install" (caché de capas) y el build tarda segundos.
-# - requirements-runtime.txt: solo dependencias de ejecución, todas con versión fija (sin pytest
-#   ni respx, que están en requirements.txt para el entorno virtual).
+# - requirements-lock.txt: TODAS las dependencias de ejecución (directas y transitivas), cada una
+#   con versión exacta y el hash SHA-256 de sus wheels. Se genera a partir de requirements-runtime.txt
+#   (ver el README del servicio); pytest y respx no van en la imagen.
+# - --require-hashes: pip rechaza cualquier paquete que no esté en el lock o cuyo archivo no coincida
+#   con el hash: el build siempre instala exactamente lo verificado (regla S8544 de SonarCloud).
 # - --only-binary :all: solo acepta paquetes ya compilados (wheels): pip no ejecuta scripts de
-#   instalación de terceros durante el build (reglas S8541 y S8544 de SonarCloud).
-COPY services/airport-service/requirements-runtime.txt .
-RUN pip install --only-binary :all: -r requirements-runtime.txt
+#   instalación de terceros durante el build (regla S8541 de SonarCloud).
+COPY services/airport-service/requirements-lock.txt .
+RUN pip install --only-binary :all: --require-hashes -r requirements-lock.txt
 
 COPY libs/observability/observability /app/libs/observability/observability
 

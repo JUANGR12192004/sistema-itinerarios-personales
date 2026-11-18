@@ -5,7 +5,7 @@
 *
 !libs/observability/
 !libs/observability/**
-!services/airport-service/requirements-runtime.txt
+!services/airport-service/requirements-lock.txt
 !services/airport-service/app/
 !services/airport-service/app/**
 

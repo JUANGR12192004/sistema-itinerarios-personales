@@ -22,10 +22,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/services/itinerary-service
 
-# Solo dependencias de ejecución con versión fija (incluye Alembic para las migraciones), y solo
-# paquetes ya compilados: pip no ejecuta scripts de instalación (reglas S8541 y S8544 de SonarCloud).
-COPY services/itinerary-service/requirements-runtime.txt .
-RUN pip install --only-binary :all: -r requirements-runtime.txt
+# requirements-lock.txt: todas las dependencias de ejecución (directas y transitivas, incluye Alembic
+# para las migraciones) con versión exacta y hash SHA-256, generado a partir de requirements-runtime.txt.
+# --require-hashes: solo se instala lo verificado en el lock (regla S8544 de SonarCloud).
+# --only-binary :all: solo paquetes ya compilados, sin scripts de instalación (regla S8541).
+COPY services/itinerary-service/requirements-lock.txt .
+RUN pip install --only-binary :all: --require-hashes -r requirements-lock.txt
 
 COPY libs/observability/observability /app/libs/observability/observability
 

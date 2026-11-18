@@ -19,10 +19,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/serverless/event-trigger
 
-# Solo dependencias de ejecución con versión fija, y solo paquetes ya compilados: pip no
-# ejecuta scripts de instalación (reglas S8541 y S8544 de SonarCloud).
-COPY serverless/event-trigger/requirements-runtime.txt .
-RUN pip install --only-binary :all: -r requirements-runtime.txt
+# requirements-lock.txt: todas las dependencias de ejecución (directas y transitivas) con versión
+# exacta y hash SHA-256, generado a partir de requirements-runtime.txt.
+# --require-hashes: solo se instala lo verificado en el lock (regla S8544 de SonarCloud).
+# --only-binary :all: solo paquetes ya compilados, sin scripts de instalación (regla S8541).
+COPY serverless/event-trigger/requirements-lock.txt .
+RUN pip install --only-binary :all: --require-hashes -r requirements-lock.txt
 
 COPY libs/observability/observability /app/libs/observability/observability
 

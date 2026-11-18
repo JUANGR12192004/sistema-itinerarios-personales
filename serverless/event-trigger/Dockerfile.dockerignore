@@ -3,7 +3,7 @@
 *
 !libs/observability/
 !libs/observability/**
-!serverless/event-trigger/requirements-runtime.txt
+!serverless/event-trigger/requirements-lock.txt
 !serverless/event-trigger/app/
 !serverless/event-trigger/app/**
 
