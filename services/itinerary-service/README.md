@@ -115,7 +115,8 @@ En macOS (zsh): `cp .env.example .env`.
 
 ## RabbitMQ
 
-Hasta la Fase 10 (Docker Compose), RabbitMQ se ejecuta con un contenedor (igual en PowerShell, CMD y zsh):
+Con Docker Compose (Fase 10), RabbitMQ es el servicio `rabbitmq` y se levanta con el resto del sistema. En el modo
+manual se ejecuta con un contenedor (igual en PowerShell, CMD y zsh):
 
 ```powershell
 docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
@@ -142,10 +143,34 @@ El contrato del evento está en [`docs/asyncapi/asyncapi.yaml`](../../docs/async
 y la explicación completa (Outbox, duplicados, idempotencia y mensajes venenosos) en
 [`docs/04-comunicacion-y-eventos.md`](../../docs/04-comunicacion-y-eventos.md).
 
-## Orden de arranque del sistema completo
+## Con Docker Compose (Fase 10)
+
+Desde la raíz del repositorio, `docker compose up -d --build` levanta el sistema completo. La imagen
+`services/itinerary-service/Dockerfile` se usa para **tres servicios** de Compose, que solo cambian el comando:
+
+| Servicio de Compose | Comando | Puerto |
+|---|---|---|
+| `itinerary-migrations` | `alembic upgrade head` (una sola ejecución, antes de la API y del relay) | — |
+| `itinerary-service` | `uvicorn app.main:app --host 0.0.0.0 --port 8002` | 8002 |
+| `outbox-relay` | `python -m app.outbox_relay` | 9101 (métricas) |
+
+Dentro de Compose la base es `itinerary-postgres:5432` (en el equipo sigue publicada en 5433), Airport Service es
+`airport-service:8001` y RabbitMQ `rabbitmq:5672`. La base solo está en la red `itinerary-data`, que comparten
+estos tres servicios (ADR-041). Comandos útiles:
+
+```
+docker compose logs -f itinerary-service outbox-relay
+docker compose exec itinerary-postgres psql -U itinerary -d itinerary_db
+docker compose up -d --build itinerary-service outbox-relay
+```
+
+Las pruebas de integración se siguen ejecutando desde el entorno virtual y usan `localhost:5433` y `localhost:5672`,
+que Compose publica igual que los contenedores manuales.
+
+## Orden de arranque del sistema completo (modo manual)
 
 Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en el
-[README raíz](../../README.md#orden-de-arranque):
+[README raíz](../../README.md#arranque-manual-modo-desarrollo):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (**este servicio**, `alembic upgrade head`) y `notification_db`.

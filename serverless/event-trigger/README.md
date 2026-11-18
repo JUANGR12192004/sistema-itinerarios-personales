@@ -37,9 +37,23 @@ temporal se reintenta sin límite y lo permanente se aparta.
 | `infrastructure/rabbitmq` | `consumer.py`, `topology.py`, `dlq_replayer.py` | Consumidor pika, declaración de la topología y reprocesamiento de la DLQ |
 | — | `main.py`, `replay_dlq.py` | Los dos comandos: el trigger y el reprocesamiento |
 
-## Orden de arranque del sistema completo
+## Con Docker Compose (Fase 10)
 
-El trigger es el paso **8** del orden completo, explicado en el [README raíz](../../README.md#orden-de-arranque):
+Desde la raíz del repositorio, `docker compose up -d --build` levanta el sistema completo, incluido el trigger
+(servicio `event-trigger`, imagen `serverless/event-trigger/Dockerfile`, métricas en el puerto 9102). Dentro de
+Compose usa `rabbitmq:5672` e invoca la función por `http://send-notification-function:8080/...`. Arranca cuando
+RabbitMQ está listo, así que la cola existe antes de que el relay publique.
+
+| Acción | Comando |
+|---|---|
+| Ver los logs | `docker compose logs -f event-trigger` |
+| Detenerlo (los mensajes se acumulan en la cola) | `docker compose stop event-trigger` (recibe `SIGINT`, como con Ctrl+C) |
+| Reprocesar un mensaje de la DLQ | `docker compose run --rm event-trigger python -m app.replay_dlq` |
+| Reprocesar todos | `docker compose run --rm event-trigger python -m app.replay_dlq --all` |
+
+## Orden de arranque del sistema completo (modo manual)
+
+El trigger es el paso **8** del orden completo, explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` y `notification_db`.
