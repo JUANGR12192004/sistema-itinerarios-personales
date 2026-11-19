@@ -31,5 +31,13 @@ async def correlation_id_middleware(
 
 
 def get_correlation_id(request: Request) -> str:
-    """Devuelve el correlation ID de la solicitud (o genera uno si el middleware no corrió)."""
-    return getattr(request.state, "correlation_id", None) or str(uuid.uuid4())
+    """Devuelve el correlation ID de la solicitud (o genera uno si el middleware no corrió).
+
+    El generado se guarda en request.state: así el log y la respuesta de un mismo error
+    usan el mismo valor aunque esta función se llame más de una vez.
+    """
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+        request.state.correlation_id = correlation_id
+    return correlation_id

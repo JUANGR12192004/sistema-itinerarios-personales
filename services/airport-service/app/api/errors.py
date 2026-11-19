@@ -117,7 +117,16 @@ def _http_error(request: Request, error: Exception) -> JSONResponse:
 def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
     # exc_info=error: en el hilo del threadpool no hay una "excepción en curso", así que
     # logger.exception no encontraría el traceback por sí solo.
-    logger.exception("Error inesperado procesando %s %s", request.method, request.url.path, exc_info=error)
+    # extra={"correlation_id": ...}: este manejador lo ejecuta ServerErrorMiddleware, la capa más
+    # externa, donde no se ve el ContextVar que fija correlation_id_middleware (esa capa corre
+    # dentro de metrics_middleware, en otra tarea). Se toma de request.state, como la respuesta.
+    logger.exception(
+        "Error inesperado procesando %s %s",
+        request.method,
+        request.url.path,
+        exc_info=error,
+        extra={"correlation_id": get_correlation_id(request)},
+    )
     return error_response(
         request, status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Ocurrió un error interno inesperado"
     )

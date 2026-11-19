@@ -10,9 +10,10 @@ import logging
 from collections.abc import Iterator
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
-from app.api.correlation import CORRELATION_ID_HEADER
+from app.api.correlation import CORRELATION_ID_HEADER, get_correlation_id
 from app.api.dependencies import get_airport_provider
 from app.application.exceptions import AirportProviderUnavailableError
 from app.main import create_app
@@ -77,6 +78,38 @@ def test_unexpected_error_log_keeps_the_traceback(client: TestClient, log_handle
     assert record.getMessage() == "Error inesperado procesando GET /airports"
     assert record.exc_info is not None
     assert record.exc_info[0] is RuntimeError
+
+
+def test_unexpected_error_log_has_the_received_correlation_id(
+    client: TestClient, log_handler: ListHandler
+) -> None:
+    # El 500 lo atiende ServerErrorMiddleware, la capa más externa: allí no se ve el ContextVar
+    # que fija correlation_id_middleware (corre dentro de metrics_middleware, en otra tarea).
+    client.get("/airports", headers={CORRELATION_ID_HEADER: "prueba-500"})
+
+    [record] = [r for r in log_handler.records if r.levelno == logging.ERROR]
+    assert record.correlation_id == "prueba-500"  # type: ignore[attr-defined]
+
+
+def test_unexpected_error_log_and_response_share_the_generated_correlation_id(
+    client: TestClient, log_handler: ListHandler
+) -> None:
+    response = client.get("/airports")
+
+    [record] = [r for r in log_handler.records if r.levelno == logging.ERROR]
+    assert record.correlation_id  # type: ignore[attr-defined]
+    assert record.correlation_id == response.json()["correlation_id"]  # type: ignore[attr-defined]
+    assert record.correlation_id == response.headers[CORRELATION_ID_HEADER]  # type: ignore[attr-defined]
+
+
+def test_generated_correlation_id_is_kept_for_the_rest_of_the_request() -> None:
+    # Sin el middleware (por ejemplo, si el error ocurre antes): se genera una sola vez.
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+
+    first = get_correlation_id(request)
+
+    assert first
+    assert get_correlation_id(request) == first
 
 
 def test_known_error_handlers_keep_the_correlation_id_in_their_logs(log_handler: ListHandler) -> None:

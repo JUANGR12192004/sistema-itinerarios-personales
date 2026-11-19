@@ -1362,10 +1362,22 @@ pytest -v
   - S5863 (`tests/domain/test_coordinates.py`): **falso positivo** (comparaba dos instancias distintas con los mismos
     valores, no la misma expresión). Reescrita con dos variables y `assert first is not second`, para que se lea qué
     prueba: igualdad de objeto de valor.
-  - Hallazgo no corregido (fuera del alcance de la rama, no cambia con ella): el log `ERROR` de un 500 de Airport
-    Service sale con `correlation_id` vacío, aunque la respuesta sí lo lleva. El 500 lo atiende `ServerErrorMiddleware`,
-    fuera del middleware que guarda el correlation ID en el `ContextVar` (el `metrics_middleware`, más externo, ejecuta
-    los internos en otra tarea con una copia del contexto). Los errores conocidos (404, 422, 502, 503, 504) sí lo tienen.
   - Pruebas: `tests/api/test_error_handlers.py` (3) y 2 del `lifespan` en `tests/api/test_main.py`. Airport Service:
     **196 pasan** (con Redis). Verificado en Docker Compose con la API real: 200, 404 `AIRPORT_NOT_FOUND`, 422,
     `map-data` y parada limpia del contenedor.
+  - Hallazgo corregido en la misma rama (no era de SonarCloud ni lo causó la rama): el log `ERROR` de un 500 salía con
+    `correlation_id` vacío en Airport **e** Itinerary Service, aunque la respuesta sí lo llevaba. Causa (comprobada con
+    la pila de middlewares): el 500 lo atiende `ServerErrorMiddleware`, la capa más externa, y el middleware de
+    correlation ID corre dentro de `metrics_middleware` (`BaseHTTPMiddleware`), que ejecuta las capas internas en otra
+    tarea con una copia del contexto: el `ContextVar` fijado allí no se ve afuera. El `trace_id` sí aparecía (lo abre la
+    instrumentación de OpenTelemetry, más externa). Corrección: el manejador del 500 pasa
+    `extra={"correlation_id": ...}` tomado de `request.state` (`CorrelationIdFilter` respeta el valor si ya viene).
+    En Airport, `get_correlation_id` guarda en `request.state` el ID que genera, para que el log y la respuesta usen el
+    mismo. En Itinerary, `_cid` del manejador de errores leía el header o generaba un UUID nuevo: sin header, el cuerpo de
+    un error y el header de la respuesta traían IDs distintos, y con un header de más de 128 caracteres el cuerpo lo
+    devolvía sin recortar. Ahora usa `request.state` como Airport (por el gateway no ocurría: siempre envía un ID válido).
+    No se reordenaron los middlewares ni se cambió `libs/observability`. Pruebas: 3 más en
+    `test_error_handlers.py` de Airport (**198 pasan**) y `tests/api/test_error_log_correlation.py` en Itinerary (4,
+    fallaban antes de la corrección; **200 pasan**). Verificado en Compose: con `itinerary-postgres` detenido, `GET
+    /api/itineraries` con `X-Correlation-ID: demo-500-log` → 500 y log JSON `ERROR` con ese `correlation_id`, `trace_id`
+    y traceback; 422 directo sin header con el mismo ID en cuerpo y header; E2E 14 pasan dos veces.
