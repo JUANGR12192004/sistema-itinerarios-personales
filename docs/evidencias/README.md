@@ -5,7 +5,7 @@ Capturas y salidas de terminal que muestran el sistema funcionando. Las evidenci
 Docker Compose y la **API Colombia real**, salvo las pruebas E2E de la evidencia 01, que usan el simulador. Todos los
 datos son de ejemplo: nombres inventados y correos `@example.com`.
 
-Las evidencias 19 y 20 las toma el equipo desde su cuenta de SonarCloud y de GitHub. La 20 ya está; la 19 sigue
+Las evidencias 19 y 20 las tomó el equipo desde su cuenta de SonarCloud y de GitHub. No queda ninguna evidencia
 pendiente.
 
 ## Lista
@@ -30,7 +30,7 @@ pendiente.
 | 16 | [`16-grafana-dashboard.png`](16-grafana-dashboard.png) | Dashboard "Sistema de Itinerarios Personales": itinerarios creados, notificaciones, mensajes en DLQ (1, igual que RabbitMQ), solicitudes, latencias, relay y trigger | `capturar_evidencias.py grafana` |
 | 17 | [`17-rabbitmq-colas.png`](17-rabbitmq-colas.png) | Panel de RabbitMQ: la cola `notification.itinerary-created` vacía y con su consumidor, y `notification.itinerary-created.dlq` con 1 mensaje | `capturar_evidencias.py rabbitmq` |
 | 18 | [`18-rabbitmq-dlq-mensaje.png`](18-rabbitmq-dlq-mensaje.png) | El mensaje de la DLQ leído sin sacarlo de la cola: header `x-death` con `reason: rejected` y la cola de origen | `capturar_evidencias.py rabbitmq` |
-| 19 | `19-sonarcloud.png` | **Pendiente (la toma el equipo).** Proyecto en SonarCloud sobre `main`: Quality Gate, seguridad, fiabilidad, mantenibilidad y duplicación | Captura manual en sonarcloud.io |
+| 19 | [`19-sonarcloud.png`](19-sonarcloud.png) | Resumen de SonarCloud sobre `main` en *Overall Code* (análisis del commit `baaf05a9`, merge del PR #33): Quality Gate **aprobado**, seguridad **A** (0 problemas), fiabilidad **A** (0 problemas), mantenibilidad **A** (32 problemas), 0 problemas aceptados y **2,2 %** de duplicación | Captura manual en sonarcloud.io, tomada por el equipo |
 | 20 | [`20-github-actions.png`](20-github-actions.png) | Los **8 checks** del pull request de la Fase 12 (#30) en verde ("All checks have passed"): los 7 jobs del workflow "Pruebas" (Airport Service, API Gateway, Docker Compose, Event Trigger, Itinerary Service, libs/observability y SendNotificationFunction) y *SonarCloud Code Analysis* con "Quality Gate passed" | Captura manual del pull request en GitHub, tomada por el equipo |
 
 Notas para leerlas:
@@ -159,5 +159,6 @@ Grafana (`admin`) son los de desarrollo local de `docker-compose.yml` y `.env.ex
 
 ### 6. Evidencias 19 y 20 (manuales)
 
-Guardar las capturas con esos nombres en esta carpeta y quitar "Pendiente" en la tabla de arriba y en la sección
+No se generan con los scripts: son capturas de las páginas de SonarCloud y de GitHub. Para actualizarlas, reemplazar
+la imagen en esta carpeta con el mismo nombre y ajustar su descripción en la tabla de arriba y en la sección
 [Evidencias](../../README.md#evidencias) del README raíz.

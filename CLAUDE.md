@@ -354,7 +354,7 @@ sistema-itinerarios-personales/
 │   ├── 08-demostraciones.md        ← Fase 12: demostraciones de punta a punta y de observabilidad
 │   ├── 09-guia-sustentacion.md     ← Fase 12: preparación, guion, reparto y preguntas probables
 │   ├── 10-historial-de-fases.md    ← Fase 12: resumen de lo que aportó cada fase
-│   ├── evidencias/                 ← Fase 12: README.md (índice) y las evidencias 01 a 18 (.txt y .png)
+│   ├── evidencias/                 ← Fase 12: README.md (índice) y las evidencias 01 a 20 (.txt y .png)
 │   ├── asyncapi/asyncapi.yaml      ← Fase 4
 │   └── openapi/airport-service.json ← Fase 11: contrato HTTP publicado de Airport Service
 ├── libs/
@@ -1322,7 +1322,7 @@ pytest -v
       notificaciones; el mensaje de demostración en la DLQ. Los de las sesiones descartadas se borraron por la API.
 - **Fase 12:** completada y **fusionada en `main`** (PR #30, merge `aee3726`) con la **etiqueta `fase-12`**. La rama
   `fase-12-documentacion` se conserva como archivo de solo lectura. Las evidencias 19 (SonarCloud) y 20 (GitHub
-  Actions) las agrega el equipo.
+  Actions) las agregó el equipo después (ver más abajo).
 - **Rama `fix/commit-antes-de-responder`** (después de la Fase 12): el job "Docker Compose" falló de forma
   intermitente en la E2E `test_crud_completo_por_el_gateway` (DELETE → 204 y el GET inmediato → 200 en lugar de 404).
   - Causa: `get_db_session` hacía `session.commit()` después del `yield`, y en FastAPI 0.162 ese código (alcance
@@ -1381,3 +1381,13 @@ pytest -v
     fallaban antes de la corrección; **200 pasan**). Verificado en Compose: con `itinerary-postgres` detenido, `GET
     /api/itineraries` con `X-Correlation-ID: demo-500-log` → 500 y log JSON `ERROR` con ese `correlation_id`, `trace_id`
     y traceback; 422 directo sin header con el mismo ID en cuerpo y header; E2E 14 pasan dos veces.
+  - Fusionada en `main` (PR #33, merge `baaf05a`). El análisis de SonarCloud de ese commit sobre `main` (*Overall
+    Code*) quedó con Quality Gate aprobado, seguridad **A** (0 problemas), **fiabilidad A (0 problemas, antes C con 9)**,
+    mantenibilidad A (32 problemas; antes 35, sin haberlos tocado a propósito), 0 problemas aceptados y 2,2 % de
+    duplicación.
+- **Evidencia 19 de SonarCloud:** el equipo subió la captura de ese análisis desde GitHub (PR #34, merge `ba95cae`), pero
+  en `docs/19-sonarcloud.png`. La rama `docs/enlaza-evidencia-19` la mueve con `git mv` a
+  `docs/evidencias/19-sonarcloud.png` (aprobado por el usuario), la enlaza sin la marca "Pendiente" en
+  `docs/evidencias/README.md` y en la sección "Evidencias" del README raíz, enlaza las evidencias 19 y 20 en el paso 10
+  de `docs/09-guia-sustentacion.md` y actualiza la sección 7.5 (evidencias 01 a 20). **Las 20 evidencias están
+  completas.**

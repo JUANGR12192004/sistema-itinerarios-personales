@@ -177,7 +177,7 @@ Grafana: itinerarios creados, notificaciones, mensajes en la DLQ (debe coincidir
 
 Evidencia [01](evidencias/01-pruebas.txt): **620 pruebas** en siete suites, sin fallos ni omitidas; pirámide de cinco
 niveles (unitarias, integración, contrato, gateway y E2E). El CI las ejecuta en cada pull request y SonarCloud analiza
-la calidad (evidencias 19 y 20).
+la calidad (evidencias [19](evidencias/19-sonarcloud.png) y [20](evidencias/20-github-actions.png)).
 
 ### Paso 11. Cierre (1 min)
 
