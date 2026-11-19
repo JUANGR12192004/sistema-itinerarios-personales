@@ -47,6 +47,7 @@ class FakeItineraryRepository(ItineraryRepository):
         return sorted(self._store.values(), key=lambda it: it.created_at)
 
     def delete(self, itinerary_id: UUID) -> None:
+        self._calls.append("delete")
         self._store.pop(itinerary_id, None)
 
 
