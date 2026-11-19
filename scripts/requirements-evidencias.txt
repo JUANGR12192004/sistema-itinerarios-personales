@@ -1,0 +1,5 @@
+# Herramienta de desarrollo para regenerar las capturas de docs/evidencias (Fase 12).
+# NO es dependencia de ningún servicio: se instala en su propio entorno virtual, scripts/.venv.
+#   python -m pip install -r scripts/requirements-evidencias.txt
+#   python -m playwright install chromium
+playwright==1.64.1
