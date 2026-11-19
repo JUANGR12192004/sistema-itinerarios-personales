@@ -35,7 +35,7 @@ Requisitos: el sistema levantado con Docker Compose o con los nueve pasos del [a
 > Los `curl` no cambian.
 
 Las solicitudes entran por el gateway
-(`http://localhost:8000/api/itineraries`), igual que lo hará el frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
+(`http://localhost:8000/api/itineraries`), igual que las del frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
 PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
 `docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
 ruta del archivo con `/`). El cuerpo del itinerario está en `demo\create-itinerary.json`; si la fecha `2026-12-15` ya

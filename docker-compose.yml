@@ -8,7 +8,7 @@
 # Detenerlo y BORRAR los datos:
 #   docker compose down -v
 #
-# Reemplaza los 9 pasos manuales del README (docker run + 4 terminales con uvicorn).
+# Reemplaza los 9 pasos manuales de docs/07-ejecucion-manual.md (docker run + 4 terminales con uvicorn).
 # Los puertos publicados en el equipo son los de CLAUDE.md, sección 7.6, así que las
 # demostraciones, Swagger y las pruebas de integración siguen usando las mismas URL.
 #

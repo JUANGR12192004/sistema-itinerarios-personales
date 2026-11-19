@@ -795,7 +795,7 @@ sequenceDiagram
     end
 ```
 
-**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados, y la función es idempotente con `event_id` (ADR-030). En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 a 8), la topología de RabbitMQ en la sección 3.3 y el contrato en `docs/asyncapi/asyncapi.yaml`. Los fallos del lado del consumidor (función o base de datos caídas, evento inválido, reprocesamiento de la DLQ) están en la sección 5.1.
+**Nota:** desde la Fase 5 la solicitud HTTP no publica en RabbitMQ: guarda el itinerario y su evento en la misma transacción y responde 201. El Outbox Relay, un proceso aparte, publica el evento después y lo reintenta si RabbitMQ no está disponible (ADR-025, ADR-026). La entrega es "al menos una vez": puede haber duplicados, y la función es idempotente con `event_id` (ADR-030). En la Fase 4 la publicación era directa, tras el commit (ADR-022), y un fallo de RabbitMQ perdía el evento. El detalle está en `docs/04-comunicacion-y-eventos.md` (secciones 6 a 8), la topología de RabbitMQ en la sección 3.3 de ese mismo documento y el contrato en `docs/asyncapi/asyncapi.yaml`. Los fallos del lado del consumidor (función o base de datos caídas, evento inválido, reprocesamiento de la DLQ) están en la sección 5.1.
 
 ### 5.1. Fallos en el consumidor: reintentos, DLQ y reprocesamiento (Fase 6)
 
@@ -1009,7 +1009,8 @@ El `correlation_id` viaja en el header `X-Correlation-ID` desde el gateway hasta
 
 ## 8. Consideraciones
 
-- Los diagramas representan el sistema implementado al cierre de la Fase 11. Si el código cambia, el diagrama afectado se actualiza en el mismo pull request.
+- Los diagramas representan el sistema implementado al cierre del proyecto (Fase 12): los de clases salen del código de `app/` y el relacional, de las migraciones de Alembic. Si el código cambia, el diagrama afectado se actualiza en el mismo pull request.
 - Los nombres de endpoints, colas y contratos coinciden con la implementación; los contratos los verifican las pruebas de contrato (`docs/openapi/airport-service.json` y `docs/asyncapi/asyncapi.yaml`, ADR-042).
-- La propiedad de las bases de datos se mantendrá por servicio.
-- Los detalles de infraestructura no deberán introducir dependencias directas en el dominio.
+- Cada base de datos pertenece a un solo componente (ADR-004, ADR-029); en Docker Compose, cada una está además en su propia red (ADR-041).
+- El dominio no depende de la infraestructura: ninguna flecha de los diagramas de clases sale del dominio (regla de dependencias, ADR-002).
+- El `README.md` raíz incluye copias de los diagramas de secuencia, relacional y despliegue: si uno cambia, se actualiza en los dos lugares.

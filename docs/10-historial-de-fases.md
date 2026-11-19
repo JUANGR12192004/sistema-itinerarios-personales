@@ -95,7 +95,7 @@ Logs JSON estructurados, trazas distribuidas con OpenTelemetry y métricas con P
 | Métrica de negocio | `itineraries_created_total` en Itinerary Service: responde "¿funciona el sistema?" sin abrir logs |
 | Métricas del Outbox Relay (puerto 9101) | `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total` |
 | Métricas del Event Trigger (puerto 9102) | `notifications_dispatched_total{outcome}`: `success`, `rejected`, `infrastructure_error`, `function_error` |
-| Prometheus (puerto 9090) | Consulta los cuatro endpoints cada 15 s. Configurado en `observability/prometheus/prometheus.yml` |
+| Prometheus (puerto 9090) | Consulta los cuatro endpoints cada 15 s. Configurado en `observability/prometheus/prometheus.yml` en el modo manual y en `prometheus.compose.yml` con Docker Compose (Fase 10) |
 | Grafana (puerto 3000) | Dashboard preconfigurado con paneles de negocio, HTTP, latencia (p50/p95/p99) y relay/trigger. Provisioning automático desde `observability/grafana/provisioning/` |
 
 La demostración completa está en la sección [Demostración de observabilidad](08-demostraciones.md#demostración-de-observabilidad).
@@ -130,4 +130,6 @@ Pirámide de pruebas en cinco niveles (ADR-042; cómo correr cada uno en [Prueba
   componentes y métricas en Prometheus. Las ejecuta el job "Docker Compose" del CI.
 - **Salida limpia**: las advertencias de Starlette y pika (de terceros) se filtran con precisión.
 
-Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas**.
+Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas** al cerrar la Fase 11. Después, la rama `fix/limpieza-config`
+borró 21 pruebas que repetían las de `libs/observability` y movió una a ese paquete: el total vigente es **619**
+(ver [Pruebas](../README.md#pruebas)).

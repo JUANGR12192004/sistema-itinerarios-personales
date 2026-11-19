@@ -47,23 +47,47 @@ RabbitMQ tarda unos segundos: está listo cuando `docker logs itinerary-rabbitmq
 ## 2. Observabilidad (Fase 9)
 
 Stack de observabilidad (Jaeger, Prometheus y Grafana). Es opcional para los pasos siguientes; sin él el sistema
-funciona igual, pero no se ven trazas ni métricas. **La primera vez** se crean:
+funciona igual, pero no se ven trazas ni métricas.
 
-```
+Prometheus y Grafana comparten la red Docker `observability-net`: el datasource de Grafana busca a Prometheus por
+el nombre `prometheus` (`observability/grafana/provisioning/datasources/prometheus.yml`), y ese nombre solo se
+resuelve dentro de una red Docker común. Grafana monta además la carpeta `dashboards/`, de donde carga el dashboard.
+Prometheus llega a los servicios del equipo por `host.docker.internal` (`observability/prometheus/prometheus.yml`).
+
+**La primera vez** se crean. **CMD:**
+
+```cmd
+docker network create observability-net
 docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
-docker run -d --name prometheus -p 9090:9090 -v "%CD%\observability\prometheus\prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
-docker run -d --name grafana -p 3000:3000 -v "%CD%\observability\grafana\provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
+docker run -d --name prometheus --network observability-net -p 9090:9090 -v "%CD%\observability\prometheus\prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
+docker run -d --name grafana --network observability-net -p 3000:3000 -v "%CD%\observability\grafana\provisioning:/etc/grafana/provisioning" -v "%CD%\observability\grafana\dashboards:/var/lib/grafana/dashboards" grafana/grafana:11.3.1
 ```
 
-En macOS (zsh) reemplazar `%CD%` por `$(pwd)`:
+**PowerShell** (la carpeta actual es `${PWD}`, no `%CD%`):
+
+```powershell
+docker network create observability-net
+docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
+docker run -d --name prometheus --network observability-net -p 9090:9090 -v "${PWD}\observability\prometheus\prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
+docker run -d --name grafana --network observability-net -p 3000:3000 -v "${PWD}\observability\grafana\provisioning:/etc/grafana/provisioning" -v "${PWD}\observability\grafana\dashboards:/var/lib/grafana/dashboards" grafana/grafana:11.3.1
+```
+
+**macOS (zsh):**
 
 ```bash
+docker network create observability-net
 docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
-docker run -d --name prometheus -p 9090:9090 -v "$(pwd)/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
-docker run -d --name grafana -p 3000:3000 -v "$(pwd)/observability/grafana/provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
+docker run -d --name prometheus --network observability-net -p 9090:9090 -v "$(pwd)/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
+docker run -d --name grafana --network observability-net -p 3000:3000 -v "$(pwd)/observability/grafana/provisioning:/etc/grafana/provisioning" -v "$(pwd)/observability/grafana/dashboards:/var/lib/grafana/dashboards" grafana/grafana:11.3.1
 ```
 
 **Las veces siguientes:** `docker start jaeger prometheus grafana`.
+
+> *Corrección (Fase 12):* hasta la Fase 11 estos comandos no usaban la red `observability-net` ni montaban
+> `dashboards/`. Con ellos Grafana arrancaba sin dashboard y su datasource fallaba
+> (`lookup prometheus: no such host`). Se comprobó el 2026-11-18 en macOS: con los comandos de arriba el dashboard
+> "Sistema de Itinerarios Personales" se carga, el datasource responde y los cuatro destinos de Prometheus están `up`.
+> Si los contenedores ya existían, se borran con `docker rm -f prometheus grafana` y se crean de nuevo.
 
 Interfaces:
 
