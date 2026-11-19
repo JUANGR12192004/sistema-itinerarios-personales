@@ -22,12 +22,18 @@ from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 
 def get_db_session() -> Generator[Session, None, None]:
-    """Sesión SQLAlchemy con commit automático al salir sin error y rollback si hay excepción."""
+    """Sesión SQLAlchemy por solicitud: rollback si hay excepción y cierre al terminar.
+
+    NO confirma (commit) la transacción: lo hace cada caso de uso de escritura con el
+    puerto UnitOfWork. En FastAPI 0.162 el código que va después del `yield` corre
+    DESPUÉS de enviar la respuesta; un commit aquí haría que el cliente recibiera el
+    200/204 antes de que los cambios estuvieran guardados (ADR-019). Si un caso de uso
+    olvida el commit, sus cambios se descartan al cerrar la sesión.
+    """
     factory = get_session_factory()
     session = factory()
     try:
         yield session
-        session.commit()
     except Exception:
         session.rollback()
         raise
