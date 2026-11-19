@@ -28,6 +28,7 @@ Con ese comando se levantan los 15 contenedores del sistema; el frontend queda e
 - [Endpoints](#endpoints)
 - [Eventos](#eventos)
 - [Pruebas](#pruebas)
+- [Evidencias](#evidencias)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Decisiones de arquitectura](#decisiones-de-arquitectura)
 - [Estructura del repositorio](#estructura-del-repositorio)
@@ -780,18 +781,19 @@ lentas, de todo el sistema, arriba.
 | Gateway | La configuración de Nginx en un contenedor propio contra servidores eco | 429 al superar el límite |
 | Punta a punta (E2E) | El sistema completo por el gateway, con un simulador de API Colombia | Crear un itinerario y encontrarlo en `notification_history` |
 
-Resultado con todo el sistema encendido (2026-11-18, macOS, `docker compose` con el simulador):
+Resultado con todo el sistema encendido (2026-11-18, macOS, `docker compose` con el simulador; evidencia
+[01](docs/evidencias/01-pruebas.txt)):
 
 | Suite | Carpeta | Pruebas | Necesita |
 |---|---|---|---|
 | Airport Service | `services/airport-service` | 191 | Nada (Redis opcional) |
 | Itinerary Service | `services/itinerary-service` | 186 | PostgreSQL y RabbitMQ para las de integración |
 | SendNotificationFunction | `serverless/send-notification-function` | 70 | PostgreSQL para las de integración |
-| Event Trigger | `serverless/event-trigger` | 86 | RabbitMQ y la función para las de integración |
+| Event Trigger | `serverless/event-trigger` | 87 | RabbitMQ y la función para las de integración |
 | Paquete compartido | `libs/observability` | 19 | Nada |
 | API Gateway | `gateway` | 53 | Docker (y el gateway real para 3 *smoke*) |
 | Punta a punta | `tests/e2e` | 14 | El sistema con el simulador (abajo) |
-| **Total** | | **619** | **0 fallos, 0 omitidas, 0 advertencias** |
+| **Total** | | **620** | **0 fallos, 0 omitidas, 0 advertencias** |
 
 Sin los servicios, las pruebas de integración quedan **SKIPPED** (no fallan). Las de integración usan bases propias
 (`itinerary_db_test`, `notification_db_test`) y colas con nombres `test-<id>.`: se pueden correr durante una
@@ -830,12 +832,50 @@ pytest -v
 ```
 
 (En PowerShell, `.venv\Scripts\Activate.ps1` en lugar de `activate`.) Para volver a usar la API Colombia real:
-`docker compose up -d` (sin el segundo archivo) recrea Airport Service con la dirección real.
+`docker compose up -d --remove-orphans` (sin el segundo archivo) recrea Airport Service con la dirección real; después,
+`docker compose restart api-gateway` (el contenedor nuevo puede tener otra IP, ADR-041) y
+`docker compose exec redis redis-cli FLUSHALL` (la caché todavía tiene los 5 aeropuertos del simulador; sin este paso
+el mapa mostraría 4 durante 10 minutos).
 
 **Contrato de Airport Service.** Si cambias su API a propósito, regenera `docs/openapi/airport-service.json` desde
 `services/airport-service` y revisa el diff: `$env:UPDATE_CONTRACTS = "1"; pytest tests/test_openapi_contract.py`
 (PowerShell), `set UPDATE_CONTRACTS=1 && pytest tests/test_openapi_contract.py` (CMD) o
 `UPDATE_CONTRACTS=1 pytest tests/test_openapi_contract.py` (zsh).
+
+## Evidencias
+
+Capturas y salidas de terminal del sistema funcionando, obtenidas el 2026-11-18 en una sola sesión con Docker Compose
+y la API Colombia real. El índice completo, con qué debe verse en cada una y cómo regenerarlas con los scripts de
+`scripts/`, está en [`docs/evidencias/README.md`](docs/evidencias/README.md).
+
+| N.º | Evidencia | Archivo |
+|---|---|---|
+| 01 | Totales de las siete suites de pruebas (620) | [`01-pruebas.txt`](docs/evidencias/01-pruebas.txt) |
+| 02 | `docker compose ps` con todo el sistema sano | [`02-docker-compose-ps.txt`](docs/evidencias/02-docker-compose-ps.txt) |
+| 03 | Respuesta del gateway con `X-Correlation-ID` | [`03-gateway-correlation-id.txt`](docs/evidencias/03-gateway-correlation-id.txt) |
+| 04 | 429 del rate limiting | [`04-rate-limit-429.txt`](docs/evidencias/04-rate-limit-429.txt) |
+| 05 | Registro `SENT` en `notification_history` | [`05-notification-history.txt`](docs/evidencias/05-notification-history.txt) |
+| 06 | Outbox: RabbitMQ detenido, evento pendiente y publicado al volver | [`06-outbox-rabbitmq-detenido.txt`](docs/evidencias/06-outbox-rabbitmq-detenido.txt) |
+| 07 | Evento inválido enviado a la DLQ | [`07-dlq-evento-invalido.txt`](docs/evidencias/07-dlq-evento-invalido.txt) |
+| 08 | Swagger de Airport Service | [`08-swagger-airport.png`](docs/evidencias/08-swagger-airport.png) |
+| 09 | Swagger de Itinerary Service | [`09-swagger-itinerary.png`](docs/evidencias/09-swagger-itinerary.png) |
+| 10 | Mapa del frontend (51 aeropuertos) | [`10-frontend-mapa.png`](docs/evidencias/10-frontend-mapa.png) |
+| 11 | CRUD: crear | [`11-frontend-crear.png`](docs/evidencias/11-frontend-crear.png) |
+| 12 | CRUD: consultar | [`12-frontend-consultar.png`](docs/evidencias/12-frontend-consultar.png) |
+| 13 | CRUD: actualizar | [`13-frontend-actualizar.png`](docs/evidencias/13-frontend-actualizar.png) |
+| 14 | CRUD: eliminar | [`14-frontend-eliminar.png`](docs/evidencias/14-frontend-eliminar.png) |
+| 15 | Traza de punta a punta en Jaeger (6 servicios) | [`15-jaeger-traza.png`](docs/evidencias/15-jaeger-traza.png) |
+| 16 | Dashboard de Grafana | [`16-grafana-dashboard.png`](docs/evidencias/16-grafana-dashboard.png) |
+| 17 | Panel de RabbitMQ: cola y DLQ | [`17-rabbitmq-colas.png`](docs/evidencias/17-rabbitmq-colas.png) |
+| 18 | Mensaje de la DLQ con `x-death` | [`18-rabbitmq-dlq-mensaje.png`](docs/evidencias/18-rabbitmq-dlq-mensaje.png) |
+| 19 | SonarCloud | **Pendiente** (la toma el equipo): `docs/evidencias/19-sonarcloud.png` |
+| 20 | GitHub Actions | **Pendiente** (la toma el equipo): `docs/evidencias/20-github-actions.png` |
+
+Así se ven el mapa y la traza:
+
+![Mapa de aeropuertos en el frontend](docs/evidencias/10-frontend-mapa.png)
+
+![Traza de punta a punta en Jaeger](docs/evidencias/15-jaeger-traza.png)
 
 ## Limitaciones conocidas
 
@@ -915,7 +955,7 @@ sistema-itinerarios-personales/
 ├── docker-compose.e2e.yml        ← simulador de API Colombia para las pruebas E2E
 ├── .env.example                  ← variables opcionales de Docker Compose
 ├── .github/                      ← plantillas de PR e issue, workflow de CI (tests.yml)
-├── docs/                         ← documentación 01 a 10, asyncapi/ y openapi/
+├── docs/                         ← documentación 01 a 10, evidencias/, asyncapi/ y openapi/
 ├── services/
 │   ├── airport-service/          ← app/ (domain, application, infrastructure, api), tests/
 │   └── itinerary-service/        ← app/ (… + outbox_relay.py), alembic/, tests/
@@ -926,7 +966,7 @@ sistema-itinerarios-personales/
 ├── frontend/                     ← index.html, css/, js/ (Plotly local)
 ├── libs/observability/           ← logging, trazas y métricas comunes (Microservice Chassis)
 ├── observability/                ← configuración de Prometheus y Grafana (dashboard)
-├── scripts/                      ← lock_requirements.py (dependencias con hashes de las imágenes)
+├── scripts/                      ← lock_requirements.py y los scripts de las evidencias
 └── tests/e2e/                    ← pruebas de punta a punta y simulador de API Colombia
 ```
 
@@ -942,7 +982,9 @@ sistema-itinerarios-personales/
 | [`docs/06-decisiones-arquitectonicas.md`](docs/06-decisiones-arquitectonicas.md) | Registro de decisiones técnicas (ADR-001 a ADR-043) |
 | [`docs/07-ejecucion-manual.md`](docs/07-ejecucion-manual.md) | Arranque manual, componente por componente (modo desarrollo) |
 | [`docs/08-demostraciones.md`](docs/08-demostraciones.md) | Demostraciones de punta a punta y de observabilidad |
+| [`docs/09-guia-sustentacion.md`](docs/09-guia-sustentacion.md) | Guía para la sustentación: preparación, guion, reparto y preguntas probables |
 | [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md) | Resumen de lo que aportó cada fase |
+| [`docs/evidencias/`](docs/evidencias/README.md) | Evidencias (capturas y salidas de terminal) y cómo regenerarlas |
 | [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml) | Contrato del evento `ItineraryCreatedEvent` y cómo se publica y se consume |
 | [`docs/openapi/airport-service.json`](docs/openapi/airport-service.json) | Contrato HTTP publicado de Airport Service |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Flujo de trabajo del equipo: issues, ramas, commits, pull requests y revisión |
@@ -977,10 +1019,10 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | 9 | Observabilidad | Completada |
 | 10 | Docker y Docker Compose | Completada |
 | 11 | Pruebas | Completada |
-| 12 | Documentación y entrega | En curso |
+| 12 | Documentación y entrega | Completada (pendiente del pull request, el merge y la etiqueta `fase-12`) |
 
-**Última fase completada:** Fase 11 — Pruebas. **En curso:** Fase 12 — Documentación y entrega. Lo que aportó cada
-fase está resumido en [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md).
+**Las 13 fases están completas.** La Fase 12 (documentación y entrega) queda en la rama `fase-12-documentacion` hasta
+su pull request. Lo que aportó cada fase está resumido en [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md).
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
@@ -1003,6 +1045,7 @@ comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.m
 | `fase-9-observabilidad` | Fase 9 — Observabilidad (logs JSON, OpenTelemetry y Jaeger, Prometheus y Grafana, `libs/observability`) | `fase-9` |
 | `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` |
 | `fase-11-pruebas` | Fase 11 — Pruebas (bases de integración propias, contratos HTTP y de eventos, punta a punta sobre Docker Compose) | `fase-11` |
+| `fase-12-documentacion` | Fase 12 — Documentación y entrega (README, diagramas de clases y relacional, evidencias, guía de sustentación) | `fase-12` (se crea tras el merge) |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.

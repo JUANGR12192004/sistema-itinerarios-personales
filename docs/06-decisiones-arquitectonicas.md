@@ -1284,6 +1284,8 @@ El Outbox Relay es un proceso aparte que publica los eventos pendientes. No reci
 - El Event Trigger extrae el `traceparent` de los headers AMQP (donde lo coloca la instrumentación de pika) y lo pasa a `LambdaFunctionInvoker`, que lo inyecta en el cuerpo del evento al invocar la función.
 - La SendNotificationFunction restaura el contexto en su handler.
 
+*Corrección (Fase 12, entrega 12C):* la instrumentación de pika deja activo el span del último mensaje recibido hasta que llega el siguiente. Si el Event Trigger perdía la conexión con RabbitMQ antes de eso, el span quedaba activo para siempre, y un mensaje posterior **sin** `traceparent` (por ejemplo, uno publicado a mano en el panel) aparecía en Jaeger como hijo de una traza ajena. Los eventos reales no se veían afectados porque siempre traen `traceparent`. `RabbitMQConsumer.run` procesa ahora cada conexión en una copia del contexto (`contextvars.copy_context().run`), con una prueba que reproduce el caso; se comprobó en el sistema real deteniendo RabbitMQ.
+
 ### Justificación
 
 La columna `traceparent` es el único mecanismo disponible para cruzar la barrera entre la escritura en la outbox y la publicación en RabbitMQ, que ocurren en dos procesos distintos y en momentos distintos.
@@ -1309,7 +1311,7 @@ Los logs y las trazas permiten depurar casos concretos, pero no dan una visión 
 - **Outbox Relay** (proceso aparte, `python -m app.outbox_relay`): llama a `start_http_server(settings.outbox_relay_metrics_port)` al arrancar (puerto 9101 por defecto). Contadores propios: `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total`, incrementados en cada ciclo.
 - **Event Trigger** (proceso aparte, `python -m app.main`): llama a `start_http_server(settings.metrics_port)` al arrancar (puerto 9102 por defecto). Contador `notifications_dispatched_total{outcome}`, con valores `success`, `rejected`, `infrastructure_error` y `function_error`, incrementado en `DeliveryHandler`.
 - **Prometheus** (imagen `prom/prometheus:v2.55.0`, puerto 9090): configurado en `observability/prometheus/prometheus.yml` con cuatro jobs (uno por endpoint), scraping cada 15 segundos.
-- **Grafana** (imagen `grafana/grafana:11.3.1`, puerto 3000): provisioning automático en `observability/grafana/provisioning/`. Dashboard `sistema-itinerarios.json` con cuatro secciones: negocio (itinerarios creados, notificaciones por resultado, mensajes procesados por el relay, ciclos del relay), solicitudes HTTP por servicio, latencia (p50/p95/p99 en ventana de 5 minutos) y detalle del relay y el trigger.
+- **Grafana** (imagen `grafana/grafana:11.3.1`, puerto 3000): provisioning automático en `observability/grafana/provisioning/`. *Corrección (Fase 12, entrega 12C):* el panel "Mensajes en DLQ" consultaba `outbox_events_dead_total` (mensajes venenosos de la outbox, ADR-027) y marcaba 0 aunque la DLQ de RabbitMQ tuviera mensajes. Ahora consulta `sum(notifications_dispatched_total{outcome=~"rejected|function_error"})`: los mensajes que el Event Trigger envió a la DLQ desde que arrancó. Dashboard `sistema-itinerarios.json` con cuatro secciones: negocio (itinerarios creados, notificaciones por resultado, mensajes procesados por el relay, ciclos del relay), solicitudes HTTP por servicio, latencia (p50/p95/p99 en ventana de 5 minutos) y detalle del relay y el trigger.
 
 ### Justificación
 
@@ -1481,6 +1483,8 @@ Se adopta una **pirámide de pruebas** con cinco niveles, cada uno con un propó
 - Con todo encendido (Fase 11): 639 pruebas en siete suites, 0 fallos, 0 omitidas, 0 advertencias. Sin servicios, las de integración quedan SKIPPED y el resto pasa.
 
 *Actualización (Fase 12):* la rama `fix/limpieza-config` borró 21 pruebas de Airport e Itinerary Service que solo repetían las de `libs/observability` y movió una a ese paquete. Ejecutadas el 2026-11-18 con todo encendido: **619 pruebas** (libs/observability 19, Airport 191, Itinerary 186, función 70, Event Trigger 86, gateway 53, E2E 14), 0 fallos, 0 omitidas, 0 advertencias.
+
+*Actualización (Fase 12, entrega 12C):* una prueba nueva del Event Trigger (contexto de traza tras perder la conexión, ver ADR-037) lleva el total a **620** (Event Trigger 87), comprobado en la evidencia `docs/evidencias/01-pruebas.txt`.
 
 ## ADR-043 — GenerateItineraryReportFunction no se implementa (alcance)
 

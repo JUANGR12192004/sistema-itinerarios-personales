@@ -418,8 +418,8 @@ la creación y durante varios ciclos del relay, y aun así el evento llegó a la
 ### Lo que queda por cuenta del consumidor
 
 El relay publica y **después** marca `published_at`. Si se detiene justo entre esos dos pasos, el evento se
-publicará otra vez (entrega **al menos una vez**). Por eso el consumidor de la Fase 6 debe ser **idempotente**
-con `event_id`. La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces` lo demuestra.
+publicará otra vez (entrega **al menos una vez**). Por eso el consumidor, SendNotificationFunction (Fase 6), es
+**idempotente** con `event_id` (ADR-030). La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces` lo demuestra.
 Los mensajes ilegibles de la outbox se descartan con `failed_at` y no se reintentan (ADR-027).
 Detalles: [`docs/04-comunicacion-y-eventos.md`](../../docs/04-comunicacion-y-eventos.md), sección 7.
 

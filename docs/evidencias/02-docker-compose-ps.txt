@@ -1,0 +1,22 @@
+Evidencia 02 — docker compose ps con todo el sistema sano
+Fecha: 2026-11-18 23:00:06 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py estado
+
+$ docker compose ps -a --format 'table {{.Service}}	{{.Image}}	{{.Status}}	{{.Ports}}'
+SERVICE                      IMAGE                                                                     STATUS                     PORTS
+airport-service              sistema-itinerarios/airport-service:local                                 Up 2 minutes (healthy)     0.0.0.0:8001->8001/tcp, [::]:8001->8001/tcp
+api-gateway                  sistema-itinerarios/api-gateway:local                                     Up 2 minutes (healthy)     0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+event-trigger                sistema-itinerarios/event-trigger:local                                   Up 6 seconds               0.0.0.0:9102->9102/tcp, [::]:9102->9102/tcp
+grafana                      grafana/grafana:11.3.1                                                    Up 17 minutes              0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+itinerary-migrations         sistema-itinerarios/itinerary-service:local                               Exited (0) 2 minutes ago   
+itinerary-postgres           postgres:16-alpine                                                        Up 14 minutes (healthy)    0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
+itinerary-service            sistema-itinerarios/itinerary-service:local                               Up 17 minutes (healthy)    0.0.0.0:8002->8002/tcp, [::]:8002->8002/tcp
+jaeger                       jaegertracing/jaeger:2.23.0                                               Up 17 minutes              0.0.0.0:4317->4317/tcp, [::]:4317->4317/tcp, 0.0.0.0:16686->16686/tcp, [::]:16686->16686/tcp
+notification-migrations      sha256:11335b7bd23d9e3749d5f2dfc20647c2cc1916d5b6e443e8cb2cd011b78dcd4b   Exited (0) 2 minutes ago   
+notification-postgres        postgres:16-alpine                                                        Up 14 minutes (healthy)    0.0.0.0:5434->5432/tcp, [::]:5434->5432/tcp
+outbox-relay                 sistema-itinerarios/itinerary-service:local                               Up 17 minutes              0.0.0.0:9101->9101/tcp, [::]:9101->9101/tcp
+prometheus                   prom/prometheus:v2.55.0                                                   Up 17 minutes              0.0.0.0:9090->9090/tcp, [::]:9090->9090/tcp
+rabbitmq                     rabbitmq:3.13-management                                                  Up 2 minutes (healthy)     0.0.0.0:5672->5672/tcp, [::]:5672->5672/tcp, 0.0.0.0:15672->15672/tcp, [::]:15672->15672/tcp
+redis                        redis:7.4-alpine                                                          Up 14 minutes (healthy)    0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+send-notification-function   sha256:2e5c79f0d2efaf80e2475ddd6a2174491e36659569ec3a06701dc9df7d5accc5   Up 17 minutes              0.0.0.0:9000->8080/tcp, [::]:9000->8080/tcp

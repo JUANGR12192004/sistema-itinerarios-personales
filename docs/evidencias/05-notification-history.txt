@@ -1,0 +1,25 @@
+Evidencia 05 — Registro SENT en notification_history
+Fecha: 2026-11-18 23:00:10 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py notificacion
+
+Itinerario creado en la evidencia 03 (X-Correlation-ID: evidencia-20261118230006).
+
+1) El evento en la outbox de Itinerary Service, ya publicado por el Outbox Relay:
+$ docker compose exec -T itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id AS event_id, event_type, published_at, attempts FROM outbox_events WHERE payload->>'correlation_id' = 'evidencia-20261118230006';"
+               event_id               |    event_type     |         published_at          | attempts 
+--------------------------------------+-------------------+-------------------------------+----------
+ bd93b2fa-7534-4483-839a-2a134cb33878 | itinerary.created | 2026-11-19 04:00:09.483876+00 |        0
+(1 row)
+
+2) La notificación en el historial de SendNotificationFunction (otra base de datos), con el mismo
+   event_id y el mismo correlation_id que llegó al gateway:
+$ docker compose exec -T notification-postgres psql -U notification -d notification_db -c "SELECT event_id, itinerary_id, recipient, channel, status, correlation_id, processed_at FROM notification_history WHERE correlation_id = 'evidencia-20261118230006';"
+               event_id               |             itinerary_id             |    recipient    |     channel     | status |      correlation_id      |         processed_at          
+--------------------------------------+--------------------------------------+-----------------+-----------------+--------+--------------------------+-------------------------------
+ bd93b2fa-7534-4483-839a-2a134cb33878 | 8f8151d5-0527-477a-a0f0-41eacb09e550 | ana@example.com | simulated-email | SENT   | evidencia-20261118230006 | 2026-11-19 04:00:09.485759+00
+(1 row)
+
+3) Log de la función:
+2026-11-19T04:00:09.491Z INFO Correo simulado enviado a ana@example.com: Hola Ana Pérez: tu itinerario 8f8151d5-0527-477a-a0f0-41eacb09e550 quedó registrado. Salida desde el aeropuerto 1 hacia el aeropuerto 5 el 2026-12-18T08:00:00-05:00, con una dur
+2026-11-19T04:00:09.491Z INFO Notificación registrada: event_id=bd93b2fa-7534-4483-839a-2a134cb33878 notification_id=47d89b45-7bf9-42e2-abf5-2fb71cf742a4 status=SENT correlation_id=evidencia-20261118230006

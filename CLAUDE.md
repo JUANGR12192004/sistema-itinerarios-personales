@@ -271,6 +271,7 @@ Estas son las reglas que debes seguir tú:
 | Observabilidad | `python-json-logger==4.2.0` (logs JSON), `opentelemetry-sdk==1.45.2` + instrumentadores (trazas), `prometheus-client==0.21.1` (métricas), Jaeger 2.23.0, Grafana 11.3.1 |
 | Paquete compartido | `libs/observability` — Microservice Chassis Pattern: logging, trazas y métricas HTTP comunes a los cuatro componentes Python (ADR-040) |
 | Documentación | Swagger / OpenAPI, AsyncAPI |
+| Evidencias (herramienta de desarrollo) | `playwright==1.64.1` con Chromium, solo en `scripts/requirements-evidencias.txt` y el entorno `scripts/.venv`; no es dependencia de ningún servicio (Fase 12) |
 | Pruebas | pytest, TestClient de FastAPI, respx (simular HTTP externo), `pyyaml==6.0.3` (dependencia directa solo en `requirements-dev.txt` de SendNotificationFunction, para leer el AsyncAPI en su prueba de contrato; Fase 11) |
 | Calidad de código | SonarCloud con **Automatic Analysis** (lo conectó el equipo desde SonarCloud con su GitHub App; no hay paso en GitHub Actions). Se configura con `.sonarcloud.properties` en la raíz: Python 3.12, `services`, `serverless` y `libs` como fuente (sin `tests` ni migraciones de Alembic) y las carpetas `tests` como código de pruebas (ADR-023, ADR-040) |
 
@@ -351,7 +352,9 @@ sistema-itinerarios-personales/
 │   ├── 01-planificacion.md ... 06-decisiones-arquitectonicas.md
 │   ├── 07-ejecucion-manual.md      ← Fase 12: arranque manual (modo desarrollo)
 │   ├── 08-demostraciones.md        ← Fase 12: demostraciones de punta a punta y de observabilidad
+│   ├── 09-guia-sustentacion.md     ← Fase 12: preparación, guion, reparto y preguntas probables
 │   ├── 10-historial-de-fases.md    ← Fase 12: resumen de lo que aportó cada fase
+│   ├── evidencias/                 ← Fase 12: README.md (índice) y las evidencias 01 a 18 (.txt y .png)
 │   ├── asyncapi/asyncapi.yaml      ← Fase 4
 │   └── openapi/airport-service.json ← Fase 11: contrato HTTP publicado de Airport Service
 ├── libs/
@@ -399,7 +402,10 @@ sistema-itinerarios-personales/
 │   ├── prometheus/
 │   └── grafana/
 ├── scripts/
-│   └── lock_requirements.py        ← genera y comprueba (--check) los requirements-lock.txt de las imágenes
+│   ├── lock_requirements.py        ← genera y comprueba (--check) los requirements-lock.txt de las imágenes
+│   ├── evidencias_terminal.py      ← Fase 12: evidencias de terminal (librería estándar)
+│   ├── capturar_evidencias.py      ← Fase 12: capturas web con Playwright
+│   └── requirements-evidencias.txt ← Fase 12: Playwright, en su propio entorno scripts/.venv
 └── tests/
     └── e2e/                        ← Fase 11: pruebas de punta a punta (pytest + httpx) y api_colombia_stub/
 ```
@@ -569,6 +575,7 @@ Confirmadas en la Fase 3 (ADR-015):
 | Paquete compartido de observabilidad (cierre Fase 9, ADR-040) | `libs/observability`: Microservice Chassis Pattern con logging, trazas y métricas HTTP comunes. Instalado con `-e ../../libs/observability` en cada `requirements.txt`. El Dockerfile de SendNotificationFunction cambia el contexto de build a la raíz del repositorio para incluir `libs/`. Los Dockerfiles de Airport e Itinerary Service harán lo mismo en la Fase 10. *Actualización (Fase 10, ADR-041):* las imágenes de Airport, Itinerary y el trigger usan el contexto en la raíz, pero no instalan el paquete con pip: copian `libs/observability/observability` y lo agregan al `PYTHONPATH` (la imagen de la función sí lo instala con pip) |
 | Docker Compose (Fase 10, ADR-041) | `docker-compose.yml` en la raíz (proyecto `sistema-itinerarios`, 15 servicios) con los puertos de la sección 7.6. Imágenes propias sobre `python:3.12-slim` con usuario `appuser`, contexto de build en la raíz y `Dockerfile.dockerignore` por imagen (lista blanca): Airport Service, Itinerary Service (**una imagen para la API, `outbox-relay` e `itinerary-migrations`**), Event Trigger y `Dockerfile.migrations` de la función (imagen de la función sin Alembic, ADR-029). Las imágenes instalan solo `requirements-lock.txt` (todas las dependencias, también las transitivas, con hashes; generado con `python scripts/lock_requirements.py` a partir de `requirements-runtime.txt`, o de `requirements-migrations.txt` en la función) con `pip install --only-binary :all: --require-hashes` (reglas S8541 y S8544 de SonarCloud); `libs/observability` va por `PYTHONPATH`, sin pip. `requirements.txt` sigue siendo el archivo del entorno virtual y del CI. Migraciones como contenedores de una sola ejecución (`service_completed_successfully`); healthchecks de PostgreSQL, RabbitMQ, Redis, servicios FastAPI (Python `urllib`) y gateway (`wget`); el gateway solo espera `service_started`. Redes `itinerary-data` y `notification-data` (cada base solo con su servicio dueño; reemplaza a `notification-net`). `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317`. Observabilidad siempre activa; Prometheus con `prometheus.compose.yml` (`prometheus.yml` se conserva para el modo manual). `stop_signal: SIGINT` en el relay y el trigger. Volúmenes para las dos bases y RabbitMQ (`hostname: rabbitmq`). `.env.example` en la raíz con variables opcionales. Modo manual conservado para desarrollo. Job de CI "Docker Compose". El `.dockerignore` antiguo de la función se borró en el cierre de la Fase 11 (lo reemplaza `Dockerfile.dockerignore`) |
 | IP de los servicios en el gateway con Compose (cierre Fase 11, ADR-041) | Se **mantiene la limitación documentada**: Nginx resuelve los upstreams al arrancar, así que si un contenedor de servicio se recrea con otra IP el gateway responde 502 `UPSTREAM_UNAVAILABLE` hasta `docker compose restart api-gateway`. No se usa `resolver 127.0.0.11` con variables en `proxy_pass`: cambiaría ADR-009 y las pruebas del gateway para un caso que solo aparece al reconstruir un servicio con el sistema encendido |
+| Evidencias (Fase 12) | `docs/evidencias/` con un índice (`README.md`) y 18 evidencias de una misma sesión: 7 salidas de terminal (`scripts/evidencias_terminal.py`, librería estándar) y 11 capturas web (`scripts/capturar_evidencias.py`, Playwright en `scripts/.venv`). Identificadores únicos por sesión. SonarCloud (19) y GitHub Actions (20) los captura el equipo. Datos de ejemplo (`@example.com`) |
 | `GenerateItineraryReportFunction` (cierre Fase 11, ADR-043) | **No se implementa** por decisión de alcance. Era opcional en la Fase 6; `SendNotificationFunction` ya demuestra el modelo FaaS completo (evento → Event Trigger → función, idempotencia, DLQ) |
 | Estrategia de pruebas (Fase 11, ADR-042) | Pirámide de cinco niveles: unitarias, integración (SKIPPED sin el servicio), contrato, gateway (contenedor propio) y punta a punta. Las pruebas de integración de Itinerary Service y de la función usan `<base>_test` (`itinerary_db_test`, `notification_db_test`) en el mismo servidor, creada y migrada por `tests/integration/database_setup.py` (`alembic/env.py` acepta `config.attributes["connection"]`); un error al migrar falla, solo la falta de PostgreSQL da SKIPPED. `libs/observability` tiene pruebas propias y job de CI. Contratos: `docs/openapi/airport-service.json` (Airport lo compara con su API; se regenera con `UPDATE_CONTRACTS=1`) que Itinerary verifica como consumidor, y AsyncAPI verificado también por la función (consumidor). E2E en `tests/e2e` sobre `docker compose -f docker-compose.yml -f docker-compose.e2e.yml` (simulador de API Colombia), por el gateway; leen las bases con `docker compose exec ... psql`; incluyen una traza en Jaeger con los seis componentes; el job "Docker Compose" las ejecuta (`COMPOSE_FILE` con los dos archivos). Advertencias de Starlette (`httpx2`) y pika (`utcfromtimestamp`) filtradas en `pytest.ini` por mensaje y origen, sin migrar librerías. Las pruebas del gateway fijan `host.docker.internal` a su IPv4 con `--add-host` |
 
@@ -707,7 +714,7 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 | 9 | Observabilidad | Logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger, Prometheus, Grafana. Demostrar el recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento → RabbitMQ → Función | Completada (etiqueta `fase-9`) |
 | 10 | Docker y Docker Compose | Contenedores para todos los componentes, `docker-compose.yml`, cómo levantar y detener todo | Completada (etiqueta `fase-10`) |
 | 11 | Pruebas | Unit, integración, API, Adapter, CRUD, comunicación HTTP, eventos, flujo completo. E2E sobre Docker Compose (Testcontainers se descartó, ADR-042) | Completada (etiqueta `fase-11`) |
-| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas | En curso |
+| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas | Completada (pendiente de PR, merge y etiqueta `fase-12`) |
 
 ### 12.1. Plan de la Fase 1 (entregas)
 
@@ -1286,4 +1293,33 @@ pytest -v
       suelto y sin Testcontainers en la Fase 11.
     - Verificado: ningún enlace interno roto y los 30 diagramas Mermaid del repositorio se dibujan sin errores con
       Mermaid 11.
-- **Siguiente:** entrega 12C (evidencias, guía de sustentación, revisión final de enlaces y del orden de lectura).
+  - Commits de la 12B: `366922e`, `1abcd96` y `91b99a3`.
+  - Entrega **12C**:
+    - Evidencias en `docs/evidencias/` (índice en su `README.md`, sección "Evidencias" del README raíz): 01 a 07 en
+      texto (`scripts/evidencias_terminal.py`: pruebas, `docker compose ps`, correlation ID, 429, `notification_history`,
+      Outbox con RabbitMQ detenido, evento inválido en la DLQ) y 08 a 18 en PNG (`scripts/capturar_evidencias.py`, con
+      `playwright==1.64.1` aprobado por el usuario en `scripts/.venv`: Swagger, mapa, CRUD paso a paso, Jaeger, Grafana,
+      RabbitMQ). Una sola sesión el 2026-11-18 en macOS, con la API Colombia real (el simulador solo para las E2E de la
+      01). 19 (SonarCloud) y 20 (GitHub Actions) quedan reservadas para el equipo.
+    - Dos errores reales encontrados al capturar, corregidos con aprobación del usuario:
+      1. **Event Trigger:** tras perder la conexión con RabbitMQ, el span del último mensaje quedaba activo y un mensaje
+         posterior sin `traceparent` aparecía en Jaeger como hijo de una traza ajena. `RabbitMQConsumer.run` procesa
+         cada conexión en una copia del contexto (`contextvars`); prueba nueva (falla sin la corrección); nota en ADR-037.
+         Comprobado en el sistema real. Event Trigger: **87** pruebas; total **620**.
+      2. **Grafana:** el panel "Mensajes en DLQ" consultaba `outbox_events_dead_total` (mensajes venenosos de la outbox);
+         ahora cuenta lo que el Event Trigger envió a la DLQ (`notifications_dispatched_total` con `rejected` o
+         `function_error`). Nota en ADR-038.
+    - Hueco de documentación corregido: para volver del simulador a la API real hay que reiniciar el gateway (ADR-041) y
+      vaciar la caché de Redis (si no, el mapa muestra los 4 aeropuertos del simulador). README ("Pruebas"),
+      `docs/evidencias/README.md` y la guía lo indican.
+    - `docs/09-guia-sustentacion.md`: preparación (qué levantar, comprobaciones, plan B con el simulador o las
+      evidencias), guion de 11 pasos con tiempos (unos 25 min), reparto sugerido entre los tres integrantes, 10 preguntas
+      probables y otras tres, y cómo explicar las limitaciones conocidas.
+    - Revisión final: enlaces internos y anclas sin errores, ningún verbo en futuro sobre algo ya construido (quedan los
+      de `docs/01`, que es la planificación original, y la nota histórica de `docs/03`), orden de lectura del README
+      (descripción → inicio rápido → arquitectura → diagramas → ejecución → referencia → evidencias → limitaciones → ADR).
+    - Datos de ejemplo creados en la sesión: itinerarios de "Ana Pérez" y "Luis Gómez" (`@example.com`) y sus
+      notificaciones; el mensaje de demostración en la DLQ. Los de las sesiones descartadas se borraron por la API.
+- **Fase 12:** completada en la rama `fase-12-documentacion`. Pendiente: push (cuando el usuario lo confirme), pull
+  request (lo crea el equipo), revisión de otro integrante, merge con "Create a merge commit" y etiqueta anotada
+  `fase-12` sobre el commit del merge. Las evidencias 19 y 20 las agrega el equipo.

@@ -1,0 +1,49 @@
+Evidencia 06 — Transactional Outbox: RabbitMQ detenido, evento pendiente y publicado al volver
+Fecha: 2026-11-18 23:00:31 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py outbox
+
+1) Se detiene RabbitMQ.
+$ docker compose stop rabbitmq
+ Container sistema-itinerarios-rabbitmq-1 Stopping 
+ Container sistema-itinerarios-rabbitmq-1 Stopped
+
+2) Se crea un itinerario: la API responde 201 aunque RabbitMQ esté caído, porque solo escribe en
+   PostgreSQL (itinerario + evento en la misma transacción).
+$ curl -s -w '\nHTTP %{http_code}\n' -X POST http://localhost:8000/api/itineraries -H 'Content-Type: application/json' -H 'X-Correlation-ID: evidencia-outbox-20261118230006' -d '{"traveler_name": "Luis Gómez", "traveler_email": "luis@example.com", "departure_airport_id": 1, "arrival_airport_id": 5, "travel_date": "2027-01-02T08:00:00-05:00", "duration_minutes": 90}'
+{"id":"c637af37-9443-4c60-a1b8-1d13349320ba","traveler_name":"Luis Gómez","traveler_email":"luis@example.com","departure_airport_id":1,"arrival_airport_id":5,"travel_date":"2027-01-02T08:00:00-05:00","duration_minutes":90,"created_at":"2026-11-19T04:00:11.440081Z","updated_at":"2026-11-19T04:00:11.440081Z"}
+HTTP 201
+
+3) Diez segundos después el evento sigue PENDIENTE (published_at vacío) y el relay suma intentos:
+$ docker compose exec -T itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id AS event_id, published_at, attempts, left(last_error, 70) AS last_error FROM outbox_events WHERE payload->>'correlation_id' = 'evidencia-outbox-20261118230006';"
+               event_id               | published_at | attempts |                    last_error                     
+--------------------------------------+--------------+----------+---------------------------------------------------
+ a85e14e1-83fd-4dfc-8772-905220019099 |              |        6 | No se pudo conectar con RabbitMQ en rabbitmq:5672
+(1 row)
+
+4) Log del Outbox Relay mientras RabbitMQ está caído (últimas líneas):
+2026-11-19T04:00:19.565Z WARNING No se pudo publicar el evento a85e14e1-83fd-4dfc-8772-905220019099 (intento 5): No se pudo conectar con RabbitMQ en rabbitmq:5672. Se detiene el lote; se reintenta en el siguiente ciclo
+2026-11-19T04:00:19.566Z INFO Ciclo del Outbox Relay: 0 publicados, 1 fallidos (se reintentan), 0 descartados
+2026-11-19T04:00:21.575Z WARNING No se pudo publicar el evento a85e14e1-83fd-4dfc-8772-905220019099 (intento 6): No se pudo conectar con RabbitMQ en rabbitmq:5672. Se detiene el lote; se reintenta en el siguiente ciclo
+2026-11-19T04:00:21.576Z INFO Ciclo del Outbox Relay: 0 publicados, 1 fallidos (se reintentan), 0 descartados
+
+5) Se vuelve a levantar RabbitMQ.
+$ docker compose up -d --wait rabbitmq
+ Container sistema-itinerarios-rabbitmq-1 Starting 
+ Container sistema-itinerarios-rabbitmq-1 Started 
+ Container sistema-itinerarios-rabbitmq-1 Waiting 
+ Container sistema-itinerarios-rabbitmq-1 Healthy
+
+6) El relay publica el evento en cuanto RabbitMQ vuelve (published_at con fecha):
+$ docker compose exec -T itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id AS event_id, published_at, attempts, left(last_error, 70) AS last_error FROM outbox_events WHERE payload->>'correlation_id' = 'evidencia-outbox-20261118230006';"
+               event_id               |         published_at          | attempts |                    last_error                     
+--------------------------------------+-------------------------------+----------+---------------------------------------------------
+ a85e14e1-83fd-4dfc-8772-905220019099 | 2026-11-19 04:00:25.602722+00 |        7 | No se pudo conectar con RabbitMQ en rabbitmq:5672
+(1 row)
+
+7) Y la notificación llega al historial: no se perdió ningún evento.
+$ docker compose exec -T notification-postgres psql -U notification -d notification_db -c "SELECT event_id, recipient, status, correlation_id FROM notification_history WHERE correlation_id = 'evidencia-outbox-20261118230006';"
+               event_id               |    recipient     | status |         correlation_id          
+--------------------------------------+------------------+--------+---------------------------------
+ a85e14e1-83fd-4dfc-8772-905220019099 | luis@example.com | SENT   | evidencia-outbox-20261118230006
+(1 row)

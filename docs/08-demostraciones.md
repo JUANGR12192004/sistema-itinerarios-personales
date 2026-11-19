@@ -3,7 +3,7 @@
 
 > Este contenido estaba en el `README.md` raíz hasta la Fase 11 y se movió aquí en la Fase 12, sin cambios de fondo.
 > Cómo levantar el sistema: [Instalación y ejecución](../README.md#instalación-y-ejecución) en el README raíz.
-> El orden recomendado para la sustentación está en `09-guia-sustentacion.md` (entrega 12C).
+> El orden recomendado para la sustentación está en [`09-guia-sustentacion.md`](09-guia-sustentacion.md).
 
 **Contenido:** [Demostración de punta a punta](#demostración-de-punta-a-punta) (caso normal, evento duplicado, DLQ y
 reprocesamiento, evento inválido, ver las colas) · [Demostración de observabilidad](#demostración-de-observabilidad)

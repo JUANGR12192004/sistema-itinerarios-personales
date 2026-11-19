@@ -1,0 +1,15 @@
+Evidencia 07 — Evento inválido enviado a la DLQ
+Fecha: 2026-11-18 23:00:41 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py dlq
+
+1) Se publica a mano un evento inválido (Itinerary Service solo produce eventos válidos):
+$ curl -s -u guest:guest -X POST http://localhost:15672/api/exchanges/%2F/itinerary.events/publish -H 'Content-Type: application/json' --data-binary @serverless/event-trigger/demo/publish-invalid-event.json
+{"routed":true}
+
+2) Log del Event Trigger:
+2026-11-19T04:00:35.129Z ERROR La función rechazó el evento (fallo permanente): event_id=c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f motivo=El evento no cumple el contrato v1: data.itinerary_id: Input should be a valid UUID, invalid character: found `n` at 0
+
+3) Mensajes en cada cola (API del panel de RabbitMQ):
+notification.itinerary-created: 0 mensajes (1 consumidores)
+notification.itinerary-created.dlq: 1 mensajes (0 consumidores)

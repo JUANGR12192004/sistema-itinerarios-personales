@@ -131,5 +131,5 @@ Pirámide de pruebas en cinco niveles (ADR-042; cómo correr cada uno en [Prueba
 - **Salida limpia**: las advertencias de Starlette y pika (de terceros) se filtran con precisión.
 
 Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas** al cerrar la Fase 11. Después, la rama `fix/limpieza-config`
-borró 21 pruebas que repetían las de `libs/observability` y movió una a ese paquete: el total vigente es **619**
+borró 21 pruebas que repetían las de `libs/observability` y movió una a ese paquete (619), y en la Fase 12 se agregó una prueba al Event Trigger: el total vigente es **620**
 (ver [Pruebas](../README.md#pruebas)).
