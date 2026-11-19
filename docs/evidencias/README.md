@@ -5,7 +5,8 @@ Capturas y salidas de terminal que muestran el sistema funcionando. Las evidenci
 Docker Compose y la **API Colombia real**, salvo las pruebas E2E de la evidencia 01, que usan el simulador. Todos los
 datos son de ejemplo: nombres inventados y correos `@example.com`.
 
-Las evidencias 19 y 20 las toma el equipo desde su cuenta de SonarCloud y de GitHub.
+Las evidencias 19 y 20 las toma el equipo desde su cuenta de SonarCloud y de GitHub. La 20 ya está; la 19 sigue
+pendiente.
 
 ## Lista
 
@@ -30,7 +31,7 @@ Las evidencias 19 y 20 las toma el equipo desde su cuenta de SonarCloud y de Git
 | 17 | [`17-rabbitmq-colas.png`](17-rabbitmq-colas.png) | Panel de RabbitMQ: la cola `notification.itinerary-created` vacía y con su consumidor, y `notification.itinerary-created.dlq` con 1 mensaje | `capturar_evidencias.py rabbitmq` |
 | 18 | [`18-rabbitmq-dlq-mensaje.png`](18-rabbitmq-dlq-mensaje.png) | El mensaje de la DLQ leído sin sacarlo de la cola: header `x-death` con `reason: rejected` y la cola de origen | `capturar_evidencias.py rabbitmq` |
 | 19 | `19-sonarcloud.png` | **Pendiente (la toma el equipo).** Proyecto en SonarCloud sobre `main`: Quality Gate, seguridad, fiabilidad, mantenibilidad y duplicación | Captura manual en sonarcloud.io |
-| 20 | `20-github-actions.png` | **Pendiente (la toma el equipo).** Workflow "Pruebas" de GitHub Actions en verde, con sus siete jobs (Airport, Itinerary, libs/observability, función, Event Trigger, API Gateway y Docker Compose) | Captura manual en la pestaña *Actions* del repositorio |
+| 20 | [`20-github-actions.png`](20-github-actions.png) | Los **8 checks** del pull request de la Fase 12 (#30) en verde ("All checks have passed"): los 7 jobs del workflow "Pruebas" (Airport Service, API Gateway, Docker Compose, Event Trigger, Itinerary Service, libs/observability y SendNotificationFunction) y *SonarCloud Code Analysis* con "Quality Gate passed" | Captura manual del pull request en GitHub, tomada por el equipo |
 
 Notas para leerlas:
 

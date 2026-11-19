@@ -1342,3 +1342,9 @@ pytest -v
     RabbitMQ. E2E (Compose con el simulador, 2026-11-18, macOS): 14 pasan en 5 ejecuciones seguidas y
     `test_crud_completo_por_el_gateway` pasa 30 de 30 (con 2 s entre ejecuciones: sin pausa, el rate limiting del
     gateway responde 429).
+  - Fusionada en `main` (PR #32, merge `1e44260`).
+- **Rama `docs/evidencia-github-actions`** (PR #31): el equipo subió desde GitHub `docs/evidencias/20-github-actions.png`
+  (los 8 checks del PR #30 de la Fase 12 en verde: los 7 jobs del workflow "Pruebas" y SonarCloud con "Quality Gate
+  passed"). La rama se actualizó con un merge de `origin/main` (sin conflictos) para traer la corrección del PR #32. La
+  evidencia 20 queda enlazada y sin la marca "Pendiente" en `docs/evidencias/README.md` y en la sección "Evidencias"
+  del README raíz. La evidencia 19 (SonarCloud) sigue pendiente hasta la rama `fix/sonarcloud-fiabilidad`.
