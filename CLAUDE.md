@@ -1348,3 +1348,24 @@ pytest -v
   passed"). La rama se actualizó con un merge de `origin/main` (sin conflictos) para traer la corrección del PR #32. La
   evidencia 20 queda enlazada y sin la marca "Pendiente" en `docs/evidencias/README.md` y en la sección "Evidencias"
   del README raíz. La evidencia 19 (SonarCloud) sigue pendiente hasta la rama `fix/sonarcloud-fiabilidad`.
+  Fusionada en `main` (PR #31, merge `68408c4`).
+- **Rama `fix/sonarcloud-fiabilidad`** (2026-11-19): SonarCloud sobre `main` mostraba fiabilidad C con 9 problemas
+  abiertos en el código completo (el Quality Gate pasaba porque eran antiguos), todos en Airport Service. Ninguno se
+  marcó como aceptado en SonarCloud; los 35 de mantenibilidad no se tocaron.
+  - S9152 (`app/main.py`, `lifespan`): **real**. `await redis.aclose()` iba después del `async with`, así que una
+    excepción durante el `yield` dejaba la conexión con Redis sin cerrar. Ahora va en un `finally`. Prueba nueva que
+    fallaba antes de la corrección (`test_lifespan_closes_redis_even_if_shutdown_is_interrupted`).
+  - S7503 ×7 (`app/api/errors.py`): **real, menor**: los siete manejadores de errores eran `async def` sin ningún
+    `await`. Pasan a `def` (Starlette acepta los dos tipos y ejecuta los `def` en el threadpool), como recomienda la regla.
+    Respuestas sin cambios. Al pasar a un hilo, `logger.exception` ya no encontraba la excepción en curso y el log del
+    500 perdía el traceback (lo detectó una prueba nueva): `_unexpected_error` pasa `exc_info=error`.
+  - S5863 (`tests/domain/test_coordinates.py`): **falso positivo** (comparaba dos instancias distintas con los mismos
+    valores, no la misma expresión). Reescrita con dos variables y `assert first is not second`, para que se lea qué
+    prueba: igualdad de objeto de valor.
+  - Hallazgo no corregido (fuera del alcance de la rama, no cambia con ella): el log `ERROR` de un 500 de Airport
+    Service sale con `correlation_id` vacío, aunque la respuesta sí lo lleva. El 500 lo atiende `ServerErrorMiddleware`,
+    fuera del middleware que guarda el correlation ID en el `ContextVar` (el `metrics_middleware`, más externo, ejecuta
+    los internos en otra tarea con una copia del contexto). Los errores conocidos (404, 422, 502, 503, 504) sí lo tienen.
+  - Pruebas: `tests/api/test_error_handlers.py` (3) y 2 del `lifespan` en `tests/api/test_main.py`. Airport Service:
+    **196 pasan** (con Redis). Verificado en Docker Compose con la API real: 200, 404 `AIRPORT_NOT_FOUND`, 422,
+    `map-data` y parada limpia del contenedor.
