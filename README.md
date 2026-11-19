@@ -781,19 +781,19 @@ lentas, de todo el sistema, arriba.
 | Gateway | La configuración de Nginx en un contenedor propio contra servidores eco | 429 al superar el límite |
 | Punta a punta (E2E) | El sistema completo por el gateway, con un simulador de API Colombia | Crear un itinerario y encontrarlo en `notification_history` |
 
-Resultado con todo el sistema encendido (2026-11-18, macOS, `docker compose` con el simulador; evidencia
+Resultado con todo el sistema encendido (2026-11-19, macOS, `docker compose` con el simulador; evidencia
 [01](docs/evidencias/01-pruebas.txt)):
 
 | Suite | Carpeta | Pruebas | Necesita |
 |---|---|---|---|
-| Airport Service | `services/airport-service` | 191 | Nada (Redis opcional) |
-| Itinerary Service | `services/itinerary-service` | 186 | PostgreSQL y RabbitMQ para las de integración |
+| Airport Service | `services/airport-service` | 199 | Nada (Redis opcional) |
+| Itinerary Service | `services/itinerary-service` | 200 | PostgreSQL y RabbitMQ para las de integración |
 | SendNotificationFunction | `serverless/send-notification-function` | 70 | PostgreSQL para las de integración |
 | Event Trigger | `serverless/event-trigger` | 87 | RabbitMQ y la función para las de integración |
 | Paquete compartido | `libs/observability` | 19 | Nada |
 | API Gateway | `gateway` | 53 | Docker (y el gateway real para 3 *smoke*) |
 | Punta a punta | `tests/e2e` | 14 | El sistema con el simulador (abajo) |
-| **Total** | | **620** | **0 fallos, 0 omitidas, 0 advertencias** |
+| **Total** | | **642** | **0 fallos, 0 omitidas, 0 advertencias** |
 
 Sin los servicios, las pruebas de integración quedan **SKIPPED** (no fallan). Las de integración usan bases propias
 (`itinerary_db_test`, `notification_db_test`) y colas con nombres `test-<id>.`: se pueden correr durante una
@@ -845,12 +845,13 @@ el mapa mostraría 4 durante 10 minutos).
 ## Evidencias
 
 Capturas y salidas de terminal del sistema funcionando, obtenidas el 2026-11-18 en una sola sesión con Docker Compose
-y la API Colombia real. El índice completo, con qué debe verse en cada una y cómo regenerarlas con los scripts de
+y la API Colombia real (la 01 se regeneró el 2026-11-19 con los totales vigentes; la 19 y la 20 las tomó el equipo).
+El índice completo, con qué debe verse en cada una y cómo regenerarlas con los scripts de
 `scripts/`, está en [`docs/evidencias/README.md`](docs/evidencias/README.md).
 
 | N.º | Evidencia | Archivo |
 |---|---|---|
-| 01 | Totales de las siete suites de pruebas (620) | [`01-pruebas.txt`](docs/evidencias/01-pruebas.txt) |
+| 01 | Totales de las siete suites de pruebas (642) | [`01-pruebas.txt`](docs/evidencias/01-pruebas.txt) |
 | 02 | `docker compose ps` con todo el sistema sano | [`02-docker-compose-ps.txt`](docs/evidencias/02-docker-compose-ps.txt) |
 | 03 | Respuesta del gateway con `X-Correlation-ID` | [`03-gateway-correlation-id.txt`](docs/evidencias/03-gateway-correlation-id.txt) |
 | 04 | 429 del rate limiting | [`04-rate-limit-429.txt`](docs/evidencias/04-rate-limit-429.txt) |
@@ -1019,10 +1020,12 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | 9 | Observabilidad | Completada |
 | 10 | Docker y Docker Compose | Completada |
 | 11 | Pruebas | Completada |
-| 12 | Documentación y entrega | Completada (pendiente del pull request, el merge y la etiqueta `fase-12`) |
+| 12 | Documentación y entrega | Completada |
 
-**Las 13 fases están completas.** La Fase 12 (documentación y entrega) queda en la rama `fase-12-documentacion` hasta
-su pull request. Lo que aportó cada fase está resumido en [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md).
+**Las 13 fases están completas y fusionadas en `main`**, cada una con su etiqueta `fase-N` (la Fase 0 no tiene: es
+anterior a la regla de etiquetas). La Fase 12 se fusionó con el PR #30 (merge `aee3726`, etiqueta `fase-12`). Después
+entraron dos correcciones y las evidencias 19 y 20. Lo que aportó cada fase, y esas correcciones posteriores, está
+resumido en [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md).
 
 El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
 comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
@@ -1045,7 +1048,7 @@ comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.m
 | `fase-9-observabilidad` | Fase 9 — Observabilidad (logs JSON, OpenTelemetry y Jaeger, Prometheus y Grafana, `libs/observability`) | `fase-9` |
 | `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` |
 | `fase-11-pruebas` | Fase 11 — Pruebas (bases de integración propias, contratos HTTP y de eventos, punta a punta sobre Docker Compose) | `fase-11` |
-| `fase-12-documentacion` | Fase 12 — Documentación y entrega (README, diagramas de clases y relacional, evidencias, guía de sustentación) | `fase-12` (se crea tras el merge) |
+| `fase-12-documentacion` | Fase 12 — Documentación y entrega (README, diagramas de clases y relacional, evidencias, guía de sustentación) | `fase-12` |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.

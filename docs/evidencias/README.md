@@ -1,9 +1,10 @@
 # Evidencias
 
-Capturas y salidas de terminal que muestran el sistema funcionando. Las evidencias 01 a 18 se obtuvieron el
+Capturas y salidas de terminal que muestran el sistema funcionando. Las evidencias 02 a 18 se obtuvieron el
 **2026-11-18 en una sola sesión** (macOS con Apple Silicon, Docker Desktop 29.9.3), con el sistema levantado con
-Docker Compose y la **API Colombia real**, salvo las pruebas E2E de la evidencia 01, que usan el simulador. Todos los
-datos son de ejemplo: nombres inventados y correos `@example.com`.
+Docker Compose y la **API Colombia real**. La evidencia 01 se **regeneró el 2026-11-19** en el mismo equipo, después de
+las correcciones posteriores a la Fase 12 (PR #32 y #33), para que sus totales coincidan con el README; sus pruebas E2E
+usan el simulador. Todos los datos son de ejemplo: nombres inventados y correos `@example.com`.
 
 Las evidencias 19 y 20 las tomó el equipo desde su cuenta de SonarCloud y de GitHub. No queda ninguna evidencia
 pendiente.
@@ -12,7 +13,7 @@ pendiente.
 
 | N.º | Archivo | Qué debe verse | Cómo se obtuvo |
 |---|---|---|---|
-| 01 | [`01-pruebas.txt`](01-pruebas.txt) | Las siete suites pasan: libs/observability 19, Airport 191, Itinerary 186, función 70, Event Trigger 87, gateway 53 y E2E 14. Total **620**, código de salida 0 en todas | `evidencias_terminal.py pruebas`, con el simulador de API Colombia encendido |
+| 01 | [`01-pruebas.txt`](01-pruebas.txt) | Las siete suites pasan: libs/observability 19, Airport 199, Itinerary 200, función 70, Event Trigger 87, gateway 53 y E2E 14. Total **642**, código de salida 0 en todas (2026-11-19) | `evidencias_terminal.py pruebas`, con el simulador de API Colombia encendido |
 | 02 | [`02-docker-compose-ps.txt`](02-docker-compose-ps.txt) | Los 15 contenedores: las dos migraciones `Exited (0)` y el resto `Up`; los que tienen healthcheck, `(healthy)` | `evidencias_terminal.py estado` (`docker compose ps -a`) |
 | 03 | [`03-gateway-correlation-id.txt`](03-gateway-correlation-id.txt) | `POST /api/itineraries` → **201** con el mismo `X-Correlation-ID` que se envió; un `GET` sin el header recibe uno generado por el gateway | `evidencias_terminal.py gateway` (`curl -i`) |
 | 04 | [`04-rate-limit-429.txt`](04-rate-limit-429.txt) | De 40 solicitudes seguidas, 21 responden 200 (10 r/s + ráfaga de 20) y el resto **429** `RATE_LIMIT_EXCEEDED` con `Retry-After: 1` | `evidencias_terminal.py rate-limit` |

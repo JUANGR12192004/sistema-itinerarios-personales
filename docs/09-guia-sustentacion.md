@@ -175,7 +175,7 @@ Grafana: itinerarios creados, notificaciones, mensajes en la DLQ (debe coincidir
 
 ### Paso 10. Pruebas y calidad (1 min)
 
-Evidencia [01](evidencias/01-pruebas.txt): **620 pruebas** en siete suites, sin fallos ni omitidas; pirámide de cinco
+Evidencia [01](evidencias/01-pruebas.txt): **642 pruebas** en siete suites, sin fallos ni omitidas; pirámide de cinco
 niveles (unitarias, integración, contrato, gateway y E2E). El CI las ejecuta en cada pull request y SonarCloud analiza
 la calidad (evidencias [19](evidencias/19-sonarcloud.png) y [20](evidencias/20-github-actions.png)).
 
@@ -248,6 +248,17 @@ aeropuertos son inválidos, el servicio responde 502 en vez de datos corruptos (
 Como asistente de programación con reglas escritas en `CLAUDE.md`: trabajar por fases y entregas, explicar cada
 concepto, pedir aprobación para decisiones y no cambiar nada sin explicarlo. Cada cambio lo revisó, aprobó y subió un
 integrante, que es el autor del commit; las decisiones están registradas como ADR.
+
+**11. ¿Encontraron algún error real gracias a las pruebas?**
+Sí, uno de consistencia que solo aparecía a veces. La prueba E2E `test_crud_completo_por_el_gateway` borraba un
+itinerario (204) y al consultarlo justo después a veces recibía 200 en lugar de 404. La causa: el commit de `PUT` y
+`DELETE` estaba en la dependencia de FastAPI que abre la sesión, después del `yield`, y FastAPI ejecuta ese código
+**después de enviar la respuesta**. El cliente recibía "borrado" antes de que la base lo confirmara. Las pruebas
+unitarias no lo veían porque usan repositorios falsos; solo una prueba de punta a punta, con la base real y dos
+solicitudes seguidas, podía detectarlo. La corrección: los casos de uso de actualizar y eliminar confirman con el
+puerto `UnitOfWork` antes de devolver el resultado, igual que la creación, y una prueba nueva comprueba el orden
+(commit antes de responder). Detalle en ADR-019 y en
+[`10-historial-de-fases.md`](10-historial-de-fases.md#correcciones-posteriores-a-la-fase-12).
 
 Otras que pueden salir:
 

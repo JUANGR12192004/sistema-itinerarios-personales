@@ -1249,7 +1249,9 @@ pytest -v
     fase. Los grupos C y D quedan para la Fase 12.
   - Verificación: pruebas que comparan el AsyncAPI con el código (Itinerary 5, función 10, trigger 6) pasan; ningún
     archivo del repositorio tiene caracteres de control.
-- **Fase 12 (Documentación y entrega):** en curso en la rama `fase-12-documentacion` (plan en la sección 12.12).
+- **Fase 12 (Documentación y entrega):** completada y **fusionada en `main`** (PR #30, merge `aee3726`) con la
+  **etiqueta `fase-12`** sobre ese commit (plan en la sección 12.12). La rama `fase-12-documentacion` se conserva como
+  archivo de solo lectura.
   - Entrega **12A**: `docs/05` con diagramas de clases (sección 3: Airport con los roles del Adapter y los
     Decorators, Itinerary API, Outbox Relay y función) y relacional (sección 4: `itinerary_db` y `notification_db`,
     índices, restricciones y referencias entre bases), índice al inicio y secciones renumeradas (secuencia 5,
@@ -1377,7 +1379,8 @@ pytest -v
     un error y el header de la respuesta traían IDs distintos, y con un header de más de 128 caracteres el cuerpo lo
     devolvía sin recortar. Ahora usa `request.state` como Airport (por el gateway no ocurría: siempre envía un ID válido).
     No se reordenaron los middlewares ni se cambió `libs/observability`. Pruebas: 3 más en
-    `test_error_handlers.py` de Airport (**198 pasan**) y `tests/api/test_error_log_correlation.py` en Itinerary (4,
+    `test_error_handlers.py` de Airport (**198 pasan**; *corrección en `docs/cierre-final`:* son **199**, porque la rama
+    agregó 2 + 3 + 3 pruebas a las 191) y `tests/api/test_error_log_correlation.py` en Itinerary (4,
     fallaban antes de la corrección; **200 pasan**). Verificado en Compose: con `itinerary-postgres` detenido, `GET
     /api/itineraries` con `X-Correlation-ID: demo-500-log` → 500 y log JSON `ERROR` con ese `correlation_id`, `trace_id`
     y traceback; 422 directo sin header con el mismo ID en cuerpo y header; E2E 14 pasan dos veces.
@@ -1390,4 +1393,21 @@ pytest -v
   `docs/evidencias/19-sonarcloud.png` (aprobado por el usuario), la enlaza sin la marca "Pendiente" en
   `docs/evidencias/README.md` y en la sección "Evidencias" del README raíz, enlaza las evidencias 19 y 20 en el paso 10
   de `docs/09-guia-sustentacion.md` y actualiza la sección 7.5 (evidencias 01 a 20). **Las 20 evidencias están
-  completas.**
+  completas.** Fusionada en `main` (PR #35, merge `d0ccc3b`).
+- **Rama `docs/cierre-final`** (2026-11-19, solo documentación): alinea la documentación con lo que entró después de la
+  Fase 12 (PR #32, #33, #34 y #35).
+  - Estado de la Fase 12: fusionada con la etiqueta `fase-12` en el README raíz ("Estado de las fases" y "Ramas del
+    repositorio") y en esta sección; `docs/10` cita las etiquetas `fase-1` a `fase-12`; la entrada de la evidencia 19
+    indica su merge.
+  - Totales confirmados ejecutando las siete suites (2026-11-19, macOS, Compose con el simulador e imágenes
+    reconstruidas desde `main`): libs/observability 19, Airport **199**, Itinerary **200**, función 70, Event Trigger
+    87, gateway 53 y E2E 14: **642 pasan, 0 fallos, 0 omitidas, 0 advertencias**. Sin servicios, Itinerary da 175 pasan
+    y 25 omitidas. Airport da 199 y no 198 como se había registrado en `fix/sonarcloud-fiabilidad` (error al sumar; el
+    código no cambió). Actualizados en el README raíz ("Pruebas" y "Evidencias"), los README de Airport e Itinerary,
+    una nota nueva en ADR-042, `docs/09` (paso 10) y `docs/10`.
+  - Evidencia 01 regenerada con `scripts/evidencias_terminal.py pruebas`; su fila y su fecha en
+    `docs/evidencias/README.md`.
+  - `docs/10-historial-de-fases.md`: sección "Correcciones posteriores a la Fase 12" (`fix/commit-antes-de-responder` y
+    `fix/sonarcloud-fiabilidad`). `docs/09-guia-sustentacion.md`: pregunta 11, el commit después de responder como
+    error real de consistencia encontrado por una prueba E2E.
+  - La sección 9.3 (protección de `main`) no cambia hasta que el dueño del repositorio la configure.

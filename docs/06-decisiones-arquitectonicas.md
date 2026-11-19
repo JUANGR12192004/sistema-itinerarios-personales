@@ -1493,6 +1493,8 @@ Se adopta una **pirámide de pruebas** con cinco niveles, cada uno con un propó
 
 *Actualización (Fase 12, entrega 12C):* una prueba nueva del Event Trigger (contexto de traza tras perder la conexión, ver ADR-037) lleva el total a **620** (Event Trigger 87), comprobado en la evidencia `docs/evidencias/01-pruebas.txt`.
 
+*Actualización (después de la Fase 12):* las ramas `fix/commit-antes-de-responder` (Itinerary +10) y `fix/sonarcloud-fiabilidad` (Airport +8, Itinerary +4) agregan 22 pruebas. Ejecutadas el 2026-11-19 con todo encendido: **642 pruebas** (libs/observability 19, Airport 199, Itinerary 200, función 70, Event Trigger 87, gateway 53, E2E 14), 0 fallos, 0 omitidas, 0 advertencias (evidencia `docs/evidencias/01-pruebas.txt`, regenerada ese día). Sin servicios, Itinerary Service da 175 pasan y 25 omitidas.
+
 ## ADR-043 — GenerateItineraryReportFunction no se implementa (alcance)
 
 **Estado:** Aceptada (cierre de la Fase 11).
