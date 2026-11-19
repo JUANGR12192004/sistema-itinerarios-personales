@@ -124,9 +124,11 @@ class UpdateItineraryUseCase:
         self,
         repo: ItineraryRepository,
         airport_catalog: AirportCatalog,
+        unit_of_work: UnitOfWork,
     ) -> None:
         self._repo = repo
         self._airport_catalog = airport_catalog
+        self._unit_of_work = unit_of_work
 
     def execute(self, itinerary_id: UUID, command: UpdateItineraryCommand) -> Itinerary:
         itinerary = self._repo.get_by_id(itinerary_id)
@@ -153,14 +155,21 @@ class UpdateItineraryUseCase:
         )
 
         self._repo.save(itinerary)
+        # El caso de uso confirma la transacción ANTES de devolver el resultado, así la
+        # respuesta HTTP sale con los cambios ya guardados (ADR-019). Si algo falla antes,
+        # no hay commit y get_db_session deshace la transacción.
+        self._unit_of_work.commit()
         return itinerary
 
 
 class DeleteItineraryUseCase:
-    def __init__(self, repo: ItineraryRepository) -> None:
+    def __init__(self, repo: ItineraryRepository, unit_of_work: UnitOfWork) -> None:
         self._repo = repo
+        self._unit_of_work = unit_of_work
 
     def execute(self, itinerary_id: UUID) -> None:
         if self._repo.get_by_id(itinerary_id) is None:
             raise ItineraryNotFoundError(itinerary_id)
         self._repo.delete(itinerary_id)
+        # Igual que al actualizar: el 204 sale solo cuando la eliminación está confirmada.
+        self._unit_of_work.commit()

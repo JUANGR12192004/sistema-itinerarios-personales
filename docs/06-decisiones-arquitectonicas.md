@@ -543,6 +543,13 @@ Coherente con el tratamiento que Airport Service ya aplica a los timeouts de API
 
 El adaptador `HttpAirportCatalogAdapter` debe inspeccionar el código de estado HTTP de la respuesta de Airport Service y lanzar la excepción de aplicación correspondiente.
 
+*Corrección (después de la Fase 12, rama `fix/commit-antes-de-responder`):* `PUT` y `DELETE /itineraries/{id}` respondían **antes** de confirmar la transacción. El commit estaba en el código que va después del `yield` de la dependencia `get_db_session`, y en FastAPI 0.162 ese código (alcance `"request"`, el valor por defecto) se ejecuta **después de enviar la respuesta**. Un `GET` inmediato podía ver todavía el itinerario eliminado o los datos anteriores; así falló de forma intermitente la prueba E2E `test_crud_completo_por_el_gateway` en el job "Docker Compose" (DELETE → 204 y el GET siguiente → 200 en lugar de 404). Decisión:
+
+- `UpdateItineraryUseCase` y `DeleteItineraryUseCase` reciben el puerto `UnitOfWork` (ADR-022) y confirman con `commit()` antes de devolver el resultado, igual que `CreateItineraryUseCase` (ADR-026). La respuesta sale solo cuando los cambios están guardados.
+- `get_db_session` **ya no hace commit**: solo deshace (`rollback`) si hay una excepción y cierra la sesión. Así, si una escritura futura olvida el commit, sus cambios se descartan siempre y las pruebas lo detectan, en lugar de "funcionar" con la misma condición de carrera.
+- Se descartó `Depends(get_db_session, scope="function")` (cierra la dependencia antes de responder): corregía el síntoma, pero dejaba en la capa API la decisión de cuándo confirmar, que pertenece al caso de uso.
+- La prueba `tests/api/test_commit_before_response.py` usa el `get_db_session` real con una sesión que registra `commit`, `rollback` y `close`, y un middleware ASGI que registra cuándo sale la respuesta: compara el orden, no los tiempos. Con el código anterior fallaba siempre (`['response_start', 'commit', 'close']`).
+
 ## ADR-020 — Contrato de ItineraryCreatedEvent (versión 1)
 
 **Estado:** Aceptada (Fase 4).

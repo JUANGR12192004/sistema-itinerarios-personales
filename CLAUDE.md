@@ -714,7 +714,7 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 | 9 | Observabilidad | Logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger, Prometheus, Grafana. Demostrar el recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento → RabbitMQ → Función | Completada (etiqueta `fase-9`) |
 | 10 | Docker y Docker Compose | Contenedores para todos los componentes, `docker-compose.yml`, cómo levantar y detener todo | Completada (etiqueta `fase-10`) |
 | 11 | Pruebas | Unit, integración, API, Adapter, CRUD, comunicación HTTP, eventos, flujo completo. E2E sobre Docker Compose (Testcontainers se descartó, ADR-042) | Completada (etiqueta `fase-11`) |
-| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas | Completada (pendiente de PR, merge y etiqueta `fase-12`) |
+| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas | Completada (etiqueta `fase-12`) |
 
 ### 12.1. Plan de la Fase 1 (entregas)
 
@@ -1320,6 +1320,25 @@ pytest -v
       (descripción → inicio rápido → arquitectura → diagramas → ejecución → referencia → evidencias → limitaciones → ADR).
     - Datos de ejemplo creados en la sesión: itinerarios de "Ana Pérez" y "Luis Gómez" (`@example.com`) y sus
       notificaciones; el mensaje de demostración en la DLQ. Los de las sesiones descartadas se borraron por la API.
-- **Fase 12:** completada en la rama `fase-12-documentacion`. Pendiente: push (cuando el usuario lo confirme), pull
-  request (lo crea el equipo), revisión de otro integrante, merge con "Create a merge commit" y etiqueta anotada
-  `fase-12` sobre el commit del merge. Las evidencias 19 y 20 las agrega el equipo.
+- **Fase 12:** completada y **fusionada en `main`** (PR #30, merge `aee3726`) con la **etiqueta `fase-12`**. La rama
+  `fase-12-documentacion` se conserva como archivo de solo lectura. Las evidencias 19 (SonarCloud) y 20 (GitHub
+  Actions) las agrega el equipo.
+- **Rama `fix/commit-antes-de-responder`** (después de la Fase 12): el job "Docker Compose" falló de forma
+  intermitente en la E2E `test_crud_completo_por_el_gateway` (DELETE → 204 y el GET inmediato → 200 en lugar de 404).
+  - Causa: `get_db_session` hacía `session.commit()` después del `yield`, y en FastAPI 0.162 ese código (alcance
+    `"request"`, el de por defecto) corre **después de enviar la respuesta** (`fastapi/routing.py`: la pila de salida
+    de la solicitud se cierra tras `await response(...)`). PUT y DELETE respondían antes de confirmar; POST no tenía el
+    problema porque `CreateItineraryUseCase` ya confirmaba con `UnitOfWork`.
+  - Corrección (nota en ADR-019): `UpdateItineraryUseCase` y `DeleteItineraryUseCase` reciben `UnitOfWork` y confirman
+    antes de devolver el resultado; las rutas PUT y DELETE inyectan `get_unit_of_work`; `get_db_session` ya no hace
+    commit (solo rollback si hay excepción y `close`), así una escritura que olvide el commit pierde sus cambios
+    siempre en lugar de depender de la velocidad. Diagrama de clases de `docs/05` actualizado. Se descartó
+    `Depends(..., scope="function")` porque deja en la capa API la decisión de cuándo confirmar.
+  - Ningún otro componente dependía de un commit en una dependencia con `yield`: Airport Service, el trigger y el
+    gateway no tienen base relacional, y la función y el Outbox Relay confirman con su `UnitOfWork`.
+  - Pruebas: `tests/api/test_commit_before_response.py` (5; compara el orden `commit` / `response_start` con una sesión
+    que registra las operaciones y un middleware ASGI; con el código anterior fallaban 2 siempre) y
+    `tests/application/test_update_delete_use_cases.py` (5). Itinerary Service: **196 pasan** con PostgreSQL y
+    RabbitMQ. E2E (Compose con el simulador, 2026-11-18, macOS): 14 pasan en 5 ejecuciones seguidas y
+    `test_crud_completo_por_el_gateway` pasa 30 de 30 (con 2 s entre ejecuciones: sin pausa, el rate limiting del
+    gateway responde 429).

@@ -395,9 +395,11 @@ classDiagram
     CreateItineraryUseCase ..> ItineraryCreatedEvent : crea
     UpdateItineraryUseCase --> ItineraryRepository
     UpdateItineraryUseCase --> AirportCatalog
+    UpdateItineraryUseCase --> UnitOfWork
     GetItineraryUseCase --> ItineraryRepository
     ListItinerariesUseCase --> ItineraryRepository
     DeleteItineraryUseCase --> ItineraryRepository
+    DeleteItineraryUseCase --> UnitOfWork
 
     class SqlAlchemyItineraryRepository {
         <<Adaptador · PostgreSQL>>

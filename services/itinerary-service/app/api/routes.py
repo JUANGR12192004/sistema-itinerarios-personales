@@ -79,8 +79,9 @@ def update_itinerary(
     body: UpdateItineraryRequest,
     repo: ItineraryRepository = Depends(get_itinerary_repository),
     catalog: AirportCatalog = Depends(get_airport_catalog),
+    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
 ) -> ItineraryResponse:
-    result = UpdateItineraryUseCase(repo, catalog).execute(
+    result = UpdateItineraryUseCase(repo, catalog, unit_of_work).execute(
         itinerary_id,
         UpdateItineraryCommand(
             traveler_name=body.traveler_name,
@@ -98,5 +99,6 @@ def update_itinerary(
 def delete_itinerary(
     itinerary_id: UUID,
     repo: ItineraryRepository = Depends(get_itinerary_repository),
+    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
 ) -> None:
-    DeleteItineraryUseCase(repo).execute(itinerary_id)
+    DeleteItineraryUseCase(repo, unit_of_work).execute(itinerary_id)
