@@ -220,7 +220,7 @@ source .venv/bin/activate
 pytest -v
 ```
 
-Resultado esperado: `191 passed`, sin advertencias (la de Starlette sobre `httpx` en `TestClient` se filtra en
+Resultado esperado: `199 passed`, sin advertencias (la de Starlette sobre `httpx` en `TestClient` se filtra en
 `pytest.ini` desde la Fase 11, ADR-042). Incluye la prueba de contrato `tests/test_openapi_contract.py`, que compara
 la API con `docs/openapi/airport-service.json` (ver "Pruebas" en el README raíz para regenerarlo).
 
