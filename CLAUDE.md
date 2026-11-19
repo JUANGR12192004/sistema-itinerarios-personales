@@ -349,6 +349,9 @@ sistema-itinerarios-personales/
 ├── .env.example
 ├── docs/
 │   ├── 01-planificacion.md ... 06-decisiones-arquitectonicas.md
+│   ├── 07-ejecucion-manual.md      ← Fase 12: arranque manual (modo desarrollo)
+│   ├── 08-demostraciones.md        ← Fase 12: demostraciones de punta a punta y de observabilidad
+│   ├── 10-historial-de-fases.md    ← Fase 12: resumen de lo que aportó cada fase
 │   ├── asyncapi/asyncapi.yaml      ← Fase 4
 │   └── openapi/airport-service.json ← Fase 11: contrato HTTP publicado de Airport Service
 ├── libs/
@@ -417,7 +420,8 @@ Si necesitas cambiar esta estructura, explica el cambio y pide aprobación.
 | SendNotificationFunction | 9000 |
 | Outbox Relay (métricas) | 9101 (proceso aparte de Itinerary Service, ADR-038) |
 | Event Trigger (métricas) | 9102 (proceso aparte, ADR-038) |
-| Jaeger | 16686 |
+| Jaeger (interfaz) | 16686 |
+| Jaeger (recepción de trazas OTLP gRPC) | 4317 |
 | Prometheus | 9090 |
 | Grafana | 3000 |
 
@@ -556,7 +560,12 @@ Confirmadas en la Fase 3 (ADR-015):
 | SonarCloud (PR #7, ADR-023) | Análisis de calidad con **Automatic Analysis** (sin paso en GitHub Actions), configurado en `.sonarcloud.properties` (desde la 6C analiza también `serverless/`). No importa cobertura. Su Quality Gate no forma parte por ahora del acuerdo de merge (check "Pruebas" + 1 aprobación) |
 | API Gateway (Fase 7, ADR-009) | **Nginx** como gateway puro en Docker (`gateway/Dockerfile` sobre `nginx:1.30.6-alpine`; desde la Fase 9, `nginx:1.30.6-alpine-otel` con `gateway/nginx.conf` propio, ADR-036; plantilla `gateway/templates/default.conf.template` con `envsubst` de la imagen oficial), puerto 8000. `/api/airports...` → Airport Service y `/api/itineraries...` → Itinerary Service, quitando `/api` (y `proxy_redirect` para las redirecciones). Direcciones por variables `AIRPORT_SERVICE_UPSTREAM` / `ITINERARY_SERVICE_UPSTREAM` (`host.docker.internal:8001/8002` en la Fase 7; nombres de contenedor en la Fase 10). Reenvía `Authorization` sin validarlo (nunca en el log). `X-Correlation-ID`: se reenvía si cumple `^[A-Za-z0-9._-]{1,128}$`; si no, se genera con forma de UUID. Timeouts: conexión 2 s, lectura 15 s, `proxy_next_upstream off`, `max_fails=0`. Errores propios en el formato de la sección 10.2: 502 `UPSTREAM_UNAVAILABLE`, 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE`; los errores de los servicios pasan sin cambios (`proxy_intercept_errors off`). Rate limiting (7B): por IP, 10 r/s, ráfaga 20, `nodelay`, solo `/api/`, 429 `RATE_LIMIT_EXCEEDED` con `Retry-After`. `GET /health` propio, `/` sirve el frontend (Fase 8), sin CORS, Swagger no se expone por el gateway |
 | Frontend (Fase 8, ADR-033) | Vanilla HTML/CSS/JS con ES modules, sin build toolchain, servido como estáticos por Nginx desde `frontend/` (copiado en la imagen del gateway, `location / { try_files ... }`, rutas no encontradas → 404 `ROUTE_NOT_FOUND` en JSON). Mapa de aeropuertos con `scattergeo` de Plotly 4.3.0 (bundle parcial `plotly-geo.min.js`, 1.4 MB, local para uso sin internet, marcado como binario en `.gitattributes`). CRUD de itinerarios con formulario y tabla; `datetime-local` → ISO 8601 con offset del navegador (ADR-017). Todo texto de datos con `textContent` (nunca `innerHTML`). Errores del gateway con `correlation_id` y botón "Copiar" en 5xx. Pruebas pytest en `gateway/tests` (misma suite del gateway). El contexto de build del gateway cambia a la raíz del repositorio: `docker build -t api-gateway -f gateway/Dockerfile .` |
+| Logs JSON (Fase 9, ADR-034) | `python-json-logger==4.2.0` en los cuatro componentes Python y en la función. Campos `timestamp`, `level`, `service`, `logger`, `message`, `correlation_id`, `trace_id`, `span_id`; filtros `CorrelationIdFilter` (de una `ContextVar` por solicitud) y `OTelContextFilter` (span activo). `configure_logging(log_level, service_name)` idempotente sobre el logger `app`; variable `LOG_LEVEL`. Desde el cierre de la Fase 9 vive en `libs/observability` (ADR-040) |
+| Trazas distribuidas (Fase 9, ADR-035) | `opentelemetry-sdk==1.45.2`, instrumentadores `0.66b2` según el componente (FastAPI, httpx, SQLAlchemy, pika, logging) y exportador OTLP gRPC. `setup_tracing(service_name, instrumentors, batch)`: `BatchSpanProcessor` en producción e `InMemorySpanExporter` en las pruebas. `OTEL_ENABLED=false` desactiva el envío; `OTEL_EXPORTER_OTLP_ENDPOINT` (por defecto `http://localhost:4317`). Propagación W3C (`traceparent`) con el propagador por defecto de OpenTelemetry |
 | Instrumentación del gateway (Fase 9, ADR-036) | Imagen `nginx:1.30.6-alpine-otel` con `ngx_otel_module`. Se provee `gateway/nginx.conf` propio con `load_module modules/ngx_otel_module.so;` antes del bloque `events {}` (la imagen no lo carga por defecto). `otel_trace_context propagate` inyecta el `traceparent` del span hijo al upstream; no se usa `proxy_set_header traceparent` (sobrescribiría el span hijo con el original del cliente). |
+| `traceparent` en la outbox (Fase 9, ADR-037) | Columna `traceparent` (`VARCHAR(55)`, nullable) en `outbox_events` (migración `e6f0a4b8c1d9`). `OutboxEventPublisher` guarda el contexto W3C de la solicitud; el relay lo restaura antes de publicar; el trigger lo lee de los headers AMQP y lo inyecta en el evento; el handler de la función lo restaura. Así una traza cruza el proceso del relay y RabbitMQ |
+| Métricas (Fase 9, ADR-038) | `prometheus-client==0.21.1`. Airport e Itinerary Service: `metrics_middleware` (`http_requests_total`, `http_request_duration_seconds`, con la plantilla de la ruta) y `/metrics`; `itineraries_created_total`. Outbox Relay (9101) y Event Trigger (9102) con `start_http_server` y contadores propios. Prometheus `v2.55.0` cada 15 s y Grafana `11.3.1` con datasource y dashboard cargados al arrancar |
+| Jaeger (Fase 9, ADR-039) | `jaegertracing/jaeger:2.23.0` (amd64 y arm64), OTLP gRPC en 4317 e interfaz en 16686, trazas en memoria (se pierden al reiniciar) |
 | Paquete compartido de observabilidad (cierre Fase 9, ADR-040) | `libs/observability`: Microservice Chassis Pattern con logging, trazas y métricas HTTP comunes. Instalado con `-e ../../libs/observability` en cada `requirements.txt`. El Dockerfile de SendNotificationFunction cambia el contexto de build a la raíz del repositorio para incluir `libs/`. Los Dockerfiles de Airport e Itinerary Service harán lo mismo en la Fase 10. *Actualización (Fase 10, ADR-041):* las imágenes de Airport, Itinerary y el trigger usan el contexto en la raíz, pero no instalan el paquete con pip: copian `libs/observability/observability` y lo agregan al `PYTHONPATH` (la imagen de la función sí lo instala con pip) |
 | Docker Compose (Fase 10, ADR-041) | `docker-compose.yml` en la raíz (proyecto `sistema-itinerarios`, 15 servicios) con los puertos de la sección 7.6. Imágenes propias sobre `python:3.12-slim` con usuario `appuser`, contexto de build en la raíz y `Dockerfile.dockerignore` por imagen (lista blanca): Airport Service, Itinerary Service (**una imagen para la API, `outbox-relay` e `itinerary-migrations`**), Event Trigger y `Dockerfile.migrations` de la función (imagen de la función sin Alembic, ADR-029). Las imágenes instalan solo `requirements-lock.txt` (todas las dependencias, también las transitivas, con hashes; generado con `python scripts/lock_requirements.py` a partir de `requirements-runtime.txt`, o de `requirements-migrations.txt` en la función) con `pip install --only-binary :all: --require-hashes` (reglas S8541 y S8544 de SonarCloud); `libs/observability` va por `PYTHONPATH`, sin pip. `requirements.txt` sigue siendo el archivo del entorno virtual y del CI. Migraciones como contenedores de una sola ejecución (`service_completed_successfully`); healthchecks de PostgreSQL, RabbitMQ, Redis, servicios FastAPI (Python `urllib`) y gateway (`wget`); el gateway solo espera `service_started`. Redes `itinerary-data` y `notification-data` (cada base solo con su servicio dueño; reemplaza a `notification-net`). `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317`. Observabilidad siempre activa; Prometheus con `prometheus.compose.yml` (`prometheus.yml` se conserva para el modo manual). `stop_signal: SIGINT` en el relay y el trigger. Volúmenes para las dos bases y RabbitMQ (`hostname: rabbitmq`). `.env.example` en la raíz con variables opcionales. Modo manual conservado para desarrollo. Job de CI "Docker Compose". El `.dockerignore` antiguo de la función se borró en el cierre de la Fase 11 (lo reemplaza `Dockerfile.dockerignore`) |
 | IP de los servicios en el gateway con Compose (cierre Fase 11, ADR-041) | Se **mantiene la limitación documentada**: Nginx resuelve los upstreams al arrancar, así que si un contenedor de servicio se recrea con otra IP el gateway responde 502 `UPSTREAM_UNAVAILABLE` hasta `docker compose restart api-gateway`. No se usa `resolver 127.0.0.11` con variables en `proxy_pass`: cambiaría ADR-009 y las pruebas del gateway para un caso que solo aparece al reconstruir un servicio con el sistema encendido |
@@ -594,9 +603,9 @@ está en `docs/openapi/airport-service.json` (Fase 11).
 | Airport | `GET /airports/map-data` | 200 (arrays para Plotly) | 502, 503, 504 |
 | Itinerary | `POST /itineraries` | 201 | 422, 503, 504 |
 | Itinerary | `GET /itineraries` | 200 | — |
-| Itinerary | `GET /itineraries/{id}` | 200 | 404 |
+| Itinerary | `GET /itineraries/{id}` | 200 | 404, 422 (el id no es un UUID) |
 | Itinerary | `PUT /itineraries/{id}` | 200 | 404, 422, 503, 504 |
-| Itinerary | `DELETE /itineraries/{id}` | 204 | 404 |
+| Itinerary | `DELETE /itineraries/{id}` | 204 | 404, 422 (el id no es un UUID) |
 | Todos | `GET /health` | 200 | — |
 | Todos | `GET /metrics` | 200 | — (Fase 9) |
 
@@ -684,21 +693,21 @@ Los códigos de error (`code`) van en MAYÚSCULAS_CON_GUIONES_BAJOS y en inglés
 
 ## 12. Fases del proyecto
 
-| Fase | Nombre | Contenido |
-|---|---|---|
-| 0 | Planificación y arquitectura | **Completada** (ver `docs/`) |
-| 1 | Airport Service | FastAPI, hexagonal, dominio, puerto, Adapter, cliente API Colombia, traducción externo → interno, endpoints, errores, Swagger, Pydantic, tests básicos. **Sin Redis ni circuit breaker.** Demostrar: cliente → Airport Service → Adapter → API Colombia |
-| 2 | Resiliencia y caché | Redis, caché, timeout, retry, exponential backoff, circuit breaker, fallback. Explicar cada mecanismo. Probar: API funciona, API tarda demasiado, API no responde, consultas repetidas |
-| 3 | Itinerary Service | FastAPI, hexagonal, DDD básico, entidad Itinerary, PostgreSQL, SQLAlchemy, Pydantic, Alembic, CRUD completo, errores, Swagger. Validación HTTP de aeropuertos contra Airport Service antes de guardar |
-| 4 | Eventos y RabbitMQ | `ItineraryCreatedEvent`, exchange, cola, routing key, contrato formal, AsyncAPI. Explicar: llamada HTTP vs evento vs evento de dominio vs evento de integración. Publicación directa tras el commit (para mostrar luego el problema de double write) |
-| 5 | Transactional Outbox | Itinerario + evento en la misma transacción, worker/relay que publica en RabbitMQ. Explicar el problema de double write |
-| 6 | Serverless | `SendNotificationFunction`: recibe el evento, simula la notificación, guarda historial, maneja errores. Explicar por qué es FaaS. Opcional: `GenerateItineraryReportFunction` (no implementada por alcance, ADR-043) |
-| 7 | API Gateway | Punto único de entrada, enrutamiento, sin lógica de negocio, rate limiting básico, preparar propagación de JWT |
-| 8 | Frontend | Consultar aeropuertos, mapa con Plotly JS, CRUD de itinerarios. Solo vía nuestros servicios |
-| 9 | Observabilidad | Logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger, Prometheus, Grafana. Demostrar el recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento → RabbitMQ → Función |
-| 10 | Docker y Docker Compose | Contenedores para todos los componentes, `docker-compose.yml`, cómo levantar y detener todo |
-| 11 | Pruebas | Unit, integración, API, Adapter, CRUD, comunicación HTTP, eventos, flujo completo. Opcional: E2E, Testcontainers |
-| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas |
+| Fase | Nombre | Contenido | Estado |
+|---|---|---|---|
+| 0 | Planificación y arquitectura | Objetivos, alcance, arquitectura, dominio, comunicación, diagramas y decisiones (`docs/01` a `docs/06`) | Completada (sin etiqueta: es anterior a la regla de etiquetas) |
+| 1 | Airport Service | FastAPI, hexagonal, dominio, puerto, Adapter, cliente API Colombia, traducción externo → interno, endpoints, errores, Swagger, Pydantic, tests básicos. **Sin Redis ni circuit breaker.** Demostrar: cliente → Airport Service → Adapter → API Colombia | Completada (etiqueta `fase-1`) |
+| 2 | Resiliencia y caché | Redis, caché, timeout, retry, exponential backoff, circuit breaker, fallback. Explicar cada mecanismo. Probar: API funciona, API tarda demasiado, API no responde, consultas repetidas | Completada (etiqueta `fase-2`) |
+| 3 | Itinerary Service | FastAPI, hexagonal, DDD básico, entidad Itinerary, PostgreSQL, SQLAlchemy, Pydantic, Alembic, CRUD completo, errores, Swagger. Validación HTTP de aeropuertos contra Airport Service antes de guardar | Completada (etiqueta `fase-3`) |
+| 4 | Eventos y RabbitMQ | `ItineraryCreatedEvent`, exchange, cola, routing key, contrato formal, AsyncAPI. Explicar: llamada HTTP vs evento vs evento de dominio vs evento de integración. Publicación directa tras el commit (para mostrar luego el problema de double write) | Completada (etiqueta `fase-4`) |
+| 5 | Transactional Outbox | Itinerario + evento en la misma transacción, worker/relay que publica en RabbitMQ. Explicar el problema de double write | Completada (etiqueta `fase-5`) |
+| 6 | Serverless | `SendNotificationFunction`: recibe el evento, simula la notificación, guarda historial, maneja errores. Explicar por qué es FaaS. Opcional: `GenerateItineraryReportFunction` (no implementada por alcance, ADR-043) | Completada (etiqueta `fase-6`) |
+| 7 | API Gateway | Punto único de entrada, enrutamiento, sin lógica de negocio, rate limiting básico, preparar propagación de JWT | Completada (etiqueta `fase-7`) |
+| 8 | Frontend | Consultar aeropuertos, mapa con Plotly JS, CRUD de itinerarios. Solo vía nuestros servicios | Completada (etiqueta `fase-8`) |
+| 9 | Observabilidad | Logs JSON, correlation ID, `trace_id`, `span_id`, OpenTelemetry, Jaeger, Prometheus, Grafana. Demostrar el recorrido completo Frontend → Gateway → Itinerary → Airport → BD → Evento → RabbitMQ → Función | Completada (etiqueta `fase-9`) |
+| 10 | Docker y Docker Compose | Contenedores para todos los componentes, `docker-compose.yml`, cómo levantar y detener todo | Completada (etiqueta `fase-10`) |
+| 11 | Pruebas | Unit, integración, API, Adapter, CRUD, comunicación HTTP, eventos, flujo completo. E2E sobre Docker Compose (Testcontainers se descartó, ADR-042) | Completada (etiqueta `fase-11`) |
+| 12 | Documentación y entrega | README profesional con todos los diagramas (componentes, clases, relacional, secuencia, despliegue), instalación, ejecución, variables de entorno, endpoints, eventos, evidencias y pruebas | En curso |
 
 ### 12.1. Plan de la Fase 1 (entregas)
 
@@ -781,9 +790,20 @@ Rama `fase-8-frontend`. Una pausa al final de cada entrega, antes del commit.
 | **8B** | Mapa de aeropuertos: `plotly-geo.min.js` 4.3.0 (local, 1.4 MB), `airports.js` con `scattergeo` centrado en Colombia, spinner, conteo real, tooltip por tipo | Mapa con 51 aeropuertos; colores por tipo; tooltip correcto |
 | **8C** | CRUD de itinerarios: `itineraries.js` con formulario 2 columnas, desplegables de aeropuertos, tabla, editar inline, eliminar con `confirm()`, `datetime-local` → ISO 8601 con offset, errores con `correlation_id` y botón copiar | Crear, editar y eliminar itinerarios; errores del servicio en banner |
 
----
+### 12.9. Plan de la Fase 9 (entregas)
 
-### 12.9. Plan de la Fase 10 (entregas)
+Rama `fase-9-observabilidad`. Este plan se agregó en la Fase 12 a partir de lo registrado en la sección 15 (durante la
+Fase 9 no quedó escrito aquí).
+
+| Entrega | Contenido | Verificación |
+|---|---|---|
+| **9A** | ADR-034: logs JSON con `python-json-logger` en los cuatro componentes Python (`configure_logging`, `CorrelationIdFilter`, `OTelContextFilter`) | Pruebas de `test_logging_config.py` |
+| **9B** | ADR-035 a ADR-037 y ADR-039: OpenTelemetry con exportador OTLP a Jaeger, gateway con `nginx:1.30.6-alpine-otel`, columna `traceparent` en `outbox_events` (migración `e6f0a4b8c1d9`) y propagación por relay, RabbitMQ, trigger y función | Pruebas de propagación en la outbox y el relay; traza en Jaeger |
+| **9C** | ADR-038: métricas con `prometheus-client` (HTTP, negocio, relay y trigger), Prometheus y Grafana con dashboard preconfigurado | Destinos de Prometheus `up`; dashboard en Grafana |
+| **9D** | Documentación de la fase (`docs/02`, `docs/05`, `docs/06`, README raíz y de los componentes) | — |
+| **Cierre** (`docs/cierre-fase-9`) | ADR-040: `libs/observability` (Microservice Chassis Pattern) por la duplicación que detectó SonarCloud; corrección de la carga del módulo OTel del gateway | CI del gateway y SonarCloud pasan |
+
+### 12.10. Plan de la Fase 10 (entregas)
 
 Rama `fase-10-docker-compose`. Una pausa al final de cada entrega.
 
@@ -793,7 +813,7 @@ Rama `fase-10-docker-compose`. Una pausa al final de cada entrega.
 | **10B** | `docker-compose.yml` (15 servicios, migraciones de una sola ejecución, healthchecks, redes por base, volúmenes, `stop_signal: SIGINT`), `prometheus.compose.yml`, `.env.example` en la raíz | `docker compose up -d --build`: migraciones `Exited (0)`, servicios `healthy`, recorrido de punta a punta por el gateway hasta `notification_history` |
 | **10C** | ADR-041, `docs/02` (sección 7), `docs/05` (despliegue y orden de arranque), README raíz (arranque con Compose, modo manual, demostraciones con Compose), README de los cinco componentes, job de CI "Docker Compose", estado de CLAUDE.md | Job "Docker Compose" pasa en el PR |
 
-### 12.10. Plan de la Fase 11 (entregas)
+### 12.11. Plan de la Fase 11 (entregas)
 
 Rama `fase-11-pruebas`. Por decisión del usuario, las cuatro entregas se hicieron seguidas, con un commit por entrega
 y una sola pausa al final.
@@ -805,7 +825,7 @@ y una sola pausa al final.
 | **11C** | `docker-compose.e2e.yml` con el simulador de API Colombia, `tests/e2e` y su paso en el job "Docker Compose" | 14 E2E pasan dos veces seguidas y no dejan itinerarios |
 | **11D** | Filtro de advertencias, ADR-042, README raíz (sección "Pruebas") y de los componentes, estado de CLAUDE.md | Siete suites sin fallos, sin omitidas y sin advertencias con todo encendido |
 
-### 12.11. Plan de la Fase 12 (entregas)
+### 12.12. Plan de la Fase 12 (entregas)
 
 Rama `fase-12-documentacion`. Una pausa al final de cada entrega, antes del commit. Reglas acordadas: el README no queda
 con secciones vacías entre entregas; en "Arquitectura" cada concepto es corto (qué es y por qué se usa, dónde está en el
@@ -1222,7 +1242,7 @@ pytest -v
     fase. Los grupos C y D quedan para la Fase 12.
   - Verificación: pruebas que comparan el AsyncAPI con el código (Itinerary 5, función 10, trigger 6) pasan; ningún
     archivo del repositorio tiene caracteres de control.
-- **Fase 12 (Documentación y entrega):** en curso en la rama `fase-12-documentacion` (plan en la sección 12.11).
+- **Fase 12 (Documentación y entrega):** en curso en la rama `fase-12-documentacion` (plan en la sección 12.12).
   - Entrega **12A**: `docs/05` con diagramas de clases (sección 3: Airport con los roles del Adapter y los
     Decorators, Itinerary API, Outbox Relay y función) y relacional (sección 4: `itinerary_db` y `notification_db`,
     índices, restricciones y referencias entre bases), índice al inicio y secciones renumeradas (secuencia 5,
@@ -1233,7 +1253,37 @@ pytest -v
     documentación adicional, desarrollo por fases, Claude Code y contexto académico con los datos del equipo).
     Enlaces actualizados en `docs/02`, `docs/05` y los README de Airport, Itinerary, la función y el trigger.
     Comprobado: los 15 diagramas de `docs/05` se dibujan sin errores con Mermaid 11.
-  - Pendientes para la 12B (se conservaron al mover el texto): totales de pruebas del README anteriores a
-    `fix/limpieza-config`, `prometheus.yml` en el resumen de la Fase 9 (con Compose es `prometheus.compose.yml`),
-    "estará compuesto" en "Alcance" y "lo hará el frontend" en `docs/08`.
-- **Siguiente:** entrega 12B.
+    Commits `db4cd63` (diagramas) y `f026efc` (reorganización).
+  - Entrega **12B**:
+    - README completo: inicio rápido; "Arquitectura" con un apartado corto por concepto (qué es y por qué, dónde
+      está en el código, enlace a `docs/`); diagramas general, de secuencia, relacional y de despliegue (copias de
+      `docs/05`, que lo indica en "Consideraciones"); variables de entorno de Compose y de cada componente; endpoints
+      por el gateway con sus códigos de error; contrato y topología del evento; pruebas con los totales ejecutados;
+      limitaciones conocidas (ADR-008, ADR-041, ADR-043 y protección de `main`); tabla de los 43 ADR; estructura del
+      repositorio.
+    - Totales confirmados ejecutando las siete suites (2026-11-18, macOS, Compose con el simulador): libs/observability
+      19, Airport 191, Itinerary 186, función 70, Event Trigger 86, gateway 53 y E2E 14: **619 pasan, 0 fallos, 0
+      omitidas, 0 advertencias**.
+    - Contradicciones corregidas (documentación contra código): totales de pruebas (README, ADR-042, `docs/10`, README
+      de Airport e Itinerary); `prometheus.yml` en el resumen de la Fase 9; verbos en futuro en "Alcance", `docs/02`,
+      `docs/03`, `docs/04`, `docs/05` y `docs/08`; definición de Adapter invertida y `Airport` sin atributos en
+      `docs/03`; paneles y ruta del dashboard de Grafana en `docs/02`; referencia a la sección 3.2 de `docs/05` (ahora
+      5.2) en `docs/04`; `AirportNotFoundError` en ADR-019 (en el código, `AirportNotFoundInCatalogError`);
+      `opentelemetry-propagator-b3` en ADR-035 (no se instala; se usa el propagador W3C por defecto); 422 de
+      `GET`/`DELETE /itineraries/{id}` con un id que no es UUID (sección 10.1); comentario de `docker-compose.yml`
+      que remitía al README. Dos errores reales de documentación: el diagrama de topología de RabbitMQ de `docs/04`
+      no se dibujaba (etiqueta con puntos en la flecha), y los comandos manuales de Prometheus y Grafana de `docs/07`
+      dejaban Grafana sin dashboard y con el datasource roto (faltaban la red `observability-net` y el montaje de
+      `dashboards/`; también faltaba la variante de PowerShell). Los comandos corregidos se probaron en macOS; la
+      variante de PowerShell no se probó en Windows.
+    - Grupo C (`docs/06`): estados de ADR-001 a ADR-006 y ADR-010 (aceptadas en la Fase 0 e implementadas en la fase
+      que se indica), ADR-012 (504 y `/metrics`), ADR-025 (implementada; condición con `failed_at`), ADR-033 con
+      contexto, decisión, justificación y consecuencias, nota de totales en ADR-042 y sección 2 "Revisión y
+      mantenimiento de las decisiones".
+    - Grupo D (este archivo): filas de ADR-034, 035, 037, 038 y 039 en la 9.1; 7.5 con `docs/07`, `08` y `10`; 7.6 con
+      el puerto 4317; 10.1 con los 422; sección 12 con la columna de estado (la Fase 0 no tiene etiqueta), el plan de
+      la Fase 9 (12.9, reconstruido a partir de esta sección), planes renumerados (Fase 12 → 12.12), sin el `---`
+      suelto y sin Testcontainers en la Fase 11.
+    - Verificado: ningún enlace interno roto y los 30 diagramas Mermaid del repositorio se dibujan sin errores con
+      Mermaid 11.
+- **Siguiente:** entrega 12C (evidencias, guía de sustentación, revisión final de enlaces y del orden de lectura).

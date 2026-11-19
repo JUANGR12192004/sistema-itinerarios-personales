@@ -5,11 +5,11 @@
 
 Registrar las decisiones arquitectónicas relevantes del Sistema de Itinerarios Personales, incluyendo su contexto, justificación, consecuencias y estado.
 
-Las decisiones pendientes no deben considerarse definitivas hasta ser evaluadas.
+Las decisiones se registraron en el momento de tomarlas (de la Fase 0 a la 11); la sección 2, al final, explica cómo se mantienen. El `README.md` raíz tiene una tabla con una línea por ADR.
 
 ## ADR-001 — Uso de microservicios
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada: Airport Service (Fase 1), Itinerary Service (Fase 3) y sistema de notificaciones (Fase 6).
 
 ### Contexto
 
@@ -32,7 +32,7 @@ Cada componente tendrá una responsabilidad delimitada y contratos explícitos d
 
 ## ADR-002 — Arquitectura hexagonal
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada en Airport Service (Fase 1), Itinerary Service (Fase 3), SendNotificationFunction y Event Trigger (Fase 6).
 
 ### Contexto
 
@@ -52,7 +52,7 @@ Se requiere una estructura de código más explícita, pero se facilita el mante
 
 ## ADR-003 — Patrón Adapter para API Colombia
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada en la Fase 1 (entregas 1B y 1C).
 
 ### Contexto
 
@@ -74,7 +74,7 @@ La lógica interna no dependerá directamente del formato de respuesta del prove
 
 ## ADR-004 — PostgreSQL independiente para itinerarios
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada en la Fase 3 (ADR-016).
 
 ### Contexto
 
@@ -96,7 +96,7 @@ La tecnología de persistencia del historial de notificaciones se decidió por s
 
 ## ADR-005 — RabbitMQ para mensajería
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada en la Fase 4 (ADR-021) y ampliada en la Fase 6 (ADR-031, ADR-032).
 
 ### Contexto
 
@@ -116,7 +116,7 @@ Se deberán configurar exchanges, colas, routing keys, confirmaciones, recuperac
 
 ## ADR-006 — Transactional Outbox
 
-**Estado:** Aceptada. Se implementa en la Fase 5; los detalles están en ADR-024 (tabla `outbox_events`), ADR-025 (Outbox Relay) y ADR-026 (registro del evento en la misma transacción).
+**Estado:** Aceptada (Fase 0). Implementada en la Fase 5; los detalles están en ADR-024 (tabla `outbox_events`), ADR-025 (Outbox Relay) y ADR-026 (registro del evento en la misma transacción).
 
 ### Contexto
 
@@ -279,7 +279,7 @@ El texto anterior es la decisión de la Fase 7. Cambios posteriores:
 
 ## ADR-010 — Observabilidad
 
-**Estado:** Aceptada para el diseño.
+**Estado:** Aceptada (Fase 0). Implementada en la Fase 9 (ADR-034 a ADR-040).
 
 ### Contexto
 
@@ -321,7 +321,7 @@ Cada término del negocio debe tener una única traducción en el código, regis
 
 ## ADR-012 — Contrato HTTP y formato único de errores
 
-**Estado:** Aceptada (Fase 1) para Airport Service. Los endpoints de Itinerary Service se confirmarán en la Fase 3.
+**Estado:** Aceptada (Fase 1) para Airport Service. Los endpoints de Itinerary Service se confirmaron en la Fase 3 (ADR-019).
 
 ### Contexto
 
@@ -337,6 +337,8 @@ Airport Service expone:
 | `GET /airports/{id}` | 200 | 404, 422, 502, 503 |
 | `GET /airports/map-data` | 200 | 502, 503 |
 | `GET /health` | 200 | — |
+
+*Actualización (Fase 2, ADR-014):* los tres endpoints de aeropuertos responden también 504 `AIRPORT_PROVIDER_TIMEOUT` cuando API Colombia no responde a tiempo. *Actualización (Fase 9, ADR-038):* todos los servicios exponen además `GET /metrics`. La tabla vigente de endpoints de los dos servicios está en la sección 10.1 de `CLAUDE.md` y, a través del gateway, en el `README.md` raíz.
 
 Todos los servicios responden los errores con el mismo formato:
 
@@ -528,6 +530,8 @@ Los endpoints de Itinerary Service seguían como propuesta. Faltaba definir cóm
 Se confirman los endpoints de la sección 10.1. Adicionalmente, el manejador de errores de Itinerary Service distingue:
 
 - `AirportNotFoundError` (404 de Airport Service) → HTTP 422 con código `AIRPORT_NOT_FOUND`.
+
+  *Corrección (Fase 12):* en el código la excepción se llama `AirportNotFoundInCatalogError` (la lanza `HttpAirportCatalogAdapter`), y el caso de uso la convierte en `DepartureAirportNotFoundError` o `ArrivalAirportNotFoundError` para indicar cuál de los dos aeropuertos no existe (`details.field`). El código HTTP y el `code` no cambian.
 - `AirportServiceUnavailableError` (503 de Airport Service o error de conexión) → HTTP 503 con código `AIRPORT_SERVICE_UNAVAILABLE`.
 - `AirportServiceTimeoutError` (timeout de Airport Service, subclase de `AirportServiceUnavailableError`) → HTTP 504 con código `AIRPORT_SERVICE_TIMEOUT`.
 
@@ -707,7 +711,7 @@ El Transactional Outbox (ADR-006) necesita guardar cada evento pendiente en la *
 
 ## ADR-025 — Outbox Relay: proceso aparte, `SKIP LOCKED` y entrega al menos una vez (Fase 5)
 
-**Estado:** Aceptada (Fase 5). Se implementa en la entrega 5B.
+**Estado:** Aceptada (Fase 5). Implementada en la entrega 5B; ampliada por ADR-027 (mensajes venenosos).
 
 ### Contexto
 
@@ -716,7 +720,7 @@ Alguien debe leer los eventos pendientes de `outbox_events` y publicarlos en Rab
 ### Decisión
 
 - El **Outbox Relay** es un proceso aparte de Itinerary Service, con su propio comando (`python -m app.outbox_relay`). Cada ciclo procesa un lote y espera un intervalo. Variables: `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (por defecto 2) y `OUTBOX_RELAY_BATCH_SIZE` (por defecto 10). Se detiene con Ctrl+C. Si PostgreSQL falla en un ciclo, registra el error y sigue con el siguiente, sin terminar el proceso.
-- Toma los pendientes con `SELECT ... WHERE published_at IS NULL ORDER BY occurred_at LIMIT n FOR UPDATE SKIP LOCKED`. `FOR UPDATE` bloquea las filas leídas hasta el fin de la transacción, y `SKIP LOCKED` hace que otro relay **salte** las filas bloqueadas en vez de esperarlas: dos relays nunca toman el mismo evento.
+- Toma los pendientes con `SELECT ... WHERE published_at IS NULL ORDER BY occurred_at LIMIT n FOR UPDATE SKIP LOCKED` (*actualización, ADR-027:* la condición es `published_at IS NULL AND failed_at IS NULL`). `FOR UPDATE` bloquea las filas leídas hasta el fin de la transacción, y `SKIP LOCKED` hace que otro relay **salte** las filas bloqueadas en vez de esperarlas: dos relays nunca toman el mismo evento.
 - **Un commit por lote**: hacer commit evento por evento liberaría los bloqueos del resto del lote, que otro relay podría tomar mientras este todavía los publica.
 - Orden: **publicar y después marcar** `published_at`. Esto da una entrega **al menos una vez**.
 - Si una publicación falla: se incrementa `attempts`, se guarda `last_error`, el evento sigue pendiente y **se detiene el lote**. Los eventos restantes no se tocan ni suman intentos, y todos se reintentan en el siguiente ciclo. Si RabbitMQ está caído, seguir con el resto solo alargaría el ciclo (cada intento espera hasta `RABBITMQ_TIMEOUT_SECONDS`).
@@ -1126,7 +1130,43 @@ No se pierde nada, y el relay no necesita ningún cambio para esto.
 
 ## ADR-033 — Frontend con HTML/CSS/JS y Plotly JS (Fase 8)
 
-**Estado:** Aceptada (Fase 8, ADR-033). Detalles en la sección 9.1 de `CLAUDE.md`.
+**Estado:** Aceptada (Fase 8, entrega 8A). Implementada en las entregas 8A a 8C.
+
+### Contexto
+
+El sistema necesita una interfaz web para consultar los aeropuertos en un mapa con Plotly JS (requisito del proyecto)
+y gestionar itinerarios. El frontend solo puede hablar con el API Gateway (CLAUDE.md 7.2) y debe ser fácil de explicar
+en la sustentación; el equipo trabaja en Windows y macOS.
+
+### Decisión
+
+- **HTML, CSS y JavaScript sin framework ni herramientas de build** (ES modules nativos del navegador), en `frontend/`:
+  `index.html`, `css/style.css` y `js/` (`api.js` para las llamadas al gateway, `airports.js` para el mapa,
+  `itineraries.js` para el CRUD y `main.js` para las pestañas).
+- **Servido por el propio gateway** (Nginx) como archivos estáticos: la imagen del gateway copia `frontend/`,
+  `location / { try_files ... }` lo entrega y una ruta inexistente responde 404 `ROUTE_NOT_FOUND` en JSON. El contexto
+  de build del gateway pasa a la raíz del repositorio (`docker build -t api-gateway -f gateway/Dockerfile .`).
+- **Mapa con `scattergeo` de Plotly 4.3.0**, con el bundle parcial `plotly-geo.min.js` (1,4 MB) guardado en el
+  repositorio para funcionar sin internet (marcado como binario en `.gitattributes`). Centrado en Colombia, un color por
+  tipo de aeropuerto y tooltip con nombre, IATA, ciudad y departamento. El aeropuerto sin coordenadas no se dibuja (51 de 52).
+- **CRUD de itinerarios** con formulario y tabla; los aeropuertos se eligen en desplegables. El `datetime-local` del
+  navegador se convierte a ISO 8601 con el offset del navegador (ADR-017).
+- **Seguridad:** todo texto que viene de los datos se escribe con `textContent`, nunca con `innerHTML` (evita XSS).
+- **Errores:** se muestran con su `correlation_id`; en los 5xx, con un botón "Copiar" para buscarlo en los logs.
+- Pruebas en `gateway/tests` (`test_static.py`), en la misma suite del gateway.
+
+### Justificación
+
+Sin build ni dependencias de Node, cualquier integrante abre y entiende el código, y no hay otra herramienta que
+instalar en Windows y macOS. Servirlo desde el mismo origen que la API evita configurar CORS y mantiene al gateway
+como único punto de entrada. El bundle local de Plotly permite la demostración sin internet y evita depender de un CDN.
+
+### Consecuencias
+
+- No hay componentes reutilizables ni manejo de estado de un framework: con dos pantallas no hace falta.
+- Un cambio en `frontend/` exige reconstruir la imagen del gateway (`docker compose up -d --build api-gateway`).
+- Nginx resuelve el `Content-Type` por la extensión: las ubicaciones que devuelven errores JSON fijan su tipo con
+  `types { }` vacío (corrección de la rama `fix/gateway-404-json`).
 
 ## ADR-034 — Logs JSON estructurados con python-json-logger (Fase 9)
 
@@ -1184,6 +1224,8 @@ El sistema distribuye el procesamiento de una operación entre el gateway, dos s
 
 - El API Gateway usa `ngx_otel_module` (ADR-036).
 - La propagación del contexto W3C (`traceparent`) se hace con `opentelemetry-propagator-b3` y el propagador compuesto de OpenTelemetry; los headers `traceparent` y `tracestate` viajan en las solicitudes HTTP y en los headers AMQP.
+
+  *Corrección (Fase 12):* el proyecto no instala `opentelemetry-propagator-b3`. La propagación usa el propagador por defecto de OpenTelemetry (W3C Trace Context y Baggage, compuestos), que es el que lee y escribe `traceparent`; el comportamiento descrito no cambia.
 
 ### Justificación
 
@@ -1438,6 +1480,8 @@ Se adopta una **pirámide de pruebas** con cinco niveles, cada uno con un propó
 - Las E2E necesitan Docker y tardan ~25 s con el sistema arriba; no reemplazan a las demás pruebas, que siguen corriendo sin servicios.
 - Con todo encendido (Fase 11): 639 pruebas en siete suites, 0 fallos, 0 omitidas, 0 advertencias. Sin servicios, las de integración quedan SKIPPED y el resto pasa.
 
+*Actualización (Fase 12):* la rama `fix/limpieza-config` borró 21 pruebas de Airport e Itinerary Service que solo repetían las de `libs/observability` y movió una a ese paquete. Ejecutadas el 2026-11-18 con todo encendido: **619 pruebas** (libs/observability 19, Airport 191, Itinerary 186, función 70, Event Trigger 86, gateway 53, E2E 14), 0 fallos, 0 omitidas, 0 advertencias.
+
 ## ADR-043 — GenerateItineraryReportFunction no se implementa (alcance)
 
 **Estado:** Aceptada (cierre de la Fase 11).
@@ -1460,8 +1504,15 @@ El plan de la Fase 6 (sección 12 de `CLAUDE.md`) incluía como **opcional** una
 - El sistema tiene una sola función serverless. El "sistema de notificaciones" sigue formado por Event Trigger + `SendNotificationFunction` + su almacenamiento (CLAUDE.md 7.1).
 - La función queda como posible trabajo futuro: se agregaría siguiendo el mismo modelo (carpeta propia en `serverless/`, imagen de AWS Lambda, nuevo binding en `itinerary.events` o invocación directa), sin cambiar a los demás componentes.
 
-## 2. Revisión de decisiones
+## 2. Revisión y mantenimiento de las decisiones
 
-Las decisiones pendientes deberán resolverse antes de implementar los componentes afectados.
+Al cierre del proyecto (Fase 12) no queda ninguna decisión de arquitectura pendiente: las 43 están aceptadas, salvo
+ADR-022, reemplazada por el Transactional Outbox (ADR-026). La única decisión abierta, la protección de `main` en
+GitHub, no es de arquitectura: la configura el dueño del repositorio (CLAUDE.md, sección 9.3).
 
-Toda modificación de una decisión aceptada deberá incluir la razón del cambio y sus consecuencias.
+Cómo se mantiene este registro:
+
+- Una decisión aceptada no se reescribe: los cambios posteriores se agregan como notas *Actualización (Fase N, ADR-X)*
+  o *Corrección (Fase N)*, con la razón del cambio y sus consecuencias, para que se vea cómo evolucionó.
+- Una decisión que deja de aplicarse se marca como **reemplazada** e indica cuál la reemplaza (ADR-022).
+- Cada ADR nuevo se resume en la sección 9.1 de `CLAUDE.md` y en la tabla "Decisiones de arquitectura" del `README.md` raíz.
