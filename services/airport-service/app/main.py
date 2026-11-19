@@ -81,11 +81,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             socket_connect_timeout=settings.redis_timeout_seconds,
             socket_timeout=settings.redis_timeout_seconds,
         )
-        async with httpx.AsyncClient(timeout=settings.api_colombia_timeout_seconds) as http_client:
-            app.state.airport_provider = build_airport_provider(settings, http_client, redis)
-            yield
-        # Al detener: el "async with" cierra el cliente HTTP; aquí se cierra la conexión con Redis.
-        await redis.aclose()
+        try:
+            async with httpx.AsyncClient(timeout=settings.api_colombia_timeout_seconds) as http_client:
+                app.state.airport_provider = build_airport_provider(settings, http_client, redis)
+                yield
+        finally:
+            # Al detener: el "async with" cierra el cliente HTTP y aquí se cierra la conexión con
+            # Redis. El "finally" la cierra también si la aplicación se detiene con una excepción.
+            await redis.aclose()
 
     app = FastAPI(
         title="Airport Service",

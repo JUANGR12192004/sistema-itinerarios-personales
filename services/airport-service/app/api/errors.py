@@ -9,6 +9,10 @@
 | AirportProviderTimeoutError      | 504  | AIRPORT_PROVIDER_TIMEOUT     |
 | Ruta inexistente u otro error HTTP | 404/405/... | ROUTE_NOT_FOUND, METHOD_NOT_ALLOWED, HTTP_ERROR |
 | Cualquier otra excepción         | 500  | INTERNAL_ERROR               |
+
+Los manejadores son funciones normales (`def`), no `async`: no esperan nada (solo arman
+la respuesta y escriben un log), y Starlette acepta los dos tipos; a los `def` los
+ejecuta en un hilo del threadpool.
 """
 
 import logging
@@ -52,14 +56,14 @@ def error_response(
     )
 
 
-async def _airport_not_found(request: Request, error: Exception) -> JSONResponse:
+def _airport_not_found(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, AirportNotFoundError)
     return error_response(
         request, status.HTTP_404_NOT_FOUND, "AIRPORT_NOT_FOUND", str(error), {"airport_id": error.airport_id}
     )
 
 
-async def _validation_error(request: Request, error: Exception) -> JSONResponse:
+def _validation_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, RequestValidationError)
     errors = [
         {"field": ".".join(str(part) for part in item["loc"][1:]) or str(item["loc"][0]), "message": item["msg"]}
@@ -74,7 +78,7 @@ async def _validation_error(request: Request, error: Exception) -> JSONResponse:
     )
 
 
-async def _provider_bad_response(request: Request, error: Exception) -> JSONResponse:
+def _provider_bad_response(request: Request, error: Exception) -> JSONResponse:
     logger.warning("Respuesta inválida del proveedor de aeropuertos: %s", error)
     return error_response(
         request,
@@ -84,7 +88,7 @@ async def _provider_bad_response(request: Request, error: Exception) -> JSONResp
     )
 
 
-async def _provider_unavailable(request: Request, error: Exception) -> JSONResponse:
+def _provider_unavailable(request: Request, error: Exception) -> JSONResponse:
     logger.warning("Proveedor de aeropuertos no disponible: %s", error)
     return error_response(
         request,
@@ -94,7 +98,7 @@ async def _provider_unavailable(request: Request, error: Exception) -> JSONRespo
     )
 
 
-async def _provider_timeout(request: Request, error: Exception) -> JSONResponse:
+def _provider_timeout(request: Request, error: Exception) -> JSONResponse:
     logger.warning("El proveedor de aeropuertos no respondió a tiempo: %s", error)
     return error_response(
         request,
@@ -104,14 +108,25 @@ async def _provider_timeout(request: Request, error: Exception) -> JSONResponse:
     )
 
 
-async def _http_error(request: Request, error: Exception) -> JSONResponse:
+def _http_error(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, StarletteHTTPException)
     code = _HTTP_ERROR_CODES.get(error.status_code, "HTTP_ERROR")
     return error_response(request, error.status_code, code, str(error.detail))
 
 
-async def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
-    logger.exception("Error inesperado procesando %s %s", request.method, request.url.path)
+def _unexpected_error(request: Request, error: Exception) -> JSONResponse:
+    # exc_info=error: en el hilo del threadpool no hay una "excepción en curso", así que
+    # logger.exception no encontraría el traceback por sí solo.
+    # extra={"correlation_id": ...}: este manejador lo ejecuta ServerErrorMiddleware, la capa más
+    # externa, donde no se ve el ContextVar que fija correlation_id_middleware (esa capa corre
+    # dentro de metrics_middleware, en otra tarea). Se toma de request.state, como la respuesta.
+    logger.exception(
+        "Error inesperado procesando %s %s",
+        request.method,
+        request.url.path,
+        exc_info=error,
+        extra={"correlation_id": get_correlation_id(request)},
+    )
     return error_response(
         request, status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Ocurrió un error interno inesperado"
     )

@@ -33,7 +33,17 @@ _HTTP_ERROR_CODES = {
 
 
 def _cid(request: Request) -> str:
-    return request.headers.get("X-Correlation-ID", str(uuid4()))
+    """Correlation ID de la solicitud: el que fijó el middleware en request.state.
+
+    Así el cuerpo del error, el header de la respuesta y los logs usan el mismo valor
+    (también cuando la solicitud llega sin header o con uno de más de 128 caracteres).
+    Si el middleware no llegó a correr, se genera uno y se guarda para el resto de la solicitud.
+    """
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if not correlation_id:
+        correlation_id = str(uuid4())
+        request.state.correlation_id = correlation_id
+    return correlation_id
 
 
 def _body(code: str, message: str, details: dict | None, correlation_id: str) -> dict:
@@ -134,7 +144,15 @@ def add_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception):
         cid = _cid(request)
-        logger.exception("Error inesperado procesando %s %s", request.method, request.url.path)
+        # Este manejador lo ejecuta ServerErrorMiddleware, la capa más externa, donde no se ve
+        # el ContextVar que fija el middleware de correlation ID (corre dentro de
+        # metrics_middleware, en otra tarea): el valor se pasa explícitamente al log.
+        logger.exception(
+            "Error inesperado procesando %s %s",
+            request.method,
+            request.url.path,
+            extra={"correlation_id": cid},
+        )
         return JSONResponse(
             status_code=500,
             content=_body("INTERNAL_ERROR", "Ocurrió un error interno inesperado.", None, cid),

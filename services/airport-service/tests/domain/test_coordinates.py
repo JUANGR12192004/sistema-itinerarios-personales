@@ -47,7 +47,12 @@ def test_rejects_longitude_out_of_range(longitude: float) -> None:
 
 
 def test_coordinates_with_same_values_are_equal() -> None:
-    assert Coordinates(4.45, -75.76) == Coordinates(4.45, -75.76)
+    # Objeto de valor: dos instancias distintas con los mismos valores son iguales.
+    first = Coordinates(4.45, -75.76)
+    second = Coordinates(4.45, -75.76)
+
+    assert first is not second
+    assert first == second
 
 
 def test_coordinates_are_immutable() -> None:

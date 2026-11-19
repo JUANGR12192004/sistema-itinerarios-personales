@@ -2,8 +2,10 @@
 
 import logging
 
+import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.config import Settings
 from app.infrastructure.api_colombia.adapter import ApiColombiaAirportAdapter
 from app.infrastructure.cache.cached_provider import CachedAirportProvider
@@ -27,6 +29,46 @@ def test_http_client_uses_the_configured_timeout() -> None:
         adapter = client.app.state.airport_provider._inner._inner  # type: ignore[attr-defined]
 
         assert adapter._client._http_client.timeout.read == 1.5
+
+
+class FakeRedis:
+    """Cliente de Redis falso: solo registra si se cerró la conexión."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    redis = FakeRedis()
+    monkeypatch.setattr(main_module.Redis, "from_url", lambda *args, **kwargs: redis)
+    return redis
+
+
+@pytest.mark.anyio
+async def test_lifespan_closes_redis_on_normal_shutdown(fake_redis: FakeRedis) -> None:
+    app = create_app()
+
+    async with app.router.lifespan_context(app):
+        assert not fake_redis.closed
+
+    assert fake_redis.closed
+
+
+@pytest.mark.anyio
+async def test_lifespan_closes_redis_even_if_shutdown_is_interrupted(fake_redis: FakeRedis) -> None:
+    # Si llega una excepción mientras la aplicación está en marcha (el "yield" del lifespan),
+    # la conexión con Redis se cierra igual (regla S9152 de SonarCloud).
+    app = create_app()
+
+    with pytest.raises(RuntimeError):
+        async with app.router.lifespan_context(app):
+            raise RuntimeError("parada inesperada de prueba")
+
+    assert fake_redis.closed
 
 
 def test_logging_shows_app_warnings() -> None:

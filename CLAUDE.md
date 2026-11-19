@@ -1348,3 +1348,36 @@ pytest -v
   passed"). La rama se actualizó con un merge de `origin/main` (sin conflictos) para traer la corrección del PR #32. La
   evidencia 20 queda enlazada y sin la marca "Pendiente" en `docs/evidencias/README.md` y en la sección "Evidencias"
   del README raíz. La evidencia 19 (SonarCloud) sigue pendiente hasta la rama `fix/sonarcloud-fiabilidad`.
+  Fusionada en `main` (PR #31, merge `68408c4`).
+- **Rama `fix/sonarcloud-fiabilidad`** (2026-11-19): SonarCloud sobre `main` mostraba fiabilidad C con 9 problemas
+  abiertos en el código completo (el Quality Gate pasaba porque eran antiguos), todos en Airport Service. Ninguno se
+  marcó como aceptado en SonarCloud; los 35 de mantenibilidad no se tocaron.
+  - S9152 (`app/main.py`, `lifespan`): **real**. `await redis.aclose()` iba después del `async with`, así que una
+    excepción durante el `yield` dejaba la conexión con Redis sin cerrar. Ahora va en un `finally`. Prueba nueva que
+    fallaba antes de la corrección (`test_lifespan_closes_redis_even_if_shutdown_is_interrupted`).
+  - S7503 ×7 (`app/api/errors.py`): **real, menor**: los siete manejadores de errores eran `async def` sin ningún
+    `await`. Pasan a `def` (Starlette acepta los dos tipos y ejecuta los `def` en el threadpool), como recomienda la regla.
+    Respuestas sin cambios. Al pasar a un hilo, `logger.exception` ya no encontraba la excepción en curso y el log del
+    500 perdía el traceback (lo detectó una prueba nueva): `_unexpected_error` pasa `exc_info=error`.
+  - S5863 (`tests/domain/test_coordinates.py`): **falso positivo** (comparaba dos instancias distintas con los mismos
+    valores, no la misma expresión). Reescrita con dos variables y `assert first is not second`, para que se lea qué
+    prueba: igualdad de objeto de valor.
+  - Pruebas: `tests/api/test_error_handlers.py` (3) y 2 del `lifespan` en `tests/api/test_main.py`. Airport Service:
+    **196 pasan** (con Redis). Verificado en Docker Compose con la API real: 200, 404 `AIRPORT_NOT_FOUND`, 422,
+    `map-data` y parada limpia del contenedor.
+  - Hallazgo corregido en la misma rama (no era de SonarCloud ni lo causó la rama): el log `ERROR` de un 500 salía con
+    `correlation_id` vacío en Airport **e** Itinerary Service, aunque la respuesta sí lo llevaba. Causa (comprobada con
+    la pila de middlewares): el 500 lo atiende `ServerErrorMiddleware`, la capa más externa, y el middleware de
+    correlation ID corre dentro de `metrics_middleware` (`BaseHTTPMiddleware`), que ejecuta las capas internas en otra
+    tarea con una copia del contexto: el `ContextVar` fijado allí no se ve afuera. El `trace_id` sí aparecía (lo abre la
+    instrumentación de OpenTelemetry, más externa). Corrección: el manejador del 500 pasa
+    `extra={"correlation_id": ...}` tomado de `request.state` (`CorrelationIdFilter` respeta el valor si ya viene).
+    En Airport, `get_correlation_id` guarda en `request.state` el ID que genera, para que el log y la respuesta usen el
+    mismo. En Itinerary, `_cid` del manejador de errores leía el header o generaba un UUID nuevo: sin header, el cuerpo de
+    un error y el header de la respuesta traían IDs distintos, y con un header de más de 128 caracteres el cuerpo lo
+    devolvía sin recortar. Ahora usa `request.state` como Airport (por el gateway no ocurría: siempre envía un ID válido).
+    No se reordenaron los middlewares ni se cambió `libs/observability`. Pruebas: 3 más en
+    `test_error_handlers.py` de Airport (**198 pasan**) y `tests/api/test_error_log_correlation.py` en Itinerary (4,
+    fallaban antes de la corrección; **200 pasan**). Verificado en Compose: con `itinerary-postgres` detenido, `GET
+    /api/itineraries` con `X-Correlation-ID: demo-500-log` → 500 y log JSON `ERROR` con ese `correlation_id`, `trace_id`
+    y traceback; 422 directo sin header con el mismo ID en cuerpo y header; E2E 14 pasan dos veces.
