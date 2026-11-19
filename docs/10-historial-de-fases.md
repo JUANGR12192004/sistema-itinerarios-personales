@@ -9,7 +9,7 @@ Dónde está el resto de la historia del proyecto:
 
 - **Estado detallado de cada fase y entrega** (commits, pruebas, demostraciones, hallazgos): sección 15 de
   [`CLAUDE.md`](../CLAUDE.md).
-- **Código de cada fase tal como quedó al cerrarla**: etiquetas `fase-1` a `fase-11` y ramas `fase-N-...` (tabla de
+- **Código de cada fase tal como quedó al cerrarla**: etiquetas `fase-1` a `fase-12` y ramas `fase-N-...` (tabla de
   ramas en [Desarrollo por fases](../README.md#desarrollo-por-fases-ramas-y-etiquetas) del README raíz).
 - **Por qué se tomó cada decisión**: [`06-decisiones-arquitectonicas.md`](06-decisiones-arquitectonicas.md).
 - **Planificación original (Fase 0)**: [`01-planificacion.md`](01-planificacion.md).
@@ -131,5 +131,18 @@ Pirámide de pruebas en cinco niveles (ADR-042; cómo correr cada uno en [Prueba
 - **Salida limpia**: las advertencias de Starlette y pika (de terceros) se filtran con precisión.
 
 Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas** al cerrar la Fase 11. Después, la rama `fix/limpieza-config`
-borró 21 pruebas que repetían las de `libs/observability` y movió una a ese paquete (619), y en la Fase 12 se agregó una prueba al Event Trigger: el total vigente es **620**
-(ver [Pruebas](../README.md#pruebas)).
+borró 21 pruebas que repetían las de `libs/observability` y movió una a ese paquete (619), en la Fase 12 se agregó una
+prueba al Event Trigger (620) y las correcciones posteriores a la Fase 12 agregaron 22 más: el total vigente es
+**642** (ver [Pruebas](../README.md#pruebas)).
+
+## Correcciones posteriores a la Fase 12
+
+Después del merge de la Fase 12 (PR #30, etiqueta `fase-12`) entraron dos correcciones de código. Cada una salió de una
+rama nueva desde `main`, con sus pruebas, y está registrada como nota en el ADR correspondiente.
+
+| Rama (PR) | Problema | Corrección |
+|---|---|---|
+| `fix/commit-antes-de-responder` (#32) | `PUT` y `DELETE /itineraries/{id}` **respondían antes de confirmar la transacción**: el commit estaba después del `yield` de la dependencia `get_db_session`, y FastAPI ejecuta ese código después de enviar la respuesta. Un `GET` inmediato podía ver todavía el itinerario borrado; lo detectó la prueba E2E `test_crud_completo_por_el_gateway`, que fallaba de forma intermitente en el CI | `UpdateItineraryUseCase` y `DeleteItineraryUseCase` confirman con `UnitOfWork` antes de devolver el resultado, como ya hacía la creación; la dependencia ya no hace commit. 10 pruebas nuevas en Itinerary Service (nota en ADR-019) |
+| `fix/sonarcloud-fiabilidad` (#33) | SonarCloud marcaba la **fiabilidad en C** (9 problemas en Airport Service): la conexión con Redis no se cerraba si el `lifespan` terminaba con error, y los manejadores de errores eran `async` sin ningún `await`. Además, el log `ERROR` de un 500 salía **sin `correlation_id`** en Airport e Itinerary Service, aunque la respuesta sí lo llevaba | Cierre de Redis en un `finally`, manejadores como funciones normales y el `correlation_id` del 500 tomado de `request.state`. Fiabilidad de **C a A** (evidencia [19](evidencias/19-sonarcloud.png)). 8 pruebas nuevas en Airport y 4 en Itinerary |
+
+Además, el equipo agregó las evidencias 19 (SonarCloud) y 20 (GitHub Actions) con los PR #31, #34 y #35.
