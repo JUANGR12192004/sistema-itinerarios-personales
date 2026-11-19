@@ -1,0 +1,31 @@
+Evidencia 01 — Las siete suites de pruebas
+Fecha: 2026-11-18 22:57:27 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py pruebas
+
+Precondición: docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --wait
+(el simulador de API Colombia solo hace falta para tests/e2e). Cada suite se ejecuta desde su carpeta
+con el Python de su entorno virtual (.venv).
+
+$ cd libs/observability && .venv/bin/python -m pytest -q
+19 passed in 0.25s   (código de salida 0)
+
+$ cd services/airport-service && .venv/bin/python -m pytest -q
+191 passed in 1.68s   (código de salida 0)
+
+$ cd services/itinerary-service && .venv/bin/python -m pytest -q
+186 passed in 1.09s   (código de salida 0)
+
+$ cd serverless/send-notification-function && .venv/bin/python -m pytest -q
+70 passed in 0.42s   (código de salida 0)
+
+$ cd serverless/event-trigger && .venv/bin/python -m pytest -q
+87 passed in 0.65s   (código de salida 0)
+
+$ cd gateway && .venv/bin/python -m pytest -q
+53 passed in 7.04s   (código de salida 0)
+
+$ cd tests/e2e && .venv/bin/python -m pytest -q
+14 passed in 11.36s   (código de salida 0)
+
+Total: 620 pruebas pasan.

@@ -169,8 +169,8 @@ que Compose publica igual que los contenedores manuales.
 
 ## Orden de arranque del sistema completo (modo manual)
 
-Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en el
-[README raíz](../../README.md#arranque-manual-modo-desarrollo):
+Itinerary Service ocupa los pasos **6** (API) y **7** (Outbox Relay) del orden completo, explicado en
+[`docs/07-ejecucion-manual.md`](../../docs/07-ejecucion-manual.md):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (**este servicio**, `alembic upgrade head`) y `notification_db`.
@@ -255,7 +255,7 @@ pytest -v tests\domain tests\application tests\infrastructure tests\api tests\te
 pytest -v tests\integration
 ```
 
-Resultado esperado: **195 passed** con PostgreSQL y RabbitMQ; **170 passed, 25 skipped** sin ellos.
+Resultado esperado: **186 passed** con PostgreSQL y RabbitMQ; **161 passed, 25 skipped** sin ellos.
 
 **RabbitMQ:** las pruebas de integración **no tocan** la cola real `notification.itinerary-created` ni su DLQ.
 Usan una topología propia con nombres únicos (`test-<id>.itinerary.events`, `test-<id>.notification.itinerary-created`,
@@ -418,8 +418,8 @@ la creación y durante varios ciclos del relay, y aun así el evento llegó a la
 ### Lo que queda por cuenta del consumidor
 
 El relay publica y **después** marca `published_at`. Si se detiene justo entre esos dos pasos, el evento se
-publicará otra vez (entrega **al menos una vez**). Por eso el consumidor de la Fase 6 debe ser **idempotente**
-con `event_id`. La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces` lo demuestra.
+publicará otra vez (entrega **al menos una vez**). Por eso el consumidor, SendNotificationFunction (Fase 6), es
+**idempotente** con `event_id` (ADR-030). La prueba `test_si_el_relay_cae_antes_del_commit_el_evento_se_publica_dos_veces` lo demuestra.
 Los mensajes ilegibles de la outbox se descartan con `failed_at` y no se reintentan (ADR-027).
 Detalles: [`docs/04-comunicacion-y-eventos.md`](../../docs/04-comunicacion-y-eventos.md), sección 7.
 

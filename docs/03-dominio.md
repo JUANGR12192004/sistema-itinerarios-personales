@@ -17,13 +17,15 @@ El sistema necesita identificar aeropuertos válidos, asociarlos a un itinerario
 
 ## 3. Lenguaje ubicuo
 
-Se utilizarán los siguientes términos de manera consistente. El código se escribe en inglés; la documentación, en español.
+Se utilizan los siguientes términos de manera consistente. El código se escribe en inglés; la documentación, en español.
 
 ### 3.1. Términos del negocio
 
 | Término del negocio | Código | Significado |
 |---|---|---|
 | Aeropuerto | `Airport` | Instalación de transporte aéreo identificada por un identificador y sus atributos disponibles. |
+| Código IATA / OACI | `iata_code` / `oaci_code` | Códigos internacionales del aeropuerto; pueden faltar (`None`). |
+| Coordenadas | `Coordinates` | Latitud y longitud ya validadas y corregidas (objeto de valor). |
 | Itinerario | `Itinerary` | Registro que representa un viaje planificado entre dos aeropuertos. |
 | Viajero | `traveler_name` | Nombre de la persona que realiza el viaje; no puede estar vacío. |
 | Correo del viajero | `traveler_email` | Correo electrónico opcional del viajero; lo usa la notificación simulada de la Fase 6. |
@@ -41,7 +43,7 @@ Se utilizarán los siguientes términos de manera consistente. El código se esc
 |---|---|
 | Airport Service | Servicio responsable de consultar y normalizar información de aeropuertos. |
 | Itinerary Service | Servicio responsable de gestionar el ciclo de vida de los itinerarios. |
-| Adapter | Componente que traduce una interfaz interna a la de una dependencia externa. |
+| Adapter | Componente que traduce la interfaz de una dependencia externa a la interfaz interna (puerto) que esperan los casos de uso. |
 | Puerto | Contrato (interfaz) que define cómo interactúa una capa con una dependencia. |
 | Evento de integración | Mensaje que comunica un hecho relevante a otros contextos o servicios. |
 | Outbox | Tabla de mensajes pendientes que garantiza la publicación del evento junto con la transacción de base de datos. |
@@ -110,17 +112,24 @@ Atributos confirmados (Fase 3, ADR-015 al ADR-018):
 
 ### 5.2. Airport
 
-Modelo interno que representa un aeropuerto.
+Modelo interno de solo lectura que representa un aeropuerto del catálogo (`app/domain/airport.py`). Sus atributos se definieron después de consultar API Colombia en la entrega 1A (CLAUDE.md, sección 8.3):
 
-Sus atributos definitivos dependerán de los campos que realmente entregue API Colombia y de su transformación al modelo interno.
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | int | Identificador del aeropuerto en API Colombia; mayor que 0. |
+| `name` | str | Nombre; no puede estar vacío. |
+| `iata_code` / `oaci_code` | str \| None | Códigos internacionales; `None` cuando API Colombia envía `"N/A"`. |
+| `type` | str | `Internacional`, `Nacional`, `Militar` o `En Construccion`. |
+| `city` / `department` | str | Ciudad y departamento. |
+| `coordinates` | `Coordinates` \| None | Latitud y longitud ya corregidas; `None` si la ubicación es desconocida (`0, 0`). |
 
-No se asumirá que la fuente externa contiene coordenadas, códigos o identificadores específicos sin comprobarlo.
+`Coordinates` es un objeto de valor: valida que la latitud esté entre −90 y 90 y la longitud entre −180 y 180, y dos coordenadas con los mismos valores son iguales. La traducción desde API Colombia (coordenadas intercambiadas, `"N/A"`, `0, 0`) la hace el Adapter, no el dominio (ADR-003).
 
 ### 5.3. ItineraryCreatedEvent
 
-Representa el hecho de que un itinerario ha sido creado y puede comunicarse a otros componentes.
+Representa el hecho de que un itinerario ha sido creado y se comunica a otros componentes.
 
-El contrato de integración se especificará en la documentación de eventos.
+Es un **evento de integración** (contrato público, versión 1, ADR-020), no un evento de dominio: vive en la capa de aplicación de Itinerary Service (`app/application/events.py`). El contrato está en `04-comunicacion-y-eventos.md` (sección 3.2) y en `asyncapi/asyncapi.yaml`.
 
 ### 5.4. NotificationRecord
 
@@ -163,7 +172,7 @@ DDD ayuda a organizar el modelo del negocio y los límites de sus contextos.
 
 La arquitectura hexagonal permite que las reglas de negocio se mantengan independientes de tecnologías como FastAPI, PostgreSQL, RabbitMQ y la API externa.
 
-El patrón Adapter se utilizará para implementar las traducciones entre los contratos internos y los sistemas externos.
+El patrón Adapter implementa las traducciones entre los contratos internos y los sistemas externos (API Colombia en Airport Service; Airport Service, PostgreSQL y RabbitMQ en Itinerary Service). Los diagramas de clases de `05-diagramas.md` (sección 3) muestran el dominio, los puertos y los adaptadores de cada componente.
 
 ## 8. Evolución del modelo
 

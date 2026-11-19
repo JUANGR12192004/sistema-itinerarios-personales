@@ -63,7 +63,7 @@ sección [Invocarla a mano](#invocarla-a-mano) funcionan igual (puerto 9000). Lo
 
 ## Orden de arranque del sistema completo (modo manual)
 
-La función es el paso **4** del orden completo, que está explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
+La función es el paso **4** del orden completo, que está explicado en [`docs/07-ejecucion-manual.md`](../../docs/07-ejecucion-manual.md):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` (Itinerary Service) y `notification_db` (**esta función**, `alembic upgrade head`).

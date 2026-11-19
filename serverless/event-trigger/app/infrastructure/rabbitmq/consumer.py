@@ -12,8 +12,14 @@ Si el trigger se cae antes de responder, RabbitMQ vuelve a entregar el mensaje: 
 Se usa `channel.consume(..., inactivity_timeout=1)`, que devuelve el control cada segundo
 aunque no lleguen mensajes. Así Ctrl+C se atiende enseguida en Windows y las pruebas pueden
 parar cuando la cola queda vacía.
+
+Cada conexión se procesa en una copia del contexto de Python (`contextvars`): la instrumentación
+de pika deja activo el span del último mensaje hasta que llega el siguiente, y si la conexión se
+pierde antes, ese span quedaba activo para siempre. Un mensaje posterior sin `traceparent` se
+registraba en Jaeger como hijo de una traza ajena (corrección de la Fase 12).
 """
 
+import contextvars
 import logging
 from collections.abc import Callable
 
@@ -70,7 +76,13 @@ class RabbitMQConsumer:
 
         `max_messages` y `stop_when_idle` sirven para las pruebas: paran tras N mensajes o
         cuando la cola queda vacía. Devuelve cuántos mensajes se procesaron.
+
+        La conexión se procesa en una copia del contexto actual: lo que la instrumentación deje
+        activo (el span del último mensaje) se descarta al terminar y no pasa a la reconexión.
         """
+        return contextvars.copy_context().run(self._consume, max_messages, stop_when_idle)
+
+    def _consume(self, max_messages: int | None, stop_when_idle: bool) -> int:
         connection = self._connection_factory(self._parameters)
         processed = 0
         try:

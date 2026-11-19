@@ -1,0 +1,22 @@
+Evidencia 04 — 429 del rate limiting del gateway
+Fecha: 2026-11-18 23:00:32 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py rate-limit
+
+40 solicitudes GET /api/itineraries seguidas desde la misma IP (urllib de Python, una tras otra).
+
+Códigos en orden: 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 429 429 429 429 429 429 429 429 429 429 429 429 429 429 429 429 429 429 429
+
+Resumen: 200 × 21, 429 × 19
+
+Primera respuesta 429 completa:
+HTTP/1.1 429
+Server: nginx
+Date: Thu, 19 Nov 2026 04:00:32 GMT
+Content-Type: application/json; charset=utf-8
+Content-Length: 216
+Connection: close
+Retry-After: 1
+X-Correlation-ID: 137b038d-297d-663e-7c1b-41bf3e92ceef
+
+{"error":{"code":"RATE_LIMIT_EXCEEDED","message":"Se superó el límite de solicitudes. Intente de nuevo en unos segundos","details":{"retry_after_seconds":1}},"correlation_id":"137b038d-297d-663e-7c1b-41bf3e92ceef"}

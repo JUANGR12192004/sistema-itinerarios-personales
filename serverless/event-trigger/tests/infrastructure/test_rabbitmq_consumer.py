@@ -3,6 +3,10 @@
 from types import SimpleNamespace
 
 import pytest
+from opentelemetry import context as otel_context
+from opentelemetry import trace
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+from pika.exceptions import AMQPConnectionError
 
 from app.application.delivery_handler import Decision
 from app.infrastructure.rabbitmq.consumer import RabbitMQConsumer, apply_decision
@@ -205,3 +209,30 @@ def test_la_politica_espera_con_connection_sleep_y_la_conexion_se_cierra():
 
     assert received_sleep == [connection.sleep]  # atiende heartbeats mientras espera
     assert connection.is_open is False
+
+
+# ——— Contexto de traza entre conexiones (corrección de la Fase 12) ———
+
+class LeakingChannel(FakeChannel):
+    """Imita a la instrumentación de pika: al entregar un mensaje deja activo su span (sin
+    desactivarlo hasta el siguiente) y después la conexión se pierde."""
+
+    def consume(self, queue, auto_ack, inactivity_timeout):
+        self.calls.append(("consume", {"queue": queue, "auto_ack": auto_ack}))
+        span_context = SpanContext(
+            trace_id=0x12C0E0DE, span_id=0x12C0, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED)
+        )
+        otel_context.attach(trace.set_span_in_context(NonRecordingSpan(span_context)))
+        yield delivery(1)
+        raise AMQPConnectionError("se perdió la conexión")
+
+
+def test_el_span_del_ultimo_mensaje_no_queda_activo_tras_perder_la_conexion():
+    consumer, _, _ = make_consumer(LeakingChannel(), FakeHandler(Decision.ACK))
+
+    with pytest.raises(AMQPConnectionError):
+        consumer.run()
+
+    # Sin la copia del contexto, el span del mensaje 1 seguiría activo y el siguiente mensaje
+    # sin traceparent quedaría como su hijo en Jaeger.
+    assert not trace.get_current_span().get_span_context().is_valid

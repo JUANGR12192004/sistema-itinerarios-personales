@@ -1,15 +1,49 @@
 
 # Sistema de Itinerarios Personales
 
-Sistema distribuido para la planificación y gestión de itinerarios de viaje, desarrollado como proyecto académico para la asignatura **Arquitecturas de Software Emergentes**.
+Sistema distribuido para planificar viajes entre aeropuertos colombianos: consulta los aeropuertos de
+[API Colombia](https://api-colombia.com), los muestra en un mapa interactivo, gestiona itinerarios de viaje y envía una
+notificación (simulada) cada vez que se crea uno.
 
-El proyecto busca aplicar tres enfoques arquitectónicos: microservicios, arquitectura basada en eventos y arquitectura serverless.
+Es el proyecto de la asignatura **Arquitecturas de Software Emergentes** y aplica tres arquitecturas en un mismo
+flujo: **microservicios**, **arquitectura basada en eventos** y **serverless (FaaS)**, con arquitectura hexagonal,
+DDD, Transactional Outbox, resiliencia y observabilidad.
 
-## Objetivo general
+```bash
+docker compose up -d --build
+```
+
+Con ese comando se levantan los 15 contenedores del sistema; el frontend queda en <http://localhost:8000>
+([Inicio rápido](#inicio-rápido)).
+
+## Contenido
+
+- [Descripción y objetivos](#descripción-y-objetivos)
+- [Inicio rápido](#inicio-rápido)
+- [Arquitectura](#arquitectura): las tres arquitecturas, componentes, hexagonal, DDD, Adapter, eventos, Outbox,
+  serverless, API Gateway, resiliencia, observabilidad y tecnologías
+- [Diagramas](#diagramas)
+- [Instalación y ejecución](#instalación-y-ejecución)
+- [Variables de entorno](#variables-de-entorno)
+- [Endpoints](#endpoints)
+- [Eventos](#eventos)
+- [Pruebas](#pruebas)
+- [Evidencias](#evidencias)
+- [Limitaciones conocidas](#limitaciones-conocidas)
+- [Decisiones de arquitectura](#decisiones-de-arquitectura)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Documentación adicional](#documentación-adicional)
+- [Desarrollo por fases, ramas y etiquetas](#desarrollo-por-fases-ramas-y-etiquetas)
+- [Uso de Claude Code](#uso-de-claude-code)
+- [Contexto académico](#contexto-académico)
+
+## Descripción y objetivos
+
+### Objetivo general
 
 Diseñar e implementar un sistema distribuido que permita consultar aeropuertos colombianos, gestionar itinerarios de viaje y procesar notificaciones de forma asíncrona, aplicando principios de modularidad, desacoplamiento, resiliencia y observabilidad.
 
-## Objetivos específicos
+### Objetivos específicos
 
 - Consultar aeropuertos colombianos mediante la API pública API Colombia.
 - Desacoplar la integración externa mediante el patrón Adapter.
@@ -22,45 +56,53 @@ Diseñar e implementar un sistema distribuido que permita consultar aeropuertos 
 - Incorporar persistencia independiente, migraciones, pruebas y documentación de API.
 - Preparar mecanismos de resiliencia, caché y observabilidad.
 
-## Alcance
+### Alcance
 
-El sistema estará compuesto por:
+El sistema está compuesto por:
 
 1. **Airport Service:** consulta y normalización de información de aeropuertos.
 2. **Itinerary Service:** creación, consulta, actualización y eliminación de itinerarios, con su Outbox Relay.
-3. **Sistema de notificaciones:** Event Trigger + SendNotificationFunction + su base de datos.
-4. **SendNotificationFunction:** función serverless que simula la notificación y guarda el historial.
-5. **API Gateway (Nginx):** punto único de entrada en el puerto 8000; enruta, limita solicitudes y propaga headers, sin lógica de negocio.
-6. **Frontend:** interfaz de gestión de itinerarios y visualización de aeropuertos.
+3. **Sistema de notificaciones:** Event Trigger + SendNotificationFunction (función serverless que simula la
+   notificación y guarda el historial) + su base de datos.
+4. **API Gateway (Nginx):** punto único de entrada en el puerto 8000; enruta, limita solicitudes y propaga headers, sin lógica de negocio.
+5. **Frontend:** interfaz de gestión de itinerarios y visualización de aeropuertos, servida por el gateway.
 
-La implementación se desarrolla progresivamente, siguiendo las fases definidas en la documentación del proyecto.
+El sistema se construyó en 13 fases (0 a 12); desde la Fase 1, cada una terminó con sus pruebas, un pull request y
+una etiqueta `fase-N` ([Desarrollo por fases](#desarrollo-por-fases-ramas-y-etiquetas)).
 
-## Tecnologías
+## Inicio rápido
 
-| Área | Tecnología |
-|---|---|
-| Backend | Python 3.12, FastAPI, Pydantic |
-| Persistencia | PostgreSQL (una base por servicio) |
-| ORM y migraciones | SQLAlchemy y Alembic |
-| Comunicación síncrona | HTTP / REST |
-| API Gateway | Nginx (imagen oficial `nginx:1.30.6-alpine-otel`, con el módulo de OpenTelemetry; ADR-009 y ADR-036) |
-| Mensajería | RabbitMQ (pika) |
-| Caché | Redis |
-| Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
-| Frontend | HTML, CSS, JavaScript |
-| Visualización | Plotly JS |
-| Contenedores | Docker y Docker Compose (`docker-compose.yml` en la raíz, ADR-041) |
-| Observabilidad | OpenTelemetry, Jaeger, Prometheus y Grafana |
-| Documentación API | Swagger / OpenAPI y AsyncAPI |
-| Pruebas | pytest, TestClient de FastAPI y respx |
+Requisitos: **Git** y **Docker Desktop** encendido (en Windows 11 con WSL 2; en macOS con Apple Silicon las imágenes se
+construyen para `arm64` sin opciones adicionales). Los comandos son **iguales en PowerShell, CMD y la Terminal de macOS
+(zsh)**:
+
+```bash
+git clone https://github.com/JUANGR12192004/sistema-itinerarios-personales.git
+```
+
+```bash
+cd sistema-itinerarios-personales
+```
+
+```bash
+docker compose up -d --build
+```
+
+```bash
+docker compose ps
+```
+
+La primera vez tarda unos minutos (construye las imágenes). El sistema está listo cuando las dos migraciones
+aparecen `Exited (0)` y `airport-service`, `itinerary-service` y `api-gateway` aparecen `healthy`. Después:
+
+1. Abrir <http://localhost:8000>: pestaña de aeropuertos (mapa) y pestaña de itinerarios (crear, editar, eliminar).
+2. Crear un itinerario con correo y ver la notificación en `notification_history`
+   ([`docs/08-demostraciones.md`](docs/08-demostraciones.md) tiene el recorrido completo).
+3. Ver la traza en Jaeger (<http://localhost:16686>) y las métricas en Grafana (<http://localhost:3000>).
+
+Detalles, comandos del día a día y problemas frecuentes en [Instalación y ejecución](#instalación-y-ejecución).
 
 ## Arquitectura
-
-El sistema utiliza microservicios con responsabilidades delimitadas, comunicación HTTP para las operaciones que necesitan una respuesta inmediata y mensajería asíncrona para los eventos de integración.
-
-Cada microservicio de negocio tiene su propia base de datos y es responsable de sus propios datos.
-
-Se aplican arquitectura hexagonal, el patrón Adapter y conceptos de DDD para mantener separadas las reglas de negocio y los detalles de infraestructura.
 
 ```mermaid
 flowchart LR
@@ -78,168 +120,448 @@ flowchart LR
     MQ -.rechazados.-> DLQ[(DLQ)]
 ```
 
-Todos los diagramas están en [`docs/05-diagramas.md`](docs/05-diagramas.md).
+Cada concepto de esta sección tiene un párrafo corto: qué es y por qué se usa, dónde está en el código y qué
+documento lo explica a fondo.
 
-## Estructura documental
+### Cómo se integran las tres arquitecturas
 
-- `docs/01-planificacion.md`: objetivos, alcance, requisitos y fases.
-- `docs/02-arquitectura.md`: arquitectura general y responsabilidades.
-- `docs/03-dominio.md`: dominio, contextos delimitados y lenguaje ubicuo.
-- `docs/04-comunicacion-y-eventos.md`: comunicación HTTP, eventos, Outbox y serverless (FaaS, Event Trigger, DLQ).
-- `docs/05-diagramas.md`: diagramas arquitectónicos en Mermaid.
-- `docs/06-decisiones-arquitectonicas.md`: registro de decisiones técnicas (ADR).
-- `docs/asyncapi/asyncapi.yaml`: contrato del evento `ItineraryCreatedEvent` y cómo se publica y se consume.
+Las tres arquitecturas no son partes separadas: se encadenan en **un mismo flujo**, el de crear un itinerario.
 
-| Componente | Documentación |
-|---|---|
-| API Gateway | [`gateway/README.md`](gateway/README.md) |
-| Airport Service | [`services/airport-service/README.md`](services/airport-service/README.md) |
-| Itinerary Service y Outbox Relay | [`services/itinerary-service/README.md`](services/itinerary-service/README.md) |
-| SendNotificationFunction | [`serverless/send-notification-function/README.md`](serverless/send-notification-function/README.md) |
-| Event Trigger y reprocesamiento de la DLQ | [`serverless/event-trigger/README.md`](serverless/event-trigger/README.md) |
-
-## Estado del proyecto
-
-| Fase | Nombre | Estado |
+| Arquitectura | Dónde se aplica | Qué aporta |
 |---|---|---|
-| 0 | Planificación y arquitectura | Completada |
-| 1 | Airport Service | Completada |
-| 2 | Resiliencia y caché | Completada |
-| 3 | Itinerary Service | Completada |
-| 4 | Eventos y RabbitMQ | Completada |
-| 5 | Transactional Outbox | Completada |
-| 6 | Serverless | Completada |
-| 7 | API Gateway | Completada |
-| 8 | Frontend | Completada |
-| 9 | Observabilidad | Completada |
-| 10 | Docker y Docker Compose | Completada |
-| 11 | Pruebas | Completada |
-| 12 | Documentación y entrega | Pendiente |
+| **Microservicios** | Airport Service e Itinerary Service: cada uno con su código, su API REST y sus datos | Cada servicio cambia, se despliega y falla por separado |
+| **Basada en eventos** | `ItineraryCreatedEvent` viaja por RabbitMQ de Itinerary Service al sistema de notificaciones | Quien publica no espera ni conoce a quien consume |
+| **Serverless (FaaS)** | `SendNotificationFunction`, que se ejecuta una vez por evento | Código sin servidor propio ni estado, activado por eventos |
 
-**Última fase completada:** Fase 11 — Pruebas. **Siguiente:** Fase 12 — Documentación y entrega.
+El recorrido: el frontend llama al **gateway**; Itinerary Service valida los aeropuertos **por HTTP** contra Airport
+Service (necesita la respuesta para seguir) y guarda el itinerario y su **evento** en la misma transacción. El Outbox
+Relay publica el evento en **RabbitMQ**, el Event Trigger lo consume e invoca la **función**, que guarda la
+notificación. La parte síncrona termina en el 201; todo lo demás ocurre después, sin que el usuario espere.
 
-El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
-comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+**A fondo:** [`docs/02-arquitectura.md`](docs/02-arquitectura.md) y la secuencia de la sección [Diagramas](#diagramas).
 
-### Fase 11 — Pruebas
+### Componentes y responsabilidades
 
-Pirámide de pruebas en cinco niveles (ADR-042; cómo correr cada uno en [Pruebas](#pruebas)):
+| Componente | Responsabilidad | Carpeta | Puerto | Datos |
+|---|---|---|---|---|
+| API Gateway | Punto único de entrada: enrutar, limitar solicitudes, propagar headers y servir el frontend. Sin lógica de negocio | `gateway/` | 8000 | — |
+| Frontend | Mapa de aeropuertos (Plotly JS) y CRUD de itinerarios; solo habla con el gateway | `frontend/` | (8000) | — |
+| Airport Service | Consultar API Colombia mediante un Adapter, traducir al modelo interno, caché y resiliencia | `services/airport-service/` | 8001 | Redis (solo caché) |
+| Itinerary Service | CRUD de itinerarios, reglas de negocio, validar aeropuertos y registrar el evento en la outbox | `services/itinerary-service/` | 8002 | `itinerary_db` |
+| Outbox Relay | Proceso aparte (misma imagen) que publica en RabbitMQ los eventos pendientes de la outbox | `services/itinerary-service/` | 9101 (métricas) | `itinerary_db` |
+| RabbitMQ | Transportar el evento de integración (exchange, cola, DLQ) | — | 5672 / 15672 | — |
+| Event Trigger | Consumir la cola, invocar la función y decidir ACK, reintento o DLQ | `serverless/event-trigger/` | 9102 (métricas) | — |
+| SendNotificationFunction | Simular la notificación y guardar el historial de forma idempotente | `serverless/send-notification-function/` | 9000 | `notification_db` |
+| Observabilidad | Trazas (Jaeger), métricas (Prometheus) y dashboard (Grafana) | `observability/`, `libs/observability/` | 16686, 9090, 3000 | — |
 
-- **Bases propias de las pruebas de integración**: `itinerary_db_test` y `notification_db_test`, creadas y migradas
-  por las propias pruebas. Ya no borran datos de las bases reales.
-- **Pruebas de `libs/observability`** con su job de CI.
-- **Pruebas de contrato**: Airport Service publica su API en `docs/openapi/airport-service.json` e Itinerary Service
-  la verifica como consumidor; SendNotificationFunction verifica el evento contra AsyncAPI.
-- **Pruebas de punta a punta** (`tests/e2e`) sobre Docker Compose con un simulador de API Colombia
-  (`docker-compose.e2e.yml`): CRUD, outbox → RabbitMQ → función → historial, una traza en Jaeger con los seis
-  componentes y métricas en Prometheus. Las ejecuta el job "Docker Compose" del CI.
-- **Salida limpia**: las advertencias de Starlette y pika (de terceros) se filtran con precisión.
+El "sistema de notificaciones" es **Event Trigger + SendNotificationFunction + `notification_db`**: no hay un
+microservicio de notificaciones adicional.
 
-Con todo encendido: **639 pruebas, 0 fallos, 0 omitidas**.
+### Arquitectura hexagonal
 
-### Fase 10 — Docker y Docker Compose
+La arquitectura hexagonal (puertos y adaptadores) separa las **reglas de negocio** de la **tecnología**. El dominio y
+los casos de uso no saben que existen FastAPI, PostgreSQL, RabbitMQ ni API Colombia: hablan con **puertos**
+(interfaces), y la infraestructura los implementa con **adaptadores**. Así se puede cambiar una tecnología, o probar el
+negocio con dobles de prueba, sin tocar las reglas. La **regla de dependencias** dice que las dependencias apuntan
+hacia el dominio: `api` e `infrastructure` → `application` → `domain`, nunca al revés.
 
-Todo el sistema se levanta con **un solo comando**: `docker compose up -d --build` (ADR-041). Solo hace falta Docker
-Desktop; Python 3.12 sigue haciendo falta para desarrollar y ejecutar las pruebas. Ver
-[Arranque con Docker Compose](#arranque-con-docker-compose-recomendado).
+| Capa | Contiene | Ejemplo |
+|---|---|---|
+| `domain` | Entidades, objetos de valor y reglas, en Python puro | `Itinerary.create(...)` rechaza una duración de 0 minutos |
+| `application` | Casos de uso y puertos | `CreateItineraryUseCase` usa el puerto `AirportCatalog` |
+| `infrastructure` | Adaptadores de salida | `HttpAirportCatalogAdapter` llama a Airport Service con httpx |
+| `api` (o `handler.py` en la función) | Adaptador de entrada | La ruta `POST /itineraries` solo recibe, llama al caso de uso y traduce el error |
 
-| Pieza | Qué hace |
+**En el código:** `app/domain`, `app/application`, `app/infrastructure` y `app/api` de cada servicio y de la función.
+**A fondo:** diagramas de clases en [`docs/05-diagramas.md`](docs/05-diagramas.md#3-diagramas-de-clases) y ADR-002.
+
+### DDD: contextos delimitados y lenguaje ubicuo
+
+Domain-Driven Design organiza el código alrededor del negocio. Un **contexto delimitado** es una frontera dentro de la
+cual cada término tiene un único significado y un único dueño; entre contextos solo se comparten **identificadores** y
+**contratos** (un itinerario guarda el `id` del aeropuerto, no el objeto `Airport`).
+
+| Contexto | Componente | Tipo | Relación |
+|---|---|---|---|
+| Catálogo de Aeropuertos | Airport Service | Soporte | Capa anticorrupción frente a API Colombia; su API REST es el lenguaje publicado |
+| Planificación de Itinerarios | Itinerary Service | Principal (core) | Cliente del catálogo por REST; publica `ItineraryCreatedEvent` |
+| Notificaciones | Event Trigger + SendNotificationFunction | Genérico | Suscriptor del evento; no conoce el modelo interno de itinerarios |
+
+El **lenguaje ubicuo** es el vocabulario común del equipo y del código: el código está en inglés y la documentación en
+español, con una traducción fija.
+
+| Negocio | Código | | Negocio | Código |
+|---|---|---|---|---|
+| Aeropuerto | `Airport` | | Itinerario | `Itinerary` (raíz de agregado) |
+| Coordenadas | `Coordinates` (objeto de valor) | | Viajero / correo | `traveler_name` / `traveler_email` |
+| Aeropuerto de salida / llegada | `departure_airport_id` / `arrival_airport_id` | | Fecha de viaje | `travel_date` (con zona horaria) |
+| Itinerario creado | `ItineraryCreatedEvent` | | Mensaje pendiente | `OutboxMessage` |
+| Notificación | `NotificationRecord` | | Duración | `duration_minutes` |
+
+**En el código:** `app/domain` de cada servicio. **A fondo:** [`docs/03-dominio.md`](docs/03-dominio.md).
+
+### Patrón Adapter y capa anticorrupción
+
+El patrón **Adapter** convierte una interfaz que no encaja (la de API Colombia) en la que espera el cliente (los casos
+de uso). Así Airport Service no depende del formato del proveedor: si API Colombia cambia, solo cambia el Adapter.
+
+| Rol | Clase | Archivo |
+|---|---|---|
+| Target (interfaz que espera el cliente) | `AirportProvider` | `services/airport-service/app/application/ports.py` |
+| Client | `ListAirports`, `GetAirportById`, `GetAirportMapData` | `app/application/use_cases.py` |
+| Adapter | `ApiColombiaAirportAdapter` (+ `mapper.py`) | `app/infrastructure/api_colombia/` |
+| Adaptee (interfaz externa) | `ApiColombiaClient` y el JSON de API Colombia (`ApiColombiaAirportDto`) | `app/infrastructure/api_colombia/` |
+
+El Adapter es además una **capa anticorrupción**: impide que los defectos del proveedor entren al dominio. Se
+comprobaron con consultas reales (52 aeropuertos) y `mapper.py` los corrige:
+
+- **Coordenadas intercambiadas** (51 de 52): `latitude` trae la longitud. El mapper detecta el intercambio (la latitud
+  queda fuera del rango de Colombia, −5 a 14) y solo entonces las invierte; registra un único `WARNING` por respuesta.
+- **`"N/A"`** en los códigos IATA/OACI faltantes → `None`.
+- **`0, 0`** (aeropuerto en construcción) → `coordinates = None`: no se dibuja en el mapa (por eso el mapa muestra 51).
+- **`deparmentId`** (con error ortográfico) solo existe en el DTO externo; el dominio usa nombres correctos.
+
+La caché y la resiliencia se agregan como **Decorators** del mismo puerto, sin tocar el Adapter.
+**A fondo:** ADR-003, [diagrama de clases de Airport Service](docs/05-diagramas.md#31-airport-service-patrón-adapter-y-decorators)
+y [`services/airport-service/README.md`](services/airport-service/README.md).
+
+### Arquitectura basada en eventos
+
+Un **evento** anuncia un hecho que ya ocurrió ("se creó un itinerario"); quien lo publica no espera respuesta ni sabe
+quién lo procesa. Por eso la notificación es un evento y la validación de aeropuertos es HTTP: para guardar el
+itinerario *hace falta* la respuesta de Airport Service, pero la notificación puede ocurrir después y su fallo no debe
+impedir crear el itinerario. En RabbitMQ, el relay publica en el **exchange** `itinerary.events` con la **routing
+key** `itinerary.created`; el exchange copia el mensaje a la **cola** `notification.itinerary-created`, y los mensajes
+que el consumidor rechaza pasan a la **DLQ** `notification.itinerary-created.dlq`.
+
+`ItineraryCreatedEvent` es un **evento de integración**, no de dominio: es un contrato público con otro contexto, tiene
+versión (`event_version`) y solo expone lo que promete. Por eso vive en `app/application/events.py` y no en el
+dominio. Un evento de dominio sería interno al contexto y podría cambiar libremente (el agregado no emite eventos
+internos). La entrega es **al menos una vez**: un mensaje puede llegar dos veces, y el consumidor es idempotente.
+
+**A fondo:** [Eventos](#eventos), [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md) (secciones 3
+y 4) y [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml).
+
+### Transactional Outbox
+
+**El problema (double write):** guardar el itinerario en PostgreSQL y publicar el evento en RabbitMQ son dos escrituras
+en dos sistemas sin una transacción común. Si RabbitMQ está caído (o el proceso se detiene) justo después del commit,
+el itinerario existe pero el evento se pierde. Eso pasaba en la Fase 4 y se demostró deteniendo RabbitMQ.
+
+**La solución:** el evento se guarda como una fila de la tabla `outbox_events`, **en la misma transacción** que el
+itinerario: se guardan los dos o ninguno. Un proceso aparte, el **Outbox Relay**, lee los pendientes
+(`FOR UPDATE SKIP LOCKED`), los publica y los marca como publicados. Si RabbitMQ falla, el evento sigue pendiente y se
+reintenta sin límite; un mensaje ilegible se aparta con `failed_at` para no bloquear a los demás. Como el relay publica
+y después marca, puede haber duplicados: la función los absorbe con `event_id`.
+
+**En el código:** `OutboxEventPublisher` (`app/infrastructure/persistence/outbox_event_publisher.py`), `OutboxRelay`
+(`app/application/outbox_relay.py`) y el proceso `python -m app.outbox_relay`.
+**A fondo:** ADR-006 y ADR-024 a ADR-027, y [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md)
+(secciones 6 y 7).
+
+### Serverless: SendNotificationFunction y Event Trigger
+
+**FaaS** (*Function as a Service*) es un modelo en el que el desarrollador escribe solo una **función** que la
+plataforma ejecuta cuando llega un **evento**, sin administrar servidores ni guardar estado. `SendNotificationFunction`
+es FaaS aunque corra en Docker porque:
+
+- es un `handler(event, context)` corriendo en la **imagen oficial de AWS Lambda** con el *Runtime Interface Emulator*;
+  la misma imagen se despliega sin cambios en AWS Lambda;
+- no guarda estado entre invocaciones y no sabe que existe RabbitMQ: recibe un evento y responde `PROCESSED`,
+  `ALREADY_PROCESSED` o `REJECTED`;
+- es **idempotente**: `INSERT ... ON CONFLICT (event_id) DO NOTHING` evita notificar dos veces el mismo evento.
+
+Lo que Docker no da en local es el escalado automático ni el apagado sin eventos (ver
+[Limitaciones conocidas](#limitaciones-conocidas)).
+
+El **Event Trigger** cumple el papel del *Event Source Mapping* de AWS: consume la cola, invoca la función y decide.
+Si la función respondió `PROCESSED` o `ALREADY_PROCESSED`, confirma (ACK). Si el evento es inválido, lo manda a la
+**DLQ** sin reintentar. Si falla la infraestructura (la función o su base caídas), reintenta sin límite y nunca usa la
+DLQ, porque el evento es válido y funcionará cuando vuelva el servicio. Si falla la función (por ejemplo, falta una
+migración), lo intenta 3 veces y después lo manda a la DLQ. La **DLQ** guarda los mensajes que no se pudieron
+procesar, para revisarlos sin bloquear la cola; corregida la causa, `python -m app.replay_dlq` los devuelve a la cola.
+**A fondo:** ADR-008 y ADR-028 a ADR-032, [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md)
+(sección 8) y los README de la [función](serverless/send-notification-function/README.md) y del
+[trigger](serverless/event-trigger/README.md).
+
+### API Gateway
+
+Un **API Gateway** es el punto único de entrada de los clientes. Nginx enruta `/api/airports/...` a Airport Service y
+`/api/itineraries/...` a Itinerary Service (quitando `/api`), limita a 10 solicitudes por segundo por IP (ráfaga de
+20), reenvía o genera `X-Correlation-ID`, reenvía `Authorization` sin validarlo (preparación de JWT) y sirve el
+frontend desde el mismo origen. **No tiene lógica de negocio:** si las reglas se copiaran en el gateway habría dos
+fuentes de verdad, y un componente que comparten todos tendría que cambiar con cada regla nueva. La llamada Itinerary
+→ Airport es interna y no pasa por él.
+
+**En el código:** [`gateway/templates/default.conf.template`](gateway/templates/default.conf.template).
+**A fondo:** ADR-009 y [`gateway/README.md`](gateway/README.md).
+
+### Resiliencia
+
+Airport Service depende de una API pública que puede tardar o fallar. Los mecanismos se aplican en este orden:
+caché → circuit breaker → retry con backoff → llamada con timeout → fallback.
+
+| Mecanismo | Qué es | Valor |
+|---|---|---|
+| Caché (Redis) | Guarda respuestas para no repetir consultas | Copia fresca 10 min, header `X-Cache: HIT` / `MISS` |
+| Timeout | Tiempo máximo de espera de una llamada | 3 s; si se agota → 504 `AIRPORT_PROVIDER_TIMEOUT` |
+| Retry con exponential backoff | Reintenta fallos temporales con esperas crecientes | 3 intentos, esperas de 0,5 s y 1 s; no reintenta 404 ni 502 |
+| Circuit breaker | Tras varios fallos seguidos deja de llamar durante un tiempo | Se abre tras 3 fallos seguidos; durante 30 s responde de inmediato (copia de respaldo o 503) |
+| Fallback | Respuesta alternativa cuando el proveedor no está | Copia de respaldo de 24 h, `X-Cache: STALE` |
+
+Si Redis falla, el servicio sigue sin caché. Itinerary Service también distingue "el aeropuerto no existe" (422) de
+"Airport Service no responde" (503/504).
+**En el código:** `app/infrastructure/resilience/` y `app/infrastructure/cache/` de Airport Service.
+**A fondo:** ADR-007 y ADR-014, y el [diagrama de resiliencia](docs/05-diagramas.md#6-flujo-de-resiliencia-de-airport-service).
+
+### Observabilidad
+
+En un sistema distribuido una operación pasa por muchos procesos; la observabilidad permite seguirla.
+
+| Pilar | Cómo se implementa | Dónde se ve |
+|---|---|---|
+| Logs JSON | Cada línea con `timestamp`, `level`, `service`, `correlation_id`, `trace_id` y `span_id` | `docker compose logs -f <servicio>` |
+| Correlation ID | `X-Correlation-ID`: lo genera o reenvía el gateway, viaja en el evento y queda en `notification_history` | Logs y tabla `notification_history` |
+| Trazas | OpenTelemetry con contexto W3C (`traceparent`); se guarda en `outbox_events` para cruzar el relay y RabbitMQ | Jaeger: una traza con los seis componentes |
+| Métricas | Prometheus: HTTP, `itineraries_created_total`, relay y trigger | Prometheus y el dashboard de Grafana |
+
+El código común de los cuatro componentes Python está en el paquete `libs/observability` (*Microservice Chassis
+Pattern*, ADR-040). **A fondo:** ADR-034 a ADR-040 y [`docs/02-arquitectura.md`](docs/02-arquitectura.md#6-observabilidad).
+
+### Tecnologías
+
+| Área | Tecnología |
 |---|---|
-| Imágenes propias | Airport Service, Itinerary Service (una imagen para la API, el relay y las migraciones), Event Trigger y migraciones de notificaciones, sobre `python:3.12-slim` con usuario sin privilegios |
-| Migraciones automáticas | `itinerary-migrations` y `notification-migrations` aplican `alembic upgrade head` y terminan; la API, el relay y la función esperan a que terminen con éxito |
-| Orden de arranque con healthchecks | `depends_on` espera a que PostgreSQL y RabbitMQ estén listos: ya no hay que seguir el orden a mano |
-| Redes por base de datos | Cada PostgreSQL solo es visible para los contenedores de su servicio dueño |
-| Mismos puertos de siempre | Gateway 8000, servicios 8001/8002, bases 5433/5434, RabbitMQ 5672/15672, Jaeger 16686, Prometheus 9090, Grafana 3000 |
-| Observabilidad incluida | Jaeger, Prometheus (`prometheus.compose.yml`) y Grafana con el dashboard cargado al arrancar |
-| CI | Job "Docker Compose": valida el archivo, construye las imágenes, levanta el sistema y comprueba los healthchecks y el gateway |
+| Backend | Python 3.12, FastAPI, Pydantic v2, pydantic-settings, httpx |
+| Persistencia | PostgreSQL 16 (una base por servicio) |
+| ORM y migraciones | SQLAlchemy 2 y Alembic |
+| Comunicación síncrona | HTTP / REST |
+| API Gateway | Nginx (imagen oficial `nginx:1.30.6-alpine-otel`, con el módulo de OpenTelemetry; ADR-009 y ADR-036) |
+| Mensajería | RabbitMQ 3.13 (cliente `pika`) |
+| Caché | Redis 7.4 |
+| Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
+| Frontend | HTML, CSS y JavaScript (ES modules, sin build) con Plotly JS 4.3.0 |
+| Contenedores | Docker y Docker Compose (`docker-compose.yml` en la raíz, ADR-041) |
+| Observabilidad | OpenTelemetry, Jaeger 2.23, Prometheus 2.55 y Grafana 11.3 |
+| Documentación de API | Swagger / OpenAPI y AsyncAPI 3.0 |
+| Pruebas | pytest, TestClient de FastAPI y respx |
+| Calidad de código | SonarCloud (Automatic Analysis, ADR-023) y GitHub Actions |
 
-### Fase 9 — Observabilidad
+## Diagramas
 
-Logs JSON estructurados, trazas distribuidas con OpenTelemetry y métricas con Prometheus y Grafana en todos los componentes (ADR-034 a ADR-040). El código de observabilidad compartido se consolidó en el paquete `libs/observability` (Microservice Chassis Pattern, ADR-040), incluido automáticamente al instalar las dependencias de cada componente.
+Aquí están los cuatro diagramas principales. Los de **componentes** y **clases** son grandes y están en
+[`docs/05-diagramas.md`](docs/05-diagramas.md), junto con los de fallos del consumidor, recorrido por el gateway,
+resiliencia y observabilidad.
 
-| Pieza | Qué hace |
+| Diagrama | Dónde |
 |---|---|
-| Logs JSON (`python-json-logger`) | Cada línea incluye `timestamp`, `level`, `service`, `correlation_id`, `trace_id` y `span_id`. Mismo patrón en los cuatro componentes Python |
-| Trazas (OpenTelemetry SDK + Jaeger 2.23.0) | Propaga el contexto W3C por toda la cadena: gateway → servicios → outbox → relay → RabbitMQ → trigger → función. El `traceparent` se guarda en `outbox_events` para cruzar la barrera de procesos (ADR-037) |
-| API Gateway con `ngx_otel_module` | Imagen `nginx:1.30.6-alpine-otel`: inyecta `traceparent` en las solicitudes hacia los servicios y registra `trace_id` y `span_id` en su log de acceso (ADR-036) |
-| Métricas HTTP (middleware en Airport e Itinerary Service) | `http_requests_total{method, path, status}` y `http_request_duration_seconds{method, path}`. Ruta como plantilla para evitar explosión de cardinalidad |
-| Métrica de negocio | `itineraries_created_total` en Itinerary Service: responde "¿funciona el sistema?" sin abrir logs |
-| Métricas del Outbox Relay (puerto 9101) | `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total` |
-| Métricas del Event Trigger (puerto 9102) | `notifications_dispatched_total{outcome}`: `success`, `rejected`, `infrastructure_error`, `function_error` |
-| Prometheus (puerto 9090) | Consulta los cuatro endpoints cada 15 s. Configurado en `observability/prometheus/prometheus.yml` |
-| Grafana (puerto 3000) | Dashboard preconfigurado con paneles de negocio, HTTP, latencia (p50/p95/p99) y relay/trigger. Provisioning automático desde `observability/grafana/provisioning/` |
+| Arquitectura general | [Arquitectura](#arquitectura) (arriba) |
+| Componentes (capas y puertos de cada componente) | [`docs/05-diagramas.md`, sección 2](docs/05-diagramas.md#2-diagrama-de-componentes) |
+| Clases (Airport, Itinerary API, Outbox Relay y función) | [`docs/05-diagramas.md`, sección 3](docs/05-diagramas.md#3-diagramas-de-clases) |
+| Relacional | [Abajo](#relacional) |
+| Secuencia de creación de un itinerario | [Abajo](#secuencia-de-creación-de-un-itinerario) |
+| Despliegue con Docker Compose | [Abajo](#despliegue) |
 
-La demostración completa está en la sección [Demostración de observabilidad](#demostración-de-observabilidad).
+### Secuencia de creación de un itinerario
 
-### Fase 8 — Frontend
+```mermaid
+sequenceDiagram
+    actor Usuario
+    participant FE as Frontend
+    participant GW as API Gateway
+    participant IS as Itinerary Service
+    participant AS as Airport Service
+    participant DB as PostgreSQL
+    participant R as Outbox Relay
+    participant MQ as RabbitMQ
+    participant TR as Event Trigger
+    participant NF as SendNotificationFunction
+    participant NH as PostgreSQL notificaciones
 
-Interfaz web servida por el mismo contenedor del API Gateway. Mapa de aeropuertos con Plotly JS y CRUD de itinerarios (ADR-033).
+    Usuario->>FE: Crear itinerario
+    FE->>GW: POST /api/itineraries
+    Note over GW: Rate limiting (429 si se supera)<br/>X-Correlation-ID: se reenvía o se genera
+    GW->>IS: POST /itineraries (+ X-Correlation-ID, Authorization)
 
-| Pieza | Qué hace |
-|---|---|
-| Mapa de aeropuertos | `scattergeo` de Plotly 4.3.0 (bundle parcial local), centrado en Colombia, un color por tipo, tooltip con nombre, IATA, ciudad y departamento |
-| CRUD de itinerarios | Formulario de 2 columnas con desplegables de aeropuertos; tabla con edición inline y eliminación con confirmación |
-| `datetime-local` → ISO 8601 | La fecha se envía con el offset del navegador (ADR-017) |
-| Errores del gateway | Se muestran con `correlation_id` y botón "Copiar" en 5xx |
-| Sin `innerHTML` | Todo texto de datos con `textContent` para evitar XSS |
+    IS->>AS: Validar aeropuerto de salida
+    IS->>AS: Validar aeropuerto de llegada
 
-### Fase 7 — API Gateway
+    alt Aeropuertos válidos (200)
+        IS->>DB: INSERT itinerario + INSERT outbox_events y COMMIT
+        Note over IS,DB: Una sola transacción (Transactional Outbox, Fase 5):<br/>se guardan los dos o ninguno
+        DB-->>IS: Confirmación
+        IS-->>GW: 201 Itinerario creado
+        GW-->>FE: Respuesta HTTP
+        FE-->>Usuario: Mostrar resultado
 
-Punto único de entrada en `http://localhost:8000`: **Nginx** en Docker, sin lógica de negocio (ADR-009). Toda la
-documentación está en [`gateway/README.md`](gateway/README.md).
+        R->>DB: Leer pendientes (FOR UPDATE SKIP LOCKED)
+        R->>MQ: Publicar ItineraryCreatedEvent
+        alt RabbitMQ confirma
+            MQ-->>R: Confirm (ack)
+            R->>DB: Marcar published_at y COMMIT
+        else RabbitMQ no disponible
+            R->>DB: attempts + 1 y COMMIT
+            Note over R,DB: El evento sigue pendiente:<br/>se reintenta en el siguiente ciclo
+        end
 
-| Pieza | Qué hace |
-|---|---|
-| Enrutamiento | `/api/airports/...` → Airport Service y `/api/itineraries/...` → Itinerary Service, sin el prefijo `/api`. La llamada Itinerary → Airport es interna y no pasa por el gateway |
-| Rate limiting | 10 solicitudes por segundo por IP, con ráfaga de 20, solo en `/api/`. Al superarlo: 429 `RATE_LIMIT_EXCEEDED` |
-| `X-Correlation-ID` | Se reenvía si es válido; si no, el gateway genera uno. Viaja al evento y al historial de notificaciones |
-| `Authorization` | Se reenvía sin validarlo (preparación de JWT) |
-| Errores propios | 502 `UPSTREAM_UNAVAILABLE`, 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE` en el formato único. Los errores de los servicios pasan sin cambios |
-| Pruebas | Contenedores propios del gateway contra servidores eco: no tocan datos reales ni el límite del gateway de la demostración |
+        MQ->>TR: Entregar evento (asíncrono, ACK manual)
+        TR->>NF: Invocar handler(event, context)
+        NF->>NH: INSERT ... ON CONFLICT (event_id) DO NOTHING
+        alt event_id nuevo
+            NF->>NF: Simular la notificación
+            NF->>NH: COMMIT
+            NF-->>TR: PROCESSED
+        else event_id repetido
+            NF-->>TR: ALREADY_PROCESSED
+        end
+        TR->>MQ: ACK (el mensaje se borra de la cola)
+    else Aeropuerto no encontrado (404 de Airport Service)
+        IS-->>GW: 422 AIRPORT_NOT_FOUND
+        GW-->>FE: Respuesta de error
+        FE-->>Usuario: Mostrar error
+    else Airport Service no disponible (503)
+        IS-->>GW: 503 AIRPORT_SERVICE_UNAVAILABLE
+        GW-->>FE: Respuesta de error
+        FE-->>Usuario: Mostrar error
+    else Airport Service timeout (504)
+        IS-->>GW: 504 AIRPORT_SERVICE_TIMEOUT
+        GW-->>FE: Respuesta de error
+        FE-->>Usuario: Mostrar error
+    end
+```
 
-### Fase 6 — Serverless
+La solicitud HTTP termina en el 201; el relay, RabbitMQ, el trigger y la función trabajan después. Los fallos del
+consumidor (reintentos, DLQ y reprocesamiento) están en la
+[sección 5.1 de `docs/05`](docs/05-diagramas.md#51-fallos-en-el-consumidor-reintentos-dlq-y-reprocesamiento-fase-6).
 
-| Pieza | Qué hace |
-|---|---|
-| SendNotificationFunction | Función FaaS `handler(event, context)` en una imagen de AWS Lambda con el RIE (puerto 9000). Simula el correo y guarda el historial en `notification_db`, de forma idempotente con `event_id` (ADR-008, ADR-028 a ADR-030) |
-| Event Trigger (`python -m app.main`) | Equivalente al Event Source Mapping de AWS: consume la cola, invoca la función y confirma, reintenta o envía a la DLQ (ADR-031) |
-| Fallo de infraestructura | Función o su base de datos caídas: se reintenta sin límite y nunca va a la DLQ |
-| Fallo permanente o error de la función | Evento inválido: a la DLQ sin reintentos. Error de la función: 3 intentos y después a la DLQ |
-| Reprocesamiento (`python -m app.replay_dlq`) | Devuelve a la cola los mensajes de la DLQ una vez corregido el problema |
-| Propiedad de la topología | Itinerary Service declara solo su exchange; el trigger declara su cola, la DLX y la DLQ. Si el trigger no ha arrancado, el evento espera en la outbox (ADR-032) |
+### Relacional
 
-La explicación completa (qué es FaaS y por qué esta función lo es aunque corra en Docker) está en
-[`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md), sección 8.
+Dos bases PostgreSQL independientes, cada una de un solo componente. Entre bases no hay claves foráneas: los datos
+pasan de una a otra solo a través del evento.
 
-### Fase 5 — Transactional Outbox
+**`itinerary_db`** (Itinerary Service):
 
-Resuelve el problema de *double write* de la Fase 4 (guardar en PostgreSQL y publicar en RabbitMQ sin una transacción común), sin cambiar el contrato del evento.
+```mermaid
+erDiagram
+    itineraries {
+        uuid id PK
+        varchar traveler_name "NOT NULL, 255"
+        varchar traveler_email "NULL, 255"
+        integer departure_airport_id "NOT NULL, id del catálogo"
+        integer arrival_airport_id "NOT NULL, id del catálogo"
+        timestamptz travel_date "NOT NULL"
+        integer duration_minutes "NOT NULL"
+        timestamptz created_at "NOT NULL"
+        timestamptz updated_at "NOT NULL"
+    }
+    outbox_events {
+        uuid id PK "= event_id del evento"
+        varchar aggregate_type "NOT NULL, itinerary"
+        uuid aggregate_id "NOT NULL, id del itinerario"
+        varchar event_type "NOT NULL, itinerary.created"
+        integer event_version "NOT NULL, 1"
+        jsonb payload "NOT NULL, evento completo"
+        timestamptz occurred_at "NOT NULL"
+        timestamptz published_at "NULL mientras está pendiente"
+        integer attempts "NOT NULL, DEFAULT 0"
+        text last_error "NULL"
+        timestamptz failed_at "NULL, fallo permanente"
+        varchar traceparent "NULL, 55, contexto W3C"
+    }
+    itineraries |o..o| outbox_events : "aggregate_id (sin clave foránea)"
+```
 
-| Pieza | Qué hace |
-|---|---|
-| Tabla `outbox_events` | Guarda el evento en la **misma transacción** que el itinerario: se guardan los dos o ninguno (ADR-024, ADR-026) |
-| Outbox Relay (`python -m app.outbox_relay`) | Proceso aparte que publica los pendientes con `FOR UPDATE SKIP LOCKED` y los marca como publicados (ADR-025) |
-| Fallo temporal (RabbitMQ caído) | El evento sigue pendiente y se reintenta sin límite: no se pierde |
-| Fallo permanente (mensaje ilegible) | Se descarta con `failed_at` para que no bloquee a los demás (ADR-027) |
-| Entrega al menos una vez | Puede haber duplicados: el consumidor debe ser idempotente con `event_id` |
+**`notification_db`** (SendNotificationFunction): `event_id` es único, y esa restricción es la que hace idempotente a
+la función.
 
-La explicación completa está en [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md) (sección 7).
+```mermaid
+erDiagram
+    notification_history {
+        uuid id PK
+        uuid event_id UK "NOT NULL, clave de idempotencia"
+        uuid itinerary_id "NOT NULL, id del itinerario"
+        varchar recipient "NULL si no hay correo, 255"
+        varchar channel "NOT NULL, simulated-email"
+        text message "NOT NULL"
+        varchar status "NOT NULL, SENT o SKIPPED"
+        text status_reason "NULL, motivo de SKIPPED"
+        varchar correlation_id "NULL, 255"
+        timestamptz processed_at "NOT NULL"
+    }
+```
 
-### Fase 2 — Resiliencia y caché
+Índices, restricciones y migraciones en la [sección 4 de `docs/05`](docs/05-diagramas.md#4-diagrama-relacional).
 
-Airport Service tolera los fallos de API Colombia sin cambiar sus casos de uso ni el Adapter: la caché y la resiliencia se agregan como Decorators del puerto `AirportProvider`.
+### Despliegue
 
-| Mecanismo | Comportamiento |
-|---|---|
-| Caché en Redis | Respuestas guardadas 10 minutos; header `X-Cache: HIT` o `MISS` |
-| Timeout | 3 s por llamada; si se agota en todos los intentos → 504 `AIRPORT_PROVIDER_TIMEOUT` |
-| Retry con exponential backoff | 3 intentos con esperas de 0.5 s y 1 s; no se reintentan 404 ni 502 |
-| Circuit breaker | Tras 3 consultas fallidas seguidas responde 503 al instante durante 30 s |
-| Fallback | Si API Colombia no está disponible, responde la copia de respaldo (24 h) con `X-Cache: STALE` |
+```mermaid
+flowchart TB
+    subgraph Local["docker compose up -d --build (proyecto sistema-itinerarios)"]
+        FRONT[Frontend en el navegador]
+        GATE["api-gateway (Nginx + frontend) :8000"]
+        AIR[airport-service :8001]
+        ITIN[itinerary-service :8002]
+        RED[(redis :6379)]
+        RAB["rabbitmq :5672 / :15672"]
+        RELAY["outbox-relay<br/>(misma imagen que itinerary-service, métricas :9101)"]
+        TRIG["event-trigger<br/>(métricas :9102)"]
+        FUNC["send-notification-function<br/>imagen Lambda + RIE :9000"]
 
-Orden: caché → circuit breaker → retry con backoff → llamada con timeout → fallback. Si Redis no está disponible, el servicio sigue funcionando sin caché. Decisiones en ADR-007 y ADR-014 (`docs/06-decisiones-arquitectonicas.md`).
+        subgraph IDATA["red itinerary-data"]
+            PG[("itinerary-postgres :5433")]
+            IMIG["itinerary-migrations<br/>(una sola ejecución)"]
+        end
 
-## Arranque con Docker Compose (recomendado)
+        subgraph NDATA["red notification-data"]
+            NPG[("notification-postgres :5434")]
+            NMIG["notification-migrations<br/>(una sola ejecución)"]
+        end
+
+        IMIG -->|alembic upgrade head| PG
+        NMIG -->|alembic upgrade head| NPG
+
+        subgraph OBS["Stack de observabilidad (Fase 9)"]
+            JAEGER["Jaeger :16686<br/>(OTLP gRPC :4317)"]
+            PROM["Prometheus :9090"]
+            GRAFANA["Grafana :3000"]
+            PROM --> GRAFANA
+        end
+
+        FRONT --> GATE
+        GATE --> AIR
+        GATE --> ITIN
+        ITIN --> PG
+        ITIN --> AIR
+        AIR --> RED
+        RELAY --> PG
+        RELAY --> RAB
+        RAB --> TRIG
+        TRIG --> FUNC
+        FUNC --> NPG
+
+        GATE -.->|trazas OTLP gRPC| JAEGER
+        AIR -.->|trazas OTLP gRPC| JAEGER
+        ITIN -.->|trazas OTLP gRPC| JAEGER
+        RELAY -.->|trazas OTLP gRPC| JAEGER
+        TRIG -.->|trazas OTLP gRPC| JAEGER
+        FUNC -.->|trazas OTLP gRPC| JAEGER
+        PROM -.->|scraping /metrics cada 15 s| AIR
+        PROM -.->|scraping /metrics cada 15 s| ITIN
+        PROM -.->|scraping :9101 cada 15 s| RELAY
+        PROM -.->|scraping :9102 cada 15 s| TRIG
+    end
+```
+
+Las bases de datos solo están en su red (`itinerary-data`, `notification-data`): ningún otro contenedor puede
+conectarse a ellas. El orden de arranque está en la
+[sección 7 de `docs/05`](docs/05-diagramas.md#7-despliegue-con-docker-compose-fase-10).
+
+## Instalación y ejecución
+
+El sistema se levanta con **Docker Compose** (camino recomendado). El arranque manual, componente por componente,
+se conserva para desarrollar y está en un documento aparte.
+
+### Con Docker Compose (recomendado)
 
 Desde la Fase 10 todo el sistema (15 contenedores) se levanta con Docker Compose. Requisito: **Docker Desktop**
 encendido (en Windows con WSL 2; en Mac con Apple Silicon las imágenes se construyen para `arm64` sin opciones
@@ -288,15 +610,15 @@ Variables opcionales (nivel de log, trazas, rate limit del gateway, usuario de G
 `.env` en la raíz (`Copy-Item` en PowerShell, `copy` en CMD, `cp` en zsh). Sin `.env` se usan los mismos valores
 por defecto.
 
-### Qué hace Compose por nosotros
+#### Qué hace Compose por nosotros
 
-La tabla [Qué pasa si se omite un paso](#qué-pasa-si-se-omite-un-paso) describe los errores del modo manual. Con
+La tabla [Qué pasa si se omite un paso](docs/07-ejecucion-manual.md#qué-pasa-si-se-omite-un-paso) describe los errores del modo manual. Con
 Compose, `depends_on` impone el orden: las migraciones esperan a su PostgreSQL, la API, el relay y la función esperan
 a que su migración termine con éxito, y el relay y el trigger esperan a RabbitMQ. Si un componente se detiene después,
 el comportamiento es el de esa tabla (por ejemplo, con `docker compose stop event-trigger` los mensajes se acumulan en
 la cola). Detalles en ADR-041 y en el diagrama de despliegue de [`docs/05-diagramas.md`](docs/05-diagramas.md).
 
-### Problemas frecuentes
+#### Problemas frecuentes
 
 | Síntoma | Causa | Solución |
 |---|---|---|
@@ -306,373 +628,177 @@ la cola). Detalles en ADR-041 y en el diagrama de despliegue de [`docs/05-diagra
 | 502 tras reconstruir un servicio (`up --build <servicio>`) | El contenedor nuevo puede tener otra IP y Nginx guardó la anterior (ADR-041) | `docker compose restart api-gateway` |
 | Los datos del modo manual no aparecen | Compose usa sus propios volúmenes | Es lo esperado; las bases empiezan vacías |
 
-## Arranque manual (modo desarrollo)
+### Modo manual (desarrollo)
 
-Antes de la Fase 10 el sistema se levantaba solo a mano. Sigue siendo útil para **desarrollar un componente** con
-recarga automática o depurarlo desde el entorno virtual, pero no a la vez que Docker Compose (mismos puertos). El
-orden importa porque cada paso necesita los anteriores. La instalación de cada componente (entorno virtual, `.env`)
-está en su README; aquí está el orden para levantarlo todo.
+Para desarrollar un componente con recarga automática o depurarlo desde su entorno virtual, el orden de arranque
+completo (nueve pasos, con comandos para PowerShell, CMD y zsh) y la tabla de qué pasa si se omite un paso están en
+[`docs/07-ejecucion-manual.md`](docs/07-ejecucion-manual.md). No se puede usar a la vez que Docker Compose: ocupan
+los mismos puertos.
 
-> **Combinar los dos modos:** se puede tener casi todo en Compose y un componente en el equipo, siempre que ningún
-> contenedor necesite llamar a ese componente (los contenedores lo buscan por su nombre de servicio, no en el
-> equipo). Funciona con el **Outbox Relay** y el **Event Trigger**: `docker compose stop outbox-relay` y después
-> `python -m app.outbox_relay` desde el entorno virtual, con su `.env` de siempre (`localhost:5433`,
-> `localhost:5672`). No funciona con Airport o Itinerary Service, porque el gateway los llama por su nombre.
+### Demostraciones
 
-### 1. Contenedores de infraestructura
+Con el sistema levantado, los recorridos para mostrarlo funcionando (crear un itinerario y seguirlo hasta
+`notification_history`, evento duplicado, evento en la DLQ y su reprocesamiento, trazas en Jaeger y métricas en
+Grafana) están en [`docs/08-demostraciones.md`](docs/08-demostraciones.md).
 
-Igual en PowerShell, CMD y la Terminal de macOS (zsh). En Apple Silicon las imágenes se descargan para `arm64`
-sin opciones adicionales. **La primera vez** se crean:
+## Variables de entorno
 
-```
-docker network create notification-net
-docker run -d --name itinerary-postgres -e POSTGRES_USER=itinerary -e POSTGRES_PASSWORD=itinerary -e POSTGRES_DB=itinerary_db -p 5433:5432 postgres:16-alpine
-docker run -d --name itinerary-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
-docker run -d --name notification-postgres --network notification-net -p 5434:5432 -e POSTGRES_USER=notification -e POSTGRES_PASSWORD=notification -e POSTGRES_DB=notification_db postgres:16-alpine
-docker run -d --name airport-redis -p 6379:6379 redis:7.4-alpine
-```
+Con **Docker Compose** no hace falta configurar nada: `docker-compose.yml` define todas las variables de cada
+contenedor. Solo estas se pueden cambiar, copiando [`.env.example`](.env.example) como `.env` en la raíz
+(`Copy-Item .env.example .env` en PowerShell, `copy .env.example .env` en CMD, `cp .env.example .env` en zsh):
 
-**Las veces siguientes** basta con encenderlos:
-
-```
-docker start itinerary-postgres itinerary-rabbitmq notification-postgres airport-redis
-```
-
-RabbitMQ tarda unos segundos: está listo cuando `docker logs itinerary-rabbitmq` muestra `Server startup complete`.
-
-### 2. Observabilidad (Fase 9)
-
-Stack de observabilidad (Jaeger, Prometheus y Grafana). Es opcional para los pasos siguientes; sin él el sistema
-funciona igual, pero no se ven trazas ni métricas. **La primera vez** se crean:
-
-```
-docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
-docker run -d --name prometheus -p 9090:9090 -v "%CD%\observability\prometheus\prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
-docker run -d --name grafana -p 3000:3000 -v "%CD%\observability\grafana\provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
-```
-
-En macOS (zsh) reemplazar `%CD%` por `$(pwd)`:
-
-```bash
-docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/jaeger:2.23.0 --set receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317
-docker run -d --name prometheus -p 9090:9090 -v "$(pwd)/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus:v2.55.0
-docker run -d --name grafana -p 3000:3000 -v "$(pwd)/observability/grafana/provisioning:/etc/grafana/provisioning" grafana/grafana:11.3.1
-```
-
-**Las veces siguientes:** `docker start jaeger prometheus grafana`.
-
-Interfaces:
-
-- Jaeger: <http://localhost:16686>
-- Prometheus: <http://localhost:9090>
-- Grafana: <http://localhost:3000> (usuario `admin`, clave `admin`)
-
-> Las trazas llegan a Jaeger porque los servicios, el relay y el trigger se inician con `OTEL_ENABLED=true` (valor
-> por defecto). Para desactivarlas: `OTEL_ENABLED=false` como variable de entorno antes de arrancar cada proceso.
-
-### 3. Migraciones
-
-Una vez, y otra cada vez que lleguen migraciones nuevas. Con el entorno virtual de cada carpeta activado.
-
-**PowerShell:**
-
-```powershell
-cd services\itinerary-service
-.\.venv\Scripts\Activate.ps1
-alembic upgrade head
-deactivate
-cd ..\..\serverless\send-notification-function
-.\.venv\Scripts\Activate.ps1
-alembic upgrade head
-deactivate
-cd ..\..
-```
-
-**CMD:**
-
-```cmd
-cd services\itinerary-service
-.venv\Scripts\activate.bat
-alembic upgrade head
-deactivate
-cd ..\..\serverless\send-notification-function
-.venv\Scripts\activate.bat
-alembic upgrade head
-deactivate
-cd ..\..
-```
-
-**macOS (zsh):**
-
-```bash
-cd services/itinerary-service
-source .venv/bin/activate
-alembic upgrade head
-deactivate
-cd ../../serverless/send-notification-function
-source .venv/bin/activate
-alembic upgrade head
-deactivate
-cd ../..
-```
-
-### 4. SendNotificationFunction
-
-Igual en PowerShell, CMD y zsh, **desde la raíz del repositorio** (el contexto de build incluye `libs/`).
-La primera vez (y después de cada cambio en el código de la función) se construye la imagen y se crea el
-contenedor:
-
-```
-docker build -t send-notification-function -f serverless/send-notification-function/Dockerfile .
-docker run -d --name send-notification-function --network notification-net -p 9000:8080 -e DATABASE_URL=postgresql+psycopg://notification:notification@notification-postgres:5432/notification_db send-notification-function
-```
-
-Las veces siguientes: `docker start send-notification-function`.
-
-En Apple Silicon la imagen se construye para `arm64` (la imagen base de Lambda trae las dos arquitecturas). Funciona
-igual en local; solo importa al desplegar en AWS Lambda, donde la función se crearía con arquitectura `arm64` (o la
-imagen se construiría con `docker build --platform linux/amd64`).
-
-### 5 a 8. Procesos de Python
-
-Cada uno en **su propia terminal**, con el entorno virtual de su carpeta activado
-(`.\.venv\Scripts\Activate.ps1` en PowerShell, `.venv\Scripts\activate.bat` en CMD, `source .venv/bin/activate` en
-zsh). Los comandos son iguales en las tres terminales (en macOS, las carpetas se escriben con `/`):
-
-| Paso | Carpeta | Comando | Listo cuando |
-|---|---|---|---|
-| 5. Airport Service | `services\airport-service` | `uvicorn app.main:app --port 8001` | http://localhost:8001/health responde |
-| 6. Itinerary Service | `services\itinerary-service` | `uvicorn app.main:app --port 8002` | http://localhost:8002/health responde |
-| 7. Outbox Relay | `services\itinerary-service` | `python -m app.outbox_relay` | `Outbox Relay iniciado` |
-| 8. Event Trigger | `serverless\event-trigger` | `python -m app.main` | `escuchando la cola notification.itinerary-created` |
-
-### 9. API Gateway
-
-Igual en PowerShell, CMD y zsh, desde la raíz del repositorio. La primera vez (y después de cada cambio en
-`gateway/templates/`) se construye la imagen y se crea el contenedor:
-
-```
-docker build -t api-gateway -f gateway/Dockerfile .
-docker run -d --name api-gateway -p 8000:8000 api-gateway
-```
-
-Las veces siguientes: `docker start api-gateway`. Está listo cuando http://localhost:8000/health responde.
-
-El gateway puede arrancar antes que los servicios: mientras un servicio no esté corriendo, sus rutas responden 502
-`UPSTREAM_UNAVAILABLE`, y en cuanto arranca, funcionan sin reiniciar el gateway. Llega a los servicios del equipo por
-`host.docker.internal` (Docker Desktop lo crea en macOS y Windows).
-
-Para detener todo: Ctrl+C en cada terminal y `docker stop api-gateway send-notification-function notification-postgres itinerary-rabbitmq itinerary-postgres airport-redis grafana prometheus jaeger`.
-
-### Qué pasa si se omite un paso
-
-| Paso omitido | Qué se ve | Cómo se corrige |
+| Variable | Por defecto | Para qué |
 |---|---|---|
-| `itinerary-postgres` | `POST /itineraries` responde 500 y el relay registra un error en cada ciclo | Encenderlo; el relay sigue solo |
-| `itinerary-rabbitmq` | El relay no puede publicar: los eventos **esperan en la outbox**. El trigger reintenta la conexión cada 5 s | Encenderlo; todo se publica y se procesa solo |
-| `notification-postgres` | La función responde `TransientError`; el trigger reintenta **sin límite** y nada va a la DLQ | Encenderlo; los mensajes se procesan solos |
-| `airport-redis` | Airport Service funciona sin caché (registra un warning) | Opcional |
-| Migración de `itinerary_db` | `POST /itineraries` responde 500 (la tabla no existe) | `alembic upgrade head` en Itinerary Service |
-| Migración de `notification_db` | La función falla con `ProgrammingError`, que **no** es `TransientError`: tras 3 intentos los mensajes terminan en la **DLQ** | `alembic upgrade head` en la función y después `python -m app.replay_dlq --all` en el trigger |
-| SendNotificationFunction | El trigger no puede conectarse: reintenta sin límite, nada va a la DLQ | Encenderla; los mensajes se procesan solos |
-| Airport Service | `POST /itineraries` responde 503 `AIRPORT_SERVICE_UNAVAILABLE` y no se guarda nada | Arrancarlo y repetir la solicitud |
-| Itinerary Service | No se pueden crear itinerarios | Arrancarlo |
-| Outbox Relay | Los itinerarios se crean (201), pero sus eventos **se acumulan pendientes en la outbox** | Arrancarlo; publica los pendientes en orden |
-| Event Trigger (nunca arrancó) | La cola no existe: el relay registra `UnroutableError` y el evento **espera en la outbox** | Arrancarlo: declara la cola y el relay publica en el siguiente ciclo |
-| Event Trigger (apagado después) | Los mensajes se acumulan en la cola (*Ready* en el panel) | Arrancarlo; los procesa en orden |
-| API Gateway | `http://localhost:8000` rechaza la conexión. Los servicios siguen respondiendo directamente en 8001 y 8002 | `docker start api-gateway` (o los comandos del paso 9 la primera vez) |
-| Airport o Itinerary Service, usando el gateway | El gateway responde 502 `UPSTREAM_UNAVAILABLE` con `details.service` | Arrancar el servicio; no hace falta reiniciar el gateway |
-| Jaeger | Los servicios funcionan con normalidad; el exportador OTLP registra un error al arrancar pero no interrumpe nada | `docker start jaeger` |
-| Prometheus | Los servicios funcionan; el endpoint `/metrics` sigue disponible pero nadie lo consulta | `docker start prometheus` |
-| Grafana | Los servicios y Prometheus funcionan; no hay dashboard | `docker start grafana` |
+| `LOG_LEVEL` | `INFO` | Nivel de log de los cuatro procesos Python |
+| `OTEL_ENABLED` | `true` | Envío de trazas a Jaeger desde los procesos Python |
+| `GATEWAY_OTEL_TRACE` | `on` | Trazas del gateway |
+| `GATEWAY_RATE_LIMIT` / `GATEWAY_RATE_BURST` | `10r/s` / `20` | Rate limiting del gateway por IP |
+| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | `admin` / `admin` | Usuario de Grafana |
 
-## Demostración de observabilidad
+En el **modo manual** cada componente lee su propio `.env` (copia de su `.env.example`). Variables comunes a los
+cuatro procesos Python: `LOG_LEVEL` y, desde el entorno del proceso (no desde `.env`), `OTEL_ENABLED` y
+`OTEL_EXPORTER_OTLP_ENDPOINT` (por defecto `http://localhost:4317`).
 
-Requisitos: el sistema levantado con Docker Compose (incluye Jaeger, Prometheus y Grafana), o los nueve pasos del
-arranque manual incluyendo el paso 2. Con Compose, el archivo del itinerario está en
-`serverless\event-trigger\demo\create-itinerary.json`: ejecutar el `curl` desde `serverless\event-trigger`.
+| Componente | Variables (valor por defecto) | Archivo |
+|---|---|---|
+| Airport Service | `API_COLOMBIA_BASE_URL` (`https://api-colombia.com/api/v1`), `API_COLOMBIA_TIMEOUT_SECONDS` (3), `RETRY_MAX_ATTEMPTS` (3), `RETRY_BASE_DELAY_SECONDS` (0.5), `RETRY_MAX_DELAY_SECONDS` (4), `CIRCUIT_BREAKER_FAILURE_THRESHOLD` (3), `CIRCUIT_BREAKER_RECOVERY_SECONDS` (30), `REDIS_URL` (`redis://localhost:6379/0`), `REDIS_TIMEOUT_SECONDS` (0.5), `CACHE_TTL_SECONDS` (600), `CACHE_STALE_TTL_SECONDS` (86400), `SERVICE_NAME` | [`.env.example`](services/airport-service/.env.example) |
+| Itinerary Service y Outbox Relay | `DATABASE_URL` (obligatoria), `DATABASE_CONNECT_TIMEOUT_SECONDS` (5), `AIRPORT_SERVICE_URL` (`http://localhost:8001`), `AIRPORT_SERVICE_TIMEOUT_SECONDS` (5), `RABBITMQ_URL`, `RABBITMQ_TIMEOUT_SECONDS` (3), `OUTBOX_RELAY_POLL_INTERVAL_SECONDS` (2), `OUTBOX_RELAY_BATCH_SIZE` (10), `OUTBOX_RELAY_METRICS_PORT` (9101), `HOST` (127.0.0.1), `PORT` (8002), `SERVICE_NAME` | [`.env.example`](services/itinerary-service/.env.example) |
+| SendNotificationFunction | `DATABASE_URL` (obligatoria), `DATABASE_CONNECT_TIMEOUT_SECONDS` (3), `FUNCTION_NAME`; en la imagen, `AWS_LAMBDA_FUNCTION_TIMEOUT` (10 s) | [`.env.example`](serverless/send-notification-function/.env.example) |
+| Event Trigger | `RABBITMQ_URL`, `RABBITMQ_TIMEOUT_SECONDS` (3), `RABBITMQ_RECONNECT_DELAY_SECONDS` (5), `FUNCTION_INVOKE_URL` (`http://localhost:9000/2015-03-31/functions/function/invocations`), `FUNCTION_TIMEOUT_SECONDS` (15), `TRIGGER_INFRASTRUCTURE_ATTEMPTS` (3), `TRIGGER_FUNCTION_ERROR_ATTEMPTS` (3), `TRIGGER_RETRY_BACKOFF_SECONDS` (1), `TRIGGER_RETRY_MAX_BACKOFF_SECONDS` (8), `TRIGGER_REQUEUE_DELAY_SECONDS` (10), `METRICS_PORT` (9102), `SERVICE_NAME` | [`.env.example`](serverless/event-trigger/.env.example) |
+| API Gateway | `AIRPORT_SERVICE_UPSTREAM` / `ITINERARY_SERVICE_UPSTREAM` (`host.docker.internal:8001` / `:8002`), `GATEWAY_PROXY_CONNECT_TIMEOUT` (2s), `GATEWAY_PROXY_READ_TIMEOUT` (15s), `GATEWAY_RATE_LIMIT` (10r/s), `GATEWAY_RATE_BURST` (20), `OTEL_EXPORTER_OTLP_HOST`, `GATEWAY_OTEL_TRACE` (on) | [`.env.example`](gateway/.env.example) |
 
-### Seguir una solicitud de punta a punta en Jaeger
+Cada `.env.example` explica cada variable. Los archivos `.env` nunca se suben al repositorio.
 
-```
-curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-traza" --data-binary "@demo\create-itinerary.json"
-```
+## Endpoints
 
-**macOS (zsh):**
+Los clientes entran por el **API Gateway** (`http://localhost:8000`). Todas las respuestas de error usan el mismo
+formato:
 
-```bash
-curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-traza" --data-binary "@demo/create-itinerary.json"
+```json
+{
+  "error": {"code": "AIRPORT_NOT_FOUND", "message": "El aeropuerto con id 999 no existe", "details": {"airport_id": 999}},
+  "correlation_id": "3f2a..."
+}
 ```
 
-Resultado esperado:
+| Método | Ruta en el gateway | Éxito | Errores del servicio |
+|---|---|---|---|
+| `GET` | `/api/airports` | 200: lista de aeropuertos (header `X-Cache`) | 502, 503, 504 |
+| `GET` | `/api/airports/{id}` | 200: un aeropuerto | 404 `AIRPORT_NOT_FOUND`, 422 `VALIDATION_ERROR` (id no es un entero mayor que 0), 502, 503, 504 |
+| `GET` | `/api/airports/map-data` | 200: arrays para Plotly (`ids`, `names`, `latitudes`, `longitudes`...) | 502, 503, 504 |
+| `POST` | `/api/itineraries` | 201: itinerario creado | 422 (`VALIDATION_ERROR`, `INVALID_ITINERARY`, `AIRPORT_NOT_FOUND`), 503 `AIRPORT_SERVICE_UNAVAILABLE`, 504 `AIRPORT_SERVICE_TIMEOUT` |
+| `GET` | `/api/itineraries` | 200: lista | — |
+| `GET` | `/api/itineraries/{id}` | 200: un itinerario | 404 `ITINERARY_NOT_FOUND`, 422 `VALIDATION_ERROR` (id no es UUID) |
+| `PUT` | `/api/itineraries/{id}` | 200: itinerario actualizado | 404, 422, 503, 504 |
+| `DELETE` | `/api/itineraries/{id}` | 204 | 404, 422 (id no es UUID) |
+| `GET` | `/health` | 200 (del propio gateway) | — |
+| `GET` | `/` | Frontend | 404 `ROUTE_NOT_FOUND` si el archivo no existe |
 
-1. La solicitud devuelve 201.
-2. En Jaeger (<http://localhost:16686>), buscar el servicio `api-gateway` → aparece la traza que conecta el gateway, Itinerary Service, Airport Service (dos llamadas de validación), la escritura en PostgreSQL y el contexto guardado en la outbox.
-3. Unos segundos después, el relay publica el evento: en Jaeger aparece una traza del `itinerary-service-outbox-relay` que continúa el span original gracias al `traceparent` guardado en `outbox_events`.
+En Airport Service, 502 es `AIRPORT_PROVIDER_BAD_RESPONSE` (API Colombia respondió algo inválido), 503
+`AIRPORT_PROVIDER_UNAVAILABLE` y 504 `AIRPORT_PROVIDER_TIMEOUT`. Los errores de los servicios pasan por el gateway
+**sin cambios**. El gateway agrega sus propios errores en cualquier ruta `/api/`:
 
-### Ver métricas en Grafana
+| Código | `code` | Cuándo |
+|---|---|---|
+| 404 | `ROUTE_NOT_FOUND` | La ruta no existe en el gateway |
+| 413 | `PAYLOAD_TOO_LARGE` | El cuerpo supera 1 MB |
+| 429 | `RATE_LIMIT_EXCEEDED` | Se superaron 10 solicitudes/s (+20 de ráfaga) desde la misma IP; con `Retry-After: 1` |
+| 502 | `UPSTREAM_UNAVAILABLE` | El servicio no acepta la conexión (`details.service` dice cuál) |
+| 504 | `UPSTREAM_TIMEOUT` | El servicio no responde en 15 s |
 
-Abrir <http://localhost:3000> (usuario `admin`, clave `admin`), ir a **Dashboards → Sistema de Itinerarios Personales**.
+Cuerpo de `POST` y `PUT /api/itineraries` (el ejemplo está en
+[`serverless/event-trigger/demo/create-itinerary.json`](serverless/event-trigger/demo/create-itinerary.json)):
 
-- Crear varios itinerarios y observar que `itineraries_created_total` sube.
-- El panel "Outbox Relay" muestra los eventos publicados en tiempo real.
-- El panel "HTTP Latencia" muestra los percentiles p50, p95 y p99 de los últimos 5 minutos.
-
-Los mismos datos en bruto están en Prometheus (<http://localhost:9090>): buscar `http_requests_total` o `itineraries_created_total`.
-
-## Demostración de punta a punta
-
-Recorrido completo: **gateway** → crear un itinerario → outbox → relay → RabbitMQ → trigger → función → historial.
-Requisitos: el sistema levantado con Docker Compose o con los nueve pasos del arranque manual.
-
-> **Con Docker Compose** los contenedores tienen otros nombres (`sistema-itinerarios-<servicio>-1`), así que en los
-> comandos de abajo se cambia:
->
-> | Modo manual | Docker Compose |
-> |---|---|
-> | `docker exec notification-postgres ...` | `docker compose exec notification-postgres ...` |
-> | `docker exec itinerary-postgres ...` | `docker compose exec itinerary-postgres ...` |
-> | `docker logs api-gateway` / `docker logs send-notification-function` | `docker compose logs api-gateway` / `docker compose logs send-notification-function` |
-> | Logs del relay y del trigger en su terminal | `docker compose logs -f outbox-relay event-trigger` |
-> | `python -m app.replay_dlq` | `docker compose run --rm event-trigger python -m app.replay_dlq` |
->
-> Los `curl` no cambian.
-
-Las solicitudes entran por el gateway
-(`http://localhost:8000/api/itineraries`), igual que lo hará el frontend. Los comandos se ejecutan desde `serverless\event-trigger` y son **iguales en
-PowerShell y CMD** (en CMD, ejecutar antes `chcp 65001` para ver bien las tildes). En la Terminal de macOS (zsh) los
-`docker exec` y `python -m ...` son iguales; los `curl` tienen su propio bloque (`curl` en lugar de `curl.exe` y la
-ruta del archivo con `/`). El cuerpo del itinerario está en `demo\create-itinerary.json`; si la fecha `2026-12-15` ya
-pasó, cámbiala por una futura.
-
-### 1. Caso normal
-
-```
-curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo\create-itinerary.json"
+```json
+{
+  "traveler_name": "Ana Pérez",
+  "traveler_email": "ana@example.com",
+  "departure_airport_id": 1,
+  "arrival_airport_id": 5,
+  "travel_date": "2026-12-15T08:00:00-05:00",
+  "duration_minutes": 75
+}
 ```
 
-**macOS (zsh):**
+**Fuera del gateway** (solo para desarrollo y observabilidad): Swagger en `http://localhost:8001/docs` y
+`http://localhost:8002/docs`; `GET /health` y `GET /metrics` en los puertos 8001 y 8002; métricas del relay en 9101 y
+del trigger en 9102; invocación de la función en
+`POST http://localhost:9000/2015-03-31/functions/function/invocations`. El contrato HTTP publicado de Airport Service
+está en [`docs/openapi/airport-service.json`](docs/openapi/airport-service.json). Ejemplos con `curl` en el README de
+cada componente y en [`docs/08-demostraciones.md`](docs/08-demostraciones.md).
 
-```bash
-curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-e2e" --data-binary "@demo/create-itinerary.json"
+## Eventos
+
+El sistema publica un único evento de integración, **`ItineraryCreatedEvent` versión 1** (ADR-020), cada vez que se
+crea un itinerario:
+
+```json
+{
+  "event_id": "uuid",
+  "event_type": "itinerary.created",
+  "event_version": 1,
+  "occurred_at": "2026-10-20T15:30:00Z",
+  "producer": "itinerary-service",
+  "correlation_id": "uuid",
+  "data": {
+    "itinerary_id": "uuid",
+    "traveler_name": "Ana Pérez",
+    "traveler_email": "ana@example.com",
+    "departure_airport_id": 1,
+    "arrival_airport_id": 5,
+    "travel_date": "2026-12-15T08:00:00-05:00",
+    "duration_minutes": 75
+  }
+}
 ```
 
-Resultado esperado:
+| Aspecto | Valor |
+|---|---|
+| Productor | Outbox Relay de Itinerary Service (`RabbitMQEventPublisher`) |
+| Exchange y routing key | `itinerary.events` (topic) con `itinerary.created` |
+| Consumidor | Event Trigger, cola `notification.itinerary-created`, que invoca `SendNotificationFunction` |
+| Mensajes fallidos | DLX `itinerary.events.dlx` → DLQ `notification.itinerary-created.dlq` |
+| Garantías | Mensajes persistentes, *publisher confirms*, `mandatory=True`, ACK manual después de procesar |
+| Entrega | Al menos una vez; la función es idempotente con `event_id` |
+| Propiedades AMQP | `message_id = event_id`, `correlation_id`, `type`, `app_id`, headers `event_version` y `traceparent` |
+| Versionado | Un cambio incompatible exige una nueva `event_version` |
 
-- El gateway devuelve el **201** de Itinerary Service con el itinerario, y el header `X-Correlation-ID: demo-e2e`.
-- `docker logs api-gateway` muestra la solicitud con `upstream_status=201 correlation_id=demo-e2e`.
-- Unos segundos después, el log del relay muestra `1 publicados` y el del trigger,
-  `Evento procesado (PROCESSED): event_id=<id>. ACK`.
-- `docker logs send-notification-function` muestra `Correo simulado enviado a ana@example.com: Hola Ana Pérez...`.
-
-El registro en el historial, con el mismo `correlation_id` que llegó al gateway (la trazabilidad empieza en el gateway):
-
-```
-docker exec notification-postgres psql -U notification -d notification_db -c "SELECT event_id, status, recipient, correlation_id, processed_at FROM notification_history ORDER BY processed_at DESC LIMIT 3;"
-```
-
-Y en la outbox, el evento ya publicado:
-
-```
-docker exec itinerary-postgres psql -U itinerary -d itinerary_db -c "SELECT id, published_at, attempts FROM outbox_events ORDER BY occurred_at DESC LIMIT 1;"
-```
-
-**Sin `X-Correlation-ID`:** repetir el `POST` sin ese header. El gateway genera uno con forma de UUID, lo devuelve en
-el header `X-Correlation-ID` de la respuesta, y ese mismo valor aparece en el log del relay y en `notification_history`.
-
-### 2. Evento duplicado
-
-La entrega es "al menos una vez": si el relay se cae entre publicar y marcar `published_at`, publica el evento otra
-vez. Se simula quitando la marca del último evento:
-
-```
-docker exec itinerary-postgres psql -U itinerary -d itinerary_db -c "UPDATE outbox_events SET published_at = NULL WHERE id = (SELECT id FROM outbox_events ORDER BY occurred_at DESC LIMIT 1);"
-```
-
-Resultado esperado:
-
-- El relay lo publica otra vez y el trigger registra `Evento procesado (ALREADY_PROCESSED): event_id=<el mismo id>. ACK`.
-- La consulta del historial sigue mostrando **una sola fila** para ese `event_id`: la función es idempotente.
-- No hay un segundo correo simulado en los logs de la función.
-
-### 3. Evento que termina en la DLQ y su reprocesamiento
-
-Un evento válido termina en la DLQ cuando falla el despliegue. Se simula la **migración del historial sin aplicar**
-renombrando la tabla, sin borrar su contenido:
-
-```
-docker exec notification-postgres psql -U notification -d notification_db -c "ALTER TABLE notification_history RENAME TO notification_history_respaldo;"
-curl.exe -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo\create-itinerary.json"
-```
-
-**macOS (zsh):** el mismo `docker exec` y después:
-
-```bash
-curl -s -X POST http://localhost:8000/api/itineraries -H "Content-Type: application/json" -H "X-Correlation-ID: demo-dlq" --data-binary "@demo/create-itinerary.json"
-```
-
-Resultado esperado: el trigger hace 3 intentos con `errorType=ProgrammingError: ... relation "notification_history"
-does not exist` y registra `Error de la función en 3 intentos ... Va a la DLQ`. En el panel
-(http://localhost:15672 → *Queues and Streams*), `notification.itinerary-created.dlq` tiene 1 mensaje.
-
-Ahora se **corrige la causa** (la tabla vuelve a existir) y se **reprocesa** el mensaje:
-
-```
-docker exec notification-postgres psql -U notification -d notification_db -c "ALTER TABLE notification_history_respaldo RENAME TO notification_history;"
-python -m app.replay_dlq
-```
-
-Resultado esperado:
-
-- El comando registra `Mensaje devuelto de la DLQ a la cola notification.itinerary-created: message_id=<event_id> motivo del rechazo=rejected ...`.
-- El trigger registra `Evento procesado (PROCESSED) ... ACK`.
-- La DLQ queda en 0 y el historial tiene la fila con `correlation_id = demo-dlq`.
-
-### 4. Evento inválido en la DLQ (no se reprocesa)
-
-Itinerary Service solo produce eventos válidos, así que se publica uno a mano con la API del panel de RabbitMQ:
-
-```
-curl.exe -s -u guest:guest -X POST http://localhost:15672/api/exchanges/%2F/itinerary.events/publish -H "Content-Type: application/json" --data-binary "@demo\publish-invalid-event.json"
-```
-
-**macOS (zsh):**
-
-```bash
-curl -s -u guest:guest -X POST http://localhost:15672/api/exchanges/%2F/itinerary.events/publish -H "Content-Type: application/json" --data-binary "@demo/publish-invalid-event.json"
-```
-
-Resultado esperado: el trigger registra `La función rechazó el evento (fallo permanente) ... Va a la DLQ`, sin
-reintentos. Este mensaje **no** se reprocesa: no cumple el contrato y volvería a la DLQ. Con
-`demo\publish-not-json.json` se ve el mismo resultado para un mensaje que no es JSON, sin que se invoque la función.
-
-### Ver en qué cola está cada mensaje
-
-En http://localhost:15672 (usuario y clave `guest`) → **Queues and Streams**:
-
-- `notification.itinerary-created`: *Ready* (esperando al trigger), *Unacked* (procesándose o reintentándose) y
-  *Consumers* (1 si el trigger está conectado).
-- `notification.itinerary-created.dlq`: mensajes apartados. En **Get messages** con *Ack mode: Nack message requeue
-  true* se ven sin sacarlos; el header `x-death` dice de qué cola vinieron y el motivo.
-
-Más escenarios (función apagada, base de datos de notificaciones apagada, trigger apagado desde el principio) en
-[`serverless/event-trigger/README.md`](serverless/event-trigger/README.md) y en ADR-031.
+La especificación completa (canales, operaciones `send` y `receive`, DLQ) está en
+[`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml) (AsyncAPI 3.0; se puede ver en
+<https://studio.asyncapi.com>). Pruebas de contrato del productor y del consumidor comprueban que el código coincide
+con ese archivo.
 
 ## Pruebas
 
-| Nivel | Componente | Pruebas | Necesita |
+El proyecto sigue una **pirámide de pruebas** de cinco niveles (ADR-042): muchas pruebas rápidas abajo y pocas pruebas
+lentas, de todo el sistema, arriba.
+
+| Nivel | Qué prueba | Ejemplo |
+|---|---|---|
+| Unitarias | Dominio, casos de uso y adaptadores con dobles de prueba (fakes, respx, canales falsos) | Un itinerario con salida igual a llegada se rechaza |
+| Integración | Un adaptador contra la infraestructura real (PostgreSQL, RabbitMQ, la función) | El relay publica en un RabbitMQ real |
+| Contrato | Que dos componentes sigan entendiéndose (OpenAPI de Airport, AsyncAPI del evento) | La función acepta los ejemplos del AsyncAPI |
+| Gateway | La configuración de Nginx en un contenedor propio contra servidores eco | 429 al superar el límite |
+| Punta a punta (E2E) | El sistema completo por el gateway, con un simulador de API Colombia | Crear un itinerario y encontrarlo en `notification_history` |
+
+Resultado con todo el sistema encendido (2026-11-18, macOS, `docker compose` con el simulador; evidencia
+[01](docs/evidencias/01-pruebas.txt)):
+
+| Suite | Carpeta | Pruebas | Necesita |
 |---|---|---|---|
-| Unitarias, integración y contrato | `services/airport-service` | 203 | Nada (Redis opcional) |
-| Unitarias, integración y contrato | `services/itinerary-service` | 195 | PostgreSQL y RabbitMQ para las de integración |
-| Unitarias, integración y contrato | `serverless/send-notification-function` | 70 | PostgreSQL para las de integración |
-| Unitarias e integración | `serverless/event-trigger` | 86 | RabbitMQ y la función para las de integración |
-| Paquete compartido | `libs/observability` | 18 | Nada |
-| Configuración de Nginx | `gateway` | 53 | Docker (y el gateway real para 3 *smoke*) |
+| Airport Service | `services/airport-service` | 191 | Nada (Redis opcional) |
+| Itinerary Service | `services/itinerary-service` | 186 | PostgreSQL y RabbitMQ para las de integración |
+| SendNotificationFunction | `serverless/send-notification-function` | 70 | PostgreSQL para las de integración |
+| Event Trigger | `serverless/event-trigger` | 87 | RabbitMQ y la función para las de integración |
+| Paquete compartido | `libs/observability` | 19 | Nada |
+| API Gateway | `gateway` | 53 | Docker (y el gateway real para 3 *smoke*) |
 | Punta a punta | `tests/e2e` | 14 | El sistema con el simulador (abajo) |
+| **Total** | | **620** | **0 fallos, 0 omitidas, 0 advertencias** |
 
 Sin los servicios, las pruebas de integración quedan **SKIPPED** (no fallan). Las de integración usan bases propias
 (`itinerary_db_test`, `notification_db_test`) y colas con nombres `test-<id>.`: se pueden correr durante una
-demostración sin perder datos.
+demostración sin perder datos. El workflow "Pruebas" de GitHub Actions las ejecuta en cada pull request: un job por componente (sin servicios, así
+que allí las de integración quedan SKIPPED) y el job "Docker Compose", que levanta el sistema y corre las E2E.
 
 Cada componente se prueba desde su carpeta, con su entorno virtual activado (CLAUDE.md 4.3; en la función el archivo es
 `requirements-dev.txt`, igual que en `libs/observability`). El comando es igual en PowerShell, CMD y zsh:
@@ -706,20 +832,202 @@ pytest -v
 ```
 
 (En PowerShell, `.venv\Scripts\Activate.ps1` en lugar de `activate`.) Para volver a usar la API Colombia real:
-`docker compose up -d` (sin el segundo archivo) recrea Airport Service con la dirección real.
+`docker compose up -d --remove-orphans` (sin el segundo archivo) recrea Airport Service con la dirección real; después,
+`docker compose restart api-gateway` (el contenedor nuevo puede tener otra IP, ADR-041) y
+`docker compose exec redis redis-cli FLUSHALL` (la caché todavía tiene los 5 aeropuertos del simulador; sin este paso
+el mapa mostraría 4 durante 10 minutos).
 
 **Contrato de Airport Service.** Si cambias su API a propósito, regenera `docs/openapi/airport-service.json` desde
 `services/airport-service` y revisa el diff: `$env:UPDATE_CONTRACTS = "1"; pytest tests/test_openapi_contract.py`
 (PowerShell), `set UPDATE_CONTRACTS=1 && pytest tests/test_openapi_contract.py` (CMD) o
 `UPDATE_CONTRACTS=1 pytest tests/test_openapi_contract.py` (zsh).
 
-## Desarrollo
+## Evidencias
+
+Capturas y salidas de terminal del sistema funcionando, obtenidas el 2026-11-18 en una sola sesión con Docker Compose
+y la API Colombia real. El índice completo, con qué debe verse en cada una y cómo regenerarlas con los scripts de
+`scripts/`, está en [`docs/evidencias/README.md`](docs/evidencias/README.md).
+
+| N.º | Evidencia | Archivo |
+|---|---|---|
+| 01 | Totales de las siete suites de pruebas (620) | [`01-pruebas.txt`](docs/evidencias/01-pruebas.txt) |
+| 02 | `docker compose ps` con todo el sistema sano | [`02-docker-compose-ps.txt`](docs/evidencias/02-docker-compose-ps.txt) |
+| 03 | Respuesta del gateway con `X-Correlation-ID` | [`03-gateway-correlation-id.txt`](docs/evidencias/03-gateway-correlation-id.txt) |
+| 04 | 429 del rate limiting | [`04-rate-limit-429.txt`](docs/evidencias/04-rate-limit-429.txt) |
+| 05 | Registro `SENT` en `notification_history` | [`05-notification-history.txt`](docs/evidencias/05-notification-history.txt) |
+| 06 | Outbox: RabbitMQ detenido, evento pendiente y publicado al volver | [`06-outbox-rabbitmq-detenido.txt`](docs/evidencias/06-outbox-rabbitmq-detenido.txt) |
+| 07 | Evento inválido enviado a la DLQ | [`07-dlq-evento-invalido.txt`](docs/evidencias/07-dlq-evento-invalido.txt) |
+| 08 | Swagger de Airport Service | [`08-swagger-airport.png`](docs/evidencias/08-swagger-airport.png) |
+| 09 | Swagger de Itinerary Service | [`09-swagger-itinerary.png`](docs/evidencias/09-swagger-itinerary.png) |
+| 10 | Mapa del frontend (51 aeropuertos) | [`10-frontend-mapa.png`](docs/evidencias/10-frontend-mapa.png) |
+| 11 | CRUD: crear | [`11-frontend-crear.png`](docs/evidencias/11-frontend-crear.png) |
+| 12 | CRUD: consultar | [`12-frontend-consultar.png`](docs/evidencias/12-frontend-consultar.png) |
+| 13 | CRUD: actualizar | [`13-frontend-actualizar.png`](docs/evidencias/13-frontend-actualizar.png) |
+| 14 | CRUD: eliminar | [`14-frontend-eliminar.png`](docs/evidencias/14-frontend-eliminar.png) |
+| 15 | Traza de punta a punta en Jaeger (6 servicios) | [`15-jaeger-traza.png`](docs/evidencias/15-jaeger-traza.png) |
+| 16 | Dashboard de Grafana | [`16-grafana-dashboard.png`](docs/evidencias/16-grafana-dashboard.png) |
+| 17 | Panel de RabbitMQ: cola y DLQ | [`17-rabbitmq-colas.png`](docs/evidencias/17-rabbitmq-colas.png) |
+| 18 | Mensaje de la DLQ con `x-death` | [`18-rabbitmq-dlq-mensaje.png`](docs/evidencias/18-rabbitmq-dlq-mensaje.png) |
+| 19 | SonarCloud | **Pendiente** (la toma el equipo): `docs/evidencias/19-sonarcloud.png` |
+| 20 | GitHub Actions | **Pendiente** (la toma el equipo): `docs/evidencias/20-github-actions.png` |
+
+Así se ven el mapa y la traza:
+
+![Mapa de aeropuertos en el frontend](docs/evidencias/10-frontend-mapa.png)
+
+![Traza de punta a punta en Jaeger](docs/evidencias/15-jaeger-traza.png)
+
+## Limitaciones conocidas
+
+Son decisiones conscientes, documentadas, no errores pendientes:
+
+| Limitación | Por qué | Decisión |
+|---|---|---|
+| La función FaaS **no escala sola ni se apaga** cuando no hay eventos | En local, el Runtime Interface Emulator ejecuta un solo contenedor siempre encendido. El código no cambia: la misma imagen desplegada en AWS Lambda sí escala y se apaga | [ADR-008](docs/06-decisiones-arquitectonicas.md#adr-008--tecnología-serverless-local) |
+| El gateway responde **502** si un contenedor de servicio se **recrea** con otra IP, hasta `docker compose restart api-gateway` | Nginx resuelve los nombres de los servicios al arrancar. Solo ocurre al reconstruir un servicio con el sistema encendido; con `stop` y `start` la IP no cambia | [ADR-041](docs/06-decisiones-arquitectonicas.md#adr-041--despliegue-local-con-docker-compose-fase-10) |
+| **`GenerateItineraryReportFunction` no se implementó** | Era opcional en la Fase 6; `SendNotificationFunction` ya demuestra el modelo FaaS completo | [ADR-043](docs/06-decisiones-arquitectonicas.md#adr-043--generateitineraryreportfunction-no-se-implementa-alcance) |
+| La **protección de `main`** (PR obligatorio con 1 aprobación y el check "Pruebas") es un acuerdo del equipo, no una regla de GitHub | Se configura en *Settings → Rules* y solo puede hacerlo el dueño del repositorio | [`CONTRIBUTING.md`](CONTRIBUTING.md) y CLAUDE.md, sección 9.3 |
+
+Otras limitaciones propias de un componente (por ejemplo, el estado del circuit breaker vive en la memoria de cada
+proceso) están en su README, como en [Airport Service](services/airport-service/README.md#limitaciones-conocidas-fase-2).
+
+## Decisiones de arquitectura
+
+Cada decisión importante quedó registrada como un **ADR** (*Architecture Decision Record*): contexto, decisión,
+justificación y consecuencias. El registro completo, con las actualizaciones posteriores de cada una, está en
+[`docs/06-decisiones-arquitectonicas.md`](docs/06-decisiones-arquitectonicas.md). Todas están aceptadas salvo ADR-022,
+reemplazada por el Transactional Outbox.
+
+| ADR | Fase | Decisión |
+|---|---|---|
+| [ADR-001](docs/06-decisiones-arquitectonicas.md#adr-001--uso-de-microservicios) | Fase 0 | El sistema se divide en Airport Service, Itinerary Service y el sistema de notificaciones |
+| [ADR-002](docs/06-decisiones-arquitectonicas.md#adr-002--arquitectura-hexagonal) | Fase 0 | Dominio, casos de uso, puertos y adaptadores en cada componente |
+| [ADR-003](docs/06-decisiones-arquitectonicas.md#adr-003--patrón-adapter-para-api-colombia) | Fase 0 | Puerto `AirportProvider` y `ApiColombiaAirportAdapter` frente a API Colombia |
+| [ADR-004](docs/06-decisiones-arquitectonicas.md#adr-004--postgresql-independiente-para-itinerarios) | Fase 0 | PostgreSQL propia de Itinerary Service |
+| [ADR-005](docs/06-decisiones-arquitectonicas.md#adr-005--rabbitmq-para-mensajería) | Fase 0 | RabbitMQ transporta los eventos de integración |
+| [ADR-006](docs/06-decisiones-arquitectonicas.md#adr-006--transactional-outbox) | Fase 0 | El itinerario y su evento se guardan en la misma transacción |
+| [ADR-007](docs/06-decisiones-arquitectonicas.md#adr-007--redis-para-caché) | Fase 2 | Redis como caché (10 min) y copia de respaldo (24 h), como Decorator |
+| [ADR-008](docs/06-decisiones-arquitectonicas.md#adr-008--tecnología-serverless-local) | Fase 6 | La función corre en la imagen oficial de AWS Lambda con el Runtime Interface Emulator |
+| [ADR-009](docs/06-decisiones-arquitectonicas.md#adr-009--api-gateway-con-nginx) | Fase 7 | Nginx como API Gateway: enrutamiento, rate limiting y correlation ID, sin lógica de negocio |
+| [ADR-010](docs/06-decisiones-arquitectonicas.md#adr-010--observabilidad) | Fase 0 | OpenTelemetry, Jaeger, Prometheus, Grafana y logs estructurados |
+| [ADR-011](docs/06-decisiones-arquitectonicas.md#adr-011--idioma-del-código-y-de-la-documentación) | Fase 0 | Código en inglés y documentación en español |
+| [ADR-012](docs/06-decisiones-arquitectonicas.md#adr-012--contrato-http-y-formato-único-de-errores) | Fase 1 | Endpoints de Airport Service y formato único de errores |
+| [ADR-013](docs/06-decisiones-arquitectonicas.md#adr-013--puertos-para-las-dependencias-externas-de-itinerary-service) | Fase 1 | Itinerary Service depende de los puertos `AirportCatalog` y `EventPublisher` |
+| [ADR-014](docs/06-decisiones-arquitectonicas.md#adr-014--resiliencia-de-airport-service-frente-a-api-colombia) | Fase 2 | Timeout, retry con backoff, circuit breaker y fallback, implementados a mano |
+| [ADR-015](docs/06-decisiones-arquitectonicas.md#adr-015--reglas-de-negocio-de-itinerary-service) | Fase 3 | Reglas de negocio del itinerario |
+| [ADR-016](docs/06-decisiones-arquitectonicas.md#adr-016--un-contenedor-postgresql-por-servicio) | Fase 3 | Un contenedor PostgreSQL por servicio |
+| [ADR-017](docs/06-decisiones-arquitectonicas.md#adr-017--travel_date-con-zona-horaria) | Fase 3 | `travel_date` con zona horaria |
+| [ADR-018](docs/06-decisiones-arquitectonicas.md#adr-018--traveler_email-como-campo-opcional) | Fase 3 | `traveler_email` opcional |
+| [ADR-019](docs/06-decisiones-arquitectonicas.md#adr-019--endpoints-de-itinerary-service-y-tratamiento-de-errores-de-airport-service) | Fase 3 | Endpoints de Itinerary Service; 404/503/504 de Airport Service → 422/503/504 |
+| [ADR-020](docs/06-decisiones-arquitectonicas.md#adr-020--contrato-de-itinerarycreatedevent-versión-1) | Fase 4 | Contrato de `ItineraryCreatedEvent` versión 1 |
+| [ADR-021](docs/06-decisiones-arquitectonicas.md#adr-021--topología-de-rabbitmq-y-librería-pika) | Fase 4 | Exchange, cola, DLX y DLQ; `pika` con confirms y mensajes persistentes |
+| [ADR-022](docs/06-decisiones-arquitectonicas.md#adr-022--publicación-directa-tras-el-commit-fase-4) | Fase 4 | Publicación directa después del commit (**reemplazada** por ADR-026) |
+| [ADR-023](docs/06-decisiones-arquitectonicas.md#adr-023--sonarcloud-para-el-análisis-de-calidad-del-código) | PR #7 | SonarCloud con Automatic Analysis |
+| [ADR-024](docs/06-decisiones-arquitectonicas.md#adr-024--tabla-outbox_events-y-outboxmessage-fase-5) | Fase 5 | Tabla `outbox_events` y `OutboxMessage` |
+| [ADR-025](docs/06-decisiones-arquitectonicas.md#adr-025--outbox-relay-proceso-aparte-skip-locked-y-entrega-al-menos-una-vez-fase-5) | Fase 5 | Outbox Relay como proceso aparte, `SKIP LOCKED`, entrega al menos una vez |
+| [ADR-026](docs/06-decisiones-arquitectonicas.md#adr-026--registro-del-evento-en-la-misma-transacción-del-itinerario-fase-5) | Fase 5 | El evento se registra antes del commit, en la misma transacción |
+| [ADR-027](docs/06-decisiones-arquitectonicas.md#adr-027--mensajes-venenosos-en-la-outbox-fallo-temporal-vs-fallo-permanente-fase-5) | Fase 5 | Mensajes venenosos: fallo temporal vs. permanente (`failed_at`) |
+| [ADR-028](docs/06-decisiones-arquitectonicas.md#adr-028--modelo-de-programación-de-sendnotificationfunction-fase-6) | Fase 6 | `handler(event, context)` sin estado, hexagonal por dentro |
+| [ADR-029](docs/06-decisiones-arquitectonicas.md#adr-029--historial-de-notificaciones-en-postgresql-propio-fase-6) | Fase 6 | Historial en `notification_db` propia, migrado con Alembic |
+| [ADR-030](docs/06-decisiones-arquitectonicas.md#adr-030--idempotencia-y-destinatario-de-la-notificación-fase-6) | Fase 6 | Idempotencia con `event_id`; `SKIPPED` si no hay correo |
+| [ADR-031](docs/06-decisiones-arquitectonicas.md#adr-031--event-trigger-consumo-invocación-y-política-de-reintentos-fase-6) | Fase 6 | Event Trigger: ACK, reintentos, DLQ y reprocesamiento |
+| [ADR-032](docs/06-decisiones-arquitectonicas.md#adr-032--propiedad-de-la-topología-de-rabbitmq-fase-6) | Fase 6 | El productor declara el exchange; el consumidor, su cola, la DLX y la DLQ |
+| [ADR-033](docs/06-decisiones-arquitectonicas.md#adr-033--frontend-con-htmlcssjs-y-plotly-js-fase-8) | Fase 8 | Frontend en HTML/CSS/JS con Plotly, servido por el gateway |
+| [ADR-034](docs/06-decisiones-arquitectonicas.md#adr-034--logs-json-estructurados-con-python-json-logger-fase-9) | Fase 9 | Logs JSON con `python-json-logger` |
+| [ADR-035](docs/06-decisiones-arquitectonicas.md#adr-035--trazas-distribuidas-con-opentelemetry-fase-9) | Fase 9 | Trazas distribuidas con OpenTelemetry |
+| [ADR-036](docs/06-decisiones-arquitectonicas.md#adr-036--instrumentación-del-api-gateway-con-opentelemetry-fase-9) | Fase 9 | Gateway instrumentado con `ngx_otel_module` |
+| [ADR-037](docs/06-decisiones-arquitectonicas.md#adr-037--columna-traceparent-en-outbox_events-para-propagar-el-contexto-de-traza-fase-9) | Fase 9 | `traceparent` guardado en `outbox_events` |
+| [ADR-038](docs/06-decisiones-arquitectonicas.md#adr-038--métricas-con-prometheus-y-dashboard-de-grafana-fase-9) | Fase 9 | Métricas con Prometheus y dashboard de Grafana |
+| [ADR-039](docs/06-decisiones-arquitectonicas.md#adr-039--jaeger-como-backend-de-trazas-fase-9) | Fase 9 | Jaeger como backend de trazas |
+| [ADR-040](docs/06-decisiones-arquitectonicas.md#adr-040--microservice-chassis-pattern-paquete-compartido-libsobservability-fase-9) | Fase 9 | Paquete compartido `libs/observability` (Microservice Chassis Pattern) |
+| [ADR-041](docs/06-decisiones-arquitectonicas.md#adr-041--despliegue-local-con-docker-compose-fase-10) | Fase 10 | Docker Compose: 15 servicios, migraciones automáticas y una red por base |
+| [ADR-042](docs/06-decisiones-arquitectonicas.md#adr-042--estrategia-de-pruebas-fase-11) | Fase 11 | Pirámide de pruebas en cinco niveles |
+| [ADR-043](docs/06-decisiones-arquitectonicas.md#adr-043--generateitineraryreportfunction-no-se-implementa-alcance) | Fase 11 | `GenerateItineraryReportFunction` no se implementa (alcance) |
+
+## Estructura del repositorio
+
+```
+sistema-itinerarios-personales/
+├── README.md                     ← este documento
+├── CLAUDE.md                     ← reglas y estado del proyecto para Claude Code
+├── CONTRIBUTING.md               ← flujo de trabajo del equipo
+├── docker-compose.yml            ← todo el sistema (15 servicios)
+├── docker-compose.e2e.yml        ← simulador de API Colombia para las pruebas E2E
+├── .env.example                  ← variables opcionales de Docker Compose
+├── .github/                      ← plantillas de PR e issue, workflow de CI (tests.yml)
+├── docs/                         ← documentación 01 a 10, evidencias/, asyncapi/ y openapi/
+├── services/
+│   ├── airport-service/          ← app/ (domain, application, infrastructure, api), tests/
+│   └── itinerary-service/        ← app/ (… + outbox_relay.py), alembic/, tests/
+├── serverless/
+│   ├── send-notification-function/ ← app/ (handler.py hexagonal), alembic/, events/, Dockerfile
+│   └── event-trigger/            ← app/ (consumidor, invocador, replay_dlq.py), demo/
+├── gateway/                      ← nginx.conf, templates/default.conf.template, Dockerfile, tests/
+├── frontend/                     ← index.html, css/, js/ (Plotly local)
+├── libs/observability/           ← logging, trazas y métricas comunes (Microservice Chassis)
+├── observability/                ← configuración de Prometheus y Grafana (dashboard)
+├── scripts/                      ← lock_requirements.py y los scripts de las evidencias
+└── tests/e2e/                    ← pruebas de punta a punta y simulador de API Colombia
+```
+
+## Documentación adicional
+
+| Documento | Contenido |
+|---|---|
+| [`docs/01-planificacion.md`](docs/01-planificacion.md) | Objetivos, alcance, requisitos y fases (planificación de la Fase 0) |
+| [`docs/02-arquitectura.md`](docs/02-arquitectura.md) | Arquitectura general, responsabilidades, persistencia, resiliencia, observabilidad y despliegue |
+| [`docs/03-dominio.md`](docs/03-dominio.md) | Dominio, contextos delimitados y lenguaje ubicuo |
+| [`docs/04-comunicacion-y-eventos.md`](docs/04-comunicacion-y-eventos.md) | Comunicación HTTP, eventos, Outbox y serverless (FaaS, Event Trigger, DLQ) |
+| [`docs/05-diagramas.md`](docs/05-diagramas.md) | Diagramas en Mermaid: general, componentes, clases, relacional, secuencia, resiliencia y despliegue |
+| [`docs/06-decisiones-arquitectonicas.md`](docs/06-decisiones-arquitectonicas.md) | Registro de decisiones técnicas (ADR-001 a ADR-043) |
+| [`docs/07-ejecucion-manual.md`](docs/07-ejecucion-manual.md) | Arranque manual, componente por componente (modo desarrollo) |
+| [`docs/08-demostraciones.md`](docs/08-demostraciones.md) | Demostraciones de punta a punta y de observabilidad |
+| [`docs/09-guia-sustentacion.md`](docs/09-guia-sustentacion.md) | Guía para la sustentación: preparación, guion, reparto y preguntas probables |
+| [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md) | Resumen de lo que aportó cada fase |
+| [`docs/evidencias/`](docs/evidencias/README.md) | Evidencias (capturas y salidas de terminal) y cómo regenerarlas |
+| [`docs/asyncapi/asyncapi.yaml`](docs/asyncapi/asyncapi.yaml) | Contrato del evento `ItineraryCreatedEvent` y cómo se publica y se consume |
+| [`docs/openapi/airport-service.json`](docs/openapi/airport-service.json) | Contrato HTTP publicado de Airport Service |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Flujo de trabajo del equipo: issues, ramas, commits, pull requests y revisión |
+
+| Componente | Documentación |
+|---|---|
+| API Gateway y frontend | [`gateway/README.md`](gateway/README.md) |
+| Airport Service | [`services/airport-service/README.md`](services/airport-service/README.md) |
+| Itinerary Service y Outbox Relay | [`services/itinerary-service/README.md`](services/itinerary-service/README.md) |
+| SendNotificationFunction | [`serverless/send-notification-function/README.md`](serverless/send-notification-function/README.md) |
+| Event Trigger y reprocesamiento de la DLQ | [`serverless/event-trigger/README.md`](serverless/event-trigger/README.md) |
+
+## Desarrollo por fases, ramas y etiquetas
 
 El desarrollo sigue un enfoque incremental. Cada fase incluye explicación, estructura de archivos, implementación cuando corresponda, instrucciones de ejecución, pruebas y una lista de verificación.
 
 El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisión) está en [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Ramas del repositorio
+### Estado de las fases
+
+| Fase | Nombre | Estado |
+|---|---|---|
+| 0 | Planificación y arquitectura | Completada |
+| 1 | Airport Service | Completada |
+| 2 | Resiliencia y caché | Completada |
+| 3 | Itinerary Service | Completada |
+| 4 | Eventos y RabbitMQ | Completada |
+| 5 | Transactional Outbox | Completada |
+| 6 | Serverless | Completada |
+| 7 | API Gateway | Completada |
+| 8 | Frontend | Completada |
+| 9 | Observabilidad | Completada |
+| 10 | Docker y Docker Compose | Completada |
+| 11 | Pruebas | Completada |
+| 12 | Documentación y entrega | Completada (pendiente del pull request, el merge y la etiqueta `fase-12`) |
+
+**Las 13 fases están completas.** La Fase 12 (documentación y entrega) queda en la rama `fase-12-documentacion` hasta
+su pull request. Lo que aportó cada fase está resumido en [`docs/10-historial-de-fases.md`](docs/10-historial-de-fases.md).
+
+El equipo trabaja en **Windows 11** (PowerShell y CMD) y en **macOS con Apple Silicon** (zsh). Los README dan los
+comandos para las tres terminales; la tabla de equivalencias está en [`CLAUDE.md`](CLAUDE.md), sección 4.2.
+
+### Ramas del repositorio
 
 **La versión integrada y vigente del sistema está siempre en `main`.** Las demás ramas son de consulta.
 
@@ -737,6 +1045,7 @@ El flujo de trabajo del equipo (issues, ramas, commits, pull requests y revisió
 | `fase-9-observabilidad` | Fase 9 — Observabilidad (logs JSON, OpenTelemetry y Jaeger, Prometheus y Grafana, `libs/observability`) | `fase-9` |
 | `fase-10-docker-compose` | Fase 10 — Docker y Docker Compose (imágenes de todos los componentes, migraciones automáticas, orden de arranque) | `fase-10` |
 | `fase-11-pruebas` | Fase 11 — Pruebas (bases de integración propias, contratos HTTP y de eventos, punta a punta sobre Docker Compose) | `fase-11` |
+| `fase-12-documentacion` | Fase 12 — Documentación y entrega (README, diagramas de clases y relacional, evidencias, guía de sustentación) | `fase-12` (se crea tras el merge) |
 
 - Cada rama `fase-N-...` se **conserva después del merge como archivo de solo lectura**: muestra los commits de cada entrega de esa fase. No se trabaja en ellas después de fusionarlas; cualquier corrección sale de una rama nueva desde `main`.
 - Las ramas auxiliares (`chore/`, `fix/`, `docs/`) se borran después del merge.
@@ -750,4 +1059,10 @@ Los commits y las descripciones de pull request **no llevan la línea de coautor
 
 ## Contexto académico
 
-Proyecto universitario para la asignatura Arquitecturas de Software Emergentes.
+| | |
+|---|---|
+| Universidad | Universidad Central |
+| Asignatura | Arquitecturas de Software Emergentes |
+| Docente | Otoniel Humberto Castañeda Rodriguez |
+| Periodo académico | 2026-2 |
+| Integrantes | Juan David Gutierrez Rincón, Santiago Chilito García y Gustavo Rincón Araujo |

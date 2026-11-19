@@ -121,11 +121,12 @@
       },
       "targets": [
         {
-          "expr": "outbox_events_dead_total",
-          "legendFormat": "Mensajes venenosos (DLQ)",
+          "expr": "sum(notifications_dispatched_total{outcome=~\"rejected|function_error\"}) or vector(0)",
+          "legendFormat": "Enviados a la DLQ por el Event Trigger",
           "refId": "A"
         }
       ],
+      "description": "Mensajes que el Event Trigger envió a la DLQ de RabbitMQ (evento inválido o error de la función) desde que arrancó. Los mensajes venenosos de la outbox son otra métrica: outbox_events_dead_total.",
       "title": "Mensajes en DLQ",
       "type": "stat"
     },

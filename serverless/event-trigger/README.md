@@ -53,7 +53,7 @@ RabbitMQ está listo, así que la cola existe antes de que el relay publique.
 
 ## Orden de arranque del sistema completo (modo manual)
 
-El trigger es el paso **8** del orden completo, explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
+El trigger es el paso **8** del orden completo, explicado en [`docs/07-ejecucion-manual.md`](../../docs/07-ejecucion-manual.md):
 
 1. Contenedores (`itinerary-postgres`, `itinerary-rabbitmq`, `notification-postgres` y la red `notification-net`).
 2. Migraciones: `itinerary_db` y `notification_db`.
@@ -223,7 +223,7 @@ y la borra al terminar. Se pueden correr durante una demostración sin vaciar ni
   (eso alteraría el escenario "trigger apagado desde el principio").
 - Las pruebas con la función real **agregan** filas al historial de notificaciones, con `event_id` nuevos.
 
-Los archivos de `demo\` sirven para la demostración de punta a punta del [README raíz](../../README.md#demostración-de-punta-a-punta):
+Los archivos de `demo\` sirven para la demostración de punta a punta de [`docs/08-demostraciones.md`](../../docs/08-demostraciones.md#demostración-de-punta-a-punta):
 crear un itinerario y publicar a mano un evento inválido y un mensaje que no es JSON.
 
 ## Posibles errores

@@ -3,15 +3,15 @@
 
 ## 1. Estilo arquitectónico
 
-El sistema combinará tres enfoques:
+El sistema combina tres enfoques:
 
 1. **Microservicios:** servicios independientes, con responsabilidades delimitadas.
 2. **Arquitectura basada en eventos:** comunicación asíncrona para reaccionar a la creación de itinerarios.
 3. **Serverless:** ejecución de SendNotificationFunction como una función activada por eventos.
 
-La arquitectura hexagonal se aplicará dentro de los servicios que necesiten separar las reglas de negocio de los mecanismos externos.
+La arquitectura hexagonal se aplica dentro de cada servicio y de la función, para separar las reglas de negocio de los mecanismos externos.
 
-DDD se utilizará como guía para definir los límites del dominio y establecer un lenguaje común.
+DDD se utiliza como guía para definir los límites del dominio y establecer un lenguaje común (`03-dominio.md`).
 
 ## 2. Componentes principales
 
@@ -26,11 +26,11 @@ Responsabilidades:
 - Transformar respuestas externas al modelo interno.
 - Permitir consultas por identificador.
 - Preparar datos para la visualización en el mapa.
-- Incorporar Redis, timeout, retry y circuit breaker en la fase de resiliencia.
+- Aplicar caché en Redis, timeout, retry, circuit breaker y fallback (Fase 2, sección 5).
 
-Airport Service será propietario de la integración con API Colombia.
+Airport Service es el propietario de la integración con API Colombia.
 
-El dominio no dependerá directamente de las estructuras de respuesta de esa API.
+El dominio no depende de las estructuras de respuesta de esa API: el Adapter las traduce (ADR-003).
 
 ### 2.2. Itinerary Service
 
@@ -41,8 +41,7 @@ Responsabilidades:
 - Validar aeropuertos mediante HTTP hacia Airport Service.
 - Persistir itinerarios en su propia base de datos PostgreSQL.
 - Gestionar sus migraciones mediante Alembic.
-- Publicar el evento de integración de creación.
-- Incorporar Transactional Outbox en la fase correspondiente.
+- Registrar el evento de integración de creación con el Transactional Outbox (Fase 5), que el Outbox Relay publica en RabbitMQ.
 
 ### 2.3. Sistema de notificaciones
 
@@ -104,13 +103,13 @@ Responsabilidades:
 - Permitir la gestión de itinerarios.
 - Presentar errores y resultados al usuario.
 
-No consumirá directamente la API externa.
+No consume directamente la API externa: solo habla con el API Gateway.
 
 ## 3. Comunicación entre componentes
 
 ### Comunicación síncrona
 
-Se utilizará HTTP/REST cuando un componente necesite una respuesta inmediata.
+Se utiliza HTTP/REST cuando un componente necesita una respuesta inmediata.
 
 Desde afuera (tráfico *norte-sur*):
 
@@ -124,7 +123,7 @@ El servicio de itinerarios consulta la existencia de los aeropuertos antes de gu
 
 ### Comunicación asíncrona
 
-Se utilizará RabbitMQ para transportar eventos de integración.
+Se utiliza RabbitMQ para transportar eventos de integración.
 
 Ejemplo:
 
@@ -144,7 +143,7 @@ El detalle está en `04-comunicacion-y-eventos.md`.
 
 ### Base de datos de itinerarios
 
-Itinerary Service será propietario de los itinerarios almacenados en su PostgreSQL.
+Itinerary Service es el propietario de los itinerarios almacenados en su PostgreSQL (`itinerary_db`, tablas `itineraries` y `outbox_events`). El diagrama relacional está en `05-diagramas.md`, sección 4.
 
 ### Base de datos o almacenamiento de notificaciones
 
@@ -158,16 +157,16 @@ Airport Service **no tiene base de datos relacional propia**: no guarda datos qu
 
 ## 5. Resiliencia
 
-Airport Service incorporará progresivamente:
+Airport Service incorpora (Fase 2, ADR-007 y ADR-014), en el orden caché → circuit breaker → retry con backoff → llamada con timeout → fallback:
 
-- Timeout: limita cuánto puede esperar una solicitud.
-- Retry: permite repetir operaciones fallidas de forma controlada.
-- Exponential Backoff: incrementa el intervalo entre reintentos.
-- Circuit Breaker: evita insistir continuamente contra una dependencia que falla.
-- Redis: reduce consultas repetidas a la API externa.
-- Fallback: permite una respuesta alternativa cuando sea válida y segura.
+- Timeout: limita cuánto puede esperar una solicitud (3 s; si se agota, 504).
+- Retry: repite de forma controlada las llamadas que fallan por un problema temporal (3 intentos).
+- Exponential Backoff: incrementa el intervalo entre reintentos (0,5 s y 1 s, máximo 4 s).
+- Circuit Breaker: tras 3 fallos seguidos deja de llamar a API Colombia durante 30 s: responde de inmediato con la copia de respaldo o, si no la hay, con 503.
+- Redis: reduce consultas repetidas a la API externa (copia fresca de 10 minutos).
+- Fallback: si API Colombia no está disponible, responde la copia de respaldo de 24 horas (`X-Cache: STALE`).
 
-Los reintentos se limitarán a operaciones apropiadas y no deben multiplicar innecesariamente la carga sobre el proveedor externo.
+Los reintentos se limitan a los fallos temporales: un 404 o una respuesta inválida (502) no se reintentan, para no multiplicar la carga sobre el proveedor. El flujo está en el diagrama de resiliencia de `05-diagramas.md` (sección 6).
 
 ## 6. Observabilidad
 
@@ -214,7 +213,7 @@ Los cuatro componentes exponen métricas en formato Prometheus (`prometheus-clie
 | Outbox Relay | 9101 | `/` | `outbox_events_published_total`, `outbox_events_failed_total`, `outbox_events_dead_total`, `outbox_relay_cycles_total` |
 | Event Trigger | 9102 | `/` | `notifications_dispatched_total{outcome}` |
 
-**Prometheus** (puerto 9090) consulta los cuatro endpoints cada 15 segundos. **Grafana** (puerto 3000) muestra un dashboard preconfigurado con cuatro paneles: negocio (itinerarios creados, notificaciones, relay), solicitudes HTTP por servicio (rate y distribución), latencia (p50/p95/p99 por servicio) y detalle del relay y el trigger. El datasource y el dashboard se cargan al arrancar Grafana desde `observability/grafana/provisioning/`.
+**Prometheus** (puerto 9090) consulta los cuatro endpoints cada 15 segundos. **Grafana** (puerto 3000) muestra un dashboard preconfigurado con cuatro filas de paneles: negocio (itinerarios creados, notificaciones enviadas, mensajes en la DLQ, ciclos del relay), solicitudes HTTP por servicio, latencia (p50/p95/p99 por servicio) y detalle del relay y el trigger. Grafana carga al arrancar el datasource y el proveedor de dashboards desde `observability/grafana/provisioning/`, y el dashboard desde `observability/grafana/dashboards/sistema-itinerarios.json`.
 
 ## 7. Despliegue (Fase 10, ADR-041)
 
@@ -239,7 +238,7 @@ docker compose up -d --build
 
 **Aislamiento de datos.** Cada PostgreSQL está solo en su red (`itinerary-data` o `notification-data`) junto con los contenedores de su servicio dueño. Así la propiedad de datos (sección 4) no depende solo de una convención: los demás contenedores ni siquiera resuelven el nombre de esa base.
 
-**Modo manual.** Para desarrollar un componente con recarga automática, se puede seguir ejecutando con `uvicorn` desde su entorno virtual (pasos del `README.md` raíz), pero no a la vez que Compose, porque usan los mismos puertos.
+**Modo manual.** Para desarrollar un componente con recarga automática, se puede seguir ejecutando con `uvicorn` desde su entorno virtual (pasos de [`07-ejecucion-manual.md`](07-ejecucion-manual.md)), pero no a la vez que Compose, porque usan los mismos puertos.
 
 ## 8. Principios de diseño
 

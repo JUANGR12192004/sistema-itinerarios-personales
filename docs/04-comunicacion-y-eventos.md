@@ -3,9 +3,9 @@
 
 ## 1. Objetivo
 
-Definir cómo se comunicarán los componentes del Sistema de Itinerarios Personales.
+Describir cómo se comunican los componentes del Sistema de Itinerarios Personales.
 
-Se utilizarán dos mecanismos principales:
+Se utilizan dos mecanismos principales:
 
 - HTTP/REST para operaciones síncronas.
 - RabbitMQ para mensajería asíncrona basada en eventos.
@@ -14,19 +14,19 @@ Se utilizarán dos mecanismos principales:
 
 ### 2.1. Consulta de aeropuertos
 
-El consumidor realizará una solicitud a Airport Service.
+El consumidor (el frontend, a través del gateway) hace una solicitud a Airport Service.
 
-Airport Service consultará su puerto de salida, implementado mediante el Adapter correspondiente, para obtener información de API Colombia.
+Airport Service consulta su puerto de salida (`AirportProvider`), implementado por el Adapter de API Colombia y envuelto por la caché y la resiliencia, para obtener la información de API Colombia.
 
-La respuesta se transformará al modelo interno antes de entregarse al consumidor.
+La respuesta se transforma al modelo interno antes de entregarse al consumidor.
 
 ### 2.2. Validación de itinerarios
 
-Antes de guardar un itinerario, Itinerary Service consultará Airport Service para verificar los aeropuertos de salida y llegada.
+Antes de guardar un itinerario, Itinerary Service consulta `GET /airports/{id}` de Airport Service para verificar los aeropuertos de salida y llegada (`HttpAirportCatalogAdapter`).
 
-Si alguno no existe, el itinerario no deberá persistirse como válido.
+Si alguno no existe (404 de Airport Service), el itinerario no se guarda y la API responde 422 `AIRPORT_NOT_FOUND`.
 
-Si Airport Service no está disponible, Itinerary Service deberá gestionar el fallo sin confundirlo con una respuesta que indique que el aeropuerto no existe.
+Si Airport Service no está disponible, Itinerary Service no lo confunde con un aeropuerto inexistente: responde 503 `AIRPORT_SERVICE_UNAVAILABLE`, o 504 `AIRPORT_SERVICE_TIMEOUT` si no respondió a tiempo (ADR-019).
 
 ### 2.3. Entrada por el API Gateway (Fase 7, ADR-009)
 
@@ -44,7 +44,7 @@ Qué hace el gateway con cada solicitud:
 | Errores del gateway | 502 `UPSTREAM_UNAVAILABLE` (servicio apagado), 504 `UPSTREAM_TIMEOUT`, 404 `ROUTE_NOT_FOUND`, 413 `PAYLOAD_TOO_LARGE`, en el formato único de errores |
 | Errores de los servicios | Pasan sin cambios (por ejemplo 404 `AIRPORT_NOT_FOUND` o 503 `AIRPORT_SERVICE_UNAVAILABLE`) |
 
-El recorrido está en el diagrama de la sección 3.2 de `05-diagramas.md`.
+El recorrido está en el diagrama de la sección 5.2 de `05-diagramas.md`.
 
 ## 3. Comunicación basada en eventos
 
@@ -101,7 +101,7 @@ flowchart LR
     C -->|HTTP| F[SendNotificationFunction]
     Q -.rechazado.-> DLX[[itinerary.events.dlx<br/>direct]]
     DLX -->|"bindings itinerary.created y<br/>notification.itinerary-created"| DLQ[(notification.itinerary-created.dlq)]
-    DLQ -.python -m app.replay_dlq.-> Q
+    DLQ -.->|"python -m app.replay_dlq"| Q
 ```
 
 Garantías del lado del productor (`RabbitMQEventPublisher`, librería `pika`):
@@ -499,4 +499,4 @@ Para verla de forma gráfica, pegar el archivo en https://studio.asyncapi.com.
 
 ## 10. Evolución del contrato
 
-Los cambios incompatibles en un evento deberán gestionarse mediante una estrategia explícita de versionado y compatibilidad.
+Los cambios incompatibles en un evento se gestionan con una nueva `event_version` (ADR-020): el consumidor rechaza las versiones que no conoce (`REJECTED`, a la DLQ) y es *Tolerant Reader* con los campos nuevos que no usa. Un cambio compatible (agregar un campo opcional) no cambia la versión; así se agregó el header AMQP `traceparent` en la versión 1.2.0 del documento AsyncAPI sin cambiar el contrato del evento.

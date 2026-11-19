@@ -142,11 +142,11 @@ Desde la raíz del repositorio, `docker compose up -d --build` levanta el sistem
 (servicio `airport-service`, imagen `services/airport-service/Dockerfile`, puerto 8001). Dentro de Compose usa
 `redis://redis:6379/0` y envía las trazas a `jaeger:4317`. Tras un cambio en el código:
 `docker compose up -d --build airport-service`. Logs: `docker compose logs -f airport-service`. Detalles en el
-[README raíz](../../README.md#arranque-con-docker-compose-recomendado) y en ADR-041.
+[README raíz](../../README.md#instalación-y-ejecución) y en ADR-041.
 
 ## Orden de arranque del sistema completo (modo manual)
 
-Airport Service es el paso **5** del orden completo, explicado en el [README raíz](../../README.md#arranque-manual-modo-desarrollo):
+Airport Service es el paso **5** del orden completo, explicado en [`docs/07-ejecucion-manual.md`](../../docs/07-ejecucion-manual.md):
 contenedores → observabilidad → migraciones → SendNotificationFunction → **Airport Service** → Itinerary Service → Outbox Relay →
 Event Trigger → API Gateway. Solo necesita Redis (opcional) y acceso a internet para API Colombia; debe estar arriba **antes** de
 crear itinerarios.
@@ -220,7 +220,7 @@ source .venv/bin/activate
 pytest -v
 ```
 
-Resultado esperado: `203 passed`, sin advertencias (la de Starlette sobre `httpx` en `TestClient` se filtra en
+Resultado esperado: `191 passed`, sin advertencias (la de Starlette sobre `httpx` en `TestClient` se filtra en
 `pytest.ini` desde la Fase 11, ADR-042). Incluye la prueba de contrato `tests/test_openapi_contract.py`, que compara
 la API con `docs/openapi/airport-service.json` (ver "Pruebas" en el README raíz para regenerarlo).
 

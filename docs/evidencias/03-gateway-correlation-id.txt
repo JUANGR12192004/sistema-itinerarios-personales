@@ -1,0 +1,32 @@
+Evidencia 03 — Respuesta del gateway con X-Correlation-ID
+Fecha: 2026-11-18 23:00:07 -0500
+Equipo: Darwin (arm64), Docker version 29.9.3, build 5457199
+Generada con: python scripts/evidencias_terminal.py gateway
+
+Correlation ID de la sesión: evidencia-20261118230006
+Trace ID de la sesión: 12c20261118230006000000000000000
+
+1) POST con X-Correlation-ID: el gateway lo reenvía y vuelve en la respuesta. El traceparent fija el
+   trace ID de la sesión para abrir la traza en Jaeger (evidencia 15).
+$ curl -s -i -X POST http://localhost:8000/api/itineraries -H 'Content-Type: application/json' -H 'X-Correlation-ID: evidencia-20261118230006' -H 'traceparent: 00-12c20261118230006000000000000000-12c0e0de0c0de012-01' -d '{"traveler_name": "Ana Pérez", "traveler_email": "ana@example.com", "departure_airport_id": 1, "arrival_airport_id": 5, "travel_date": "2026-12-18T08:00:00-05:00", "duration_minutes": 75}'
+HTTP/1.1 201 Created
+Server: nginx
+Date: Thu, 19 Nov 2026 04:00:07 GMT
+Content-Type: application/json
+Content-Length: 307
+Connection: keep-alive
+X-Correlation-ID: evidencia-20261118230006
+
+{"id":"8f8151d5-0527-477a-a0f0-41eacb09e550","traveler_name":"Ana Pérez","traveler_email":"ana@example.com","departure_airport_id":1,"arrival_airport_id":5,"travel_date":"2026-12-18T08:00:00-05:00","duration_minutes":75,"created_at":"2026-11-19T04:00:07.461726Z","updated_at":"2026-11-19T04:00:07.461726Z"}
+
+2) GET sin X-Correlation-ID: el gateway genera uno con forma de UUID.
+$ curl -s -i http://localhost:8000/api/itineraries
+HTTP/1.1 200 OK
+Server: nginx
+Date: Thu, 19 Nov 2026 04:00:07 GMT
+Content-Type: application/json
+Content-Length: 304
+Connection: keep-alive
+X-Correlation-ID: a21c5709-577a-fbb8-54bc-317e4f8e426b
+
+[{"id":"8f8151d5-0527-477a-a0f0-41eacb09e550","traveler_name":"Ana Pérez","traveler_email":"ana@example.com","departure_airport_id":1,"arrival_airport_id":5,"travel_date":"2026-12-18T13:00:00Z","duration_minutes":75,"created_at":"2026-11-19T04:00:07.461726Z","updated_at":"2026-11-19T04:00:07.461726Z"}]
