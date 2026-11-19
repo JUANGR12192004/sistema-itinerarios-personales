@@ -869,7 +869,7 @@ y la API Colombia real. El índice completo, con qué debe verse en cada una y c
 | 17 | Panel de RabbitMQ: cola y DLQ | [`17-rabbitmq-colas.png`](docs/evidencias/17-rabbitmq-colas.png) |
 | 18 | Mensaje de la DLQ con `x-death` | [`18-rabbitmq-dlq-mensaje.png`](docs/evidencias/18-rabbitmq-dlq-mensaje.png) |
 | 19 | SonarCloud | **Pendiente** (la toma el equipo): `docs/evidencias/19-sonarcloud.png` |
-| 20 | GitHub Actions | **Pendiente** (la toma el equipo): `docs/evidencias/20-github-actions.png` |
+| 20 | GitHub Actions: los 8 checks del PR de la Fase 12 en verde (7 jobs de pruebas y SonarCloud) | [`20-github-actions.png`](docs/evidencias/20-github-actions.png) |
 
 Así se ven el mapa y la traza:
 
