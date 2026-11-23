@@ -4,7 +4,7 @@
  * sección bajo demanda (aeropuertos con mapa; CRUD de itinerarios).
  */
 
-import { loadAirports } from './airports.js';
+import { loadAirports, setRoute } from './airports.js';
 import { loadItineraries } from './itineraries.js';
 import { initThemeToggle } from './theme.js';
 
@@ -48,6 +48,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (name === 'itineraries') loadItineraries(tab.section);
     });
   }
+
+  // «Ver en el mapa» desde la tabla de itinerarios: cambia a la pestaña Aeropuertos
+  // con el origen y el destino resaltados
+  document.addEventListener('showroute', (event) => {
+    setRoute(event.detail);
+    switchTab('airports');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    TABS.airports.btn.focus({ preventScroll: true });
+    loadAirports(TABS.airports.section);
+  });
 
   // La pestaña de aeropuertos está activa por defecto: cargar el mapa al arrancar
   loadAirports(TABS.airports.section);

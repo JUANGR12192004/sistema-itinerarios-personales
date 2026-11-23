@@ -13,6 +13,8 @@
 </head>
 <body>
   <header class="site-header">
+    <!-- Barra de carga: visible mientras hay peticiones al gateway en curso (api.js) -->
+    <div id="progress-bar" class="progress-bar" role="progressbar" aria-label="Cargando datos" hidden></div>
     <div class="header-content">
       <div class="brand">
         <!-- Símbolo de aeropuerto de las cartas aeronáuticas: círculo con un punto central -->
@@ -51,6 +53,27 @@
              role="tabpanel" aria-labelledby="tab-itineraries">
     </section>
   </main>
+
+  <!-- Avisos que se cierran solos (ui.js). Éxitos: se anuncian sin interrumpir.
+       Errores: role="alert", se anuncian de inmediato. -->
+  <div class="toast-stack">
+    <div id="toast-status" class="toast-region" role="status" aria-live="polite"></div>
+    <div id="toast-alerts" class="toast-region" role="alert" aria-live="assertive"></div>
+  </div>
+
+  <!-- Confirmación antes de una acción que no se puede deshacer (ui.js, confirmAction).
+       method="dialog" cierra el diálogo y deja en returnValue el value del botón pulsado. -->
+  <dialog id="confirm-dialog" class="confirm-dialog"
+          aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <form method="dialog">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button type="submit" value="cancel" class="btn btn-secondary confirm-cancel">Cancelar</button>
+        <button type="submit" value="confirm" class="btn btn-danger-solid confirm-accept"></button>
+      </div>
+    </form>
+  </dialog>
 
   <footer class="site-footer">
     <div class="footer-content">

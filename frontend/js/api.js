@@ -16,12 +16,34 @@ export class ApiError extends Error {
   }
 }
 
+// ── Indicador de carga ──────────────────────────────────────────────────────
+// Cuenta las peticiones en curso: mientras haya alguna, se ve la barra de carga de la
+// cabecera y <main> lleva aria-busy="true" (los lectores de pantalla saben que se actualiza).
+let pendingRequests = 0;
+
+function _setBusy(delta) {
+  pendingRequests = Math.max(0, pendingRequests + delta);
+  const busy = pendingRequests > 0;
+  const bar = document.getElementById('progress-bar');
+  if (bar) bar.hidden = !busy;
+  document.querySelector('main')?.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
 /**
  * Realiza una petición al gateway y devuelve el cuerpo JSON parseado.
  * Las respuestas 204 devuelven null.
  * Lanza ApiError en cualquier condición de error.
  */
 export async function apiFetch(path, opts = {}) {
+  _setBusy(+1);
+  try {
+    return await _request(path, opts);
+  } finally {
+    _setBusy(-1);
+  }
+}
+
+async function _request(path, opts) {
   const options = {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
@@ -118,12 +140,35 @@ export function renderError(container, error) {
   container.appendChild(banner);
 }
 
+// Nombre de cada campo de la API tal como aparece en el formulario
+const FIELD_LABELS = {
+  traveler_name: 'Nombre del viajero',
+  traveler_email: 'Correo electrónico',
+  departure_airport_id: 'Aeropuerto de salida',
+  arrival_airport_id: 'Aeropuerto de llegada',
+  travel_date: 'Fecha y hora de salida',
+  duration_minutes: 'Duración',
+};
+
+function _fieldLabel(name) {
+  return FIELD_LABELS[name] ?? name;
+}
+
+/** Convierte el objeto details del formato de error (sección 10.2) en una frase legible. */
 function _formatDetails(code, details) {
   if (code === 'VALIDATION_ERROR' && Array.isArray(details.errors)) {
     return details.errors
-      .map((e) => `${Array.isArray(e.loc) ? e.loc.join('.') : 'campo'}: ${e.msg}`)
+      .map((e) => {
+        // loc llega como ["body", "travel_date"]: interesa el último nombre de campo
+        const loc = Array.isArray(e.loc) ? e.loc.filter((p) => typeof p === 'string') : [];
+        const field = loc.length ? _fieldLabel(loc[loc.length - 1]) : 'Campo';
+        return `${field}: ${e.msg}`;
+      })
       .join('; ');
   }
-  if (typeof details.field === 'string') return `Campo: ${details.field}`;
-  return JSON.stringify(details);
+  if (typeof details.field === 'string') return `Campo: ${_fieldLabel(details.field)}`;
+  if (typeof details.service === 'string') return `Servicio afectado: ${details.service}`;
+  return Object.entries(details)
+    .map(([key, value]) => `${_fieldLabel(key)}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
+    .join('; ');
 }
