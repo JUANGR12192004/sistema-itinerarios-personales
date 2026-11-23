@@ -28,6 +28,29 @@ def test_js_served_with_correct_content_type(client: httpx.Client) -> None:
     assert "javascript" in response.headers["content-type"]
 
 
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        # Fuente local D-DIN: el navegador descarta una fuente servida con otro tipo
+        ("/fonts/D-DIN.woff2", "font/woff2"),
+        ("/fonts/D-DIN-Bold.woff2", "font/woff2"),
+        ("/fonts/OFL-1.1.txt", "text/plain"),
+        # Módulos del frontend agregados en la mejora del frontend
+        ("/js/theme-init.js", "javascript"),
+        ("/js/theme.js", "javascript"),
+        ("/js/ui.js", "javascript"),
+        ("/js/route.js", "javascript"),
+    ],
+)
+def test_frontend_assets_served_with_correct_content_type(
+    client: httpx.Client, path: str, content_type: str
+) -> None:
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert content_type in response.headers["content-type"]
+
+
 @pytest.mark.parametrize("path", ["/no-existe.html", "/no-existe.css", "/no-existe.js"])
 def test_nonexistent_file_returns_route_not_found_json(
     client: httpx.Client,
