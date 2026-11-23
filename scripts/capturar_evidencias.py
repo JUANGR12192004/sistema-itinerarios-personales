@@ -36,6 +36,14 @@ def _shot(page: Page, name: str, full_page: bool = True) -> None:
     print(f"  {path.relative_to(ROOT)}")
 
 
+def _frontend_shot(page: Page, name: str) -> None:
+    """Captura de página completa del CRUD: sin avisos a medio cerrar y desde el inicio de la página
+    (el formulario es sticky: con la página desplazada saldría a la altura donde quedó)."""
+    page.wait_for_selector(".toast", state="detached", timeout=15_000)
+    page.evaluate("window.scrollTo(0, 0)")
+    _shot(page, name)
+
+
 def swagger(page: Page) -> None:
     for number, port, service in (("08", 8001, "airport"), ("09", 8002, "itinerary")):
         page.goto(f"http://localhost:{port}/docs")
@@ -60,13 +68,13 @@ def frontend(page: Page) -> None:
     page.fill("#travel_date", travel)
     page.fill("#duration_minutes", "80")
     page.wait_for_timeout(1000)  # termina la animación de cambio de pestaña
-    _shot(page, "11-frontend-crear.png")
+    _frontend_shot(page, "11-frontend-crear.png")
 
     # Consultar: el itinerario guardado aparece en la tabla
     page.click("button[type=submit]")
     row = page.locator("table.itinerary-table tr", has_text=TRAVELER)
     row.wait_for(timeout=20_000)
-    _shot(page, "12-frontend-consultar.png")
+    _frontend_shot(page, "12-frontend-consultar.png")
 
     # Actualizar: se edita la duración y se guarda
     row.get_by_role("button", name="Editar").click()
@@ -74,18 +82,35 @@ def frontend(page: Page) -> None:
     page.fill("#duration_minutes", "95")
     page.click("button[type=submit]")
     page.locator("table.itinerary-table tr", has_text=TRAVELER).filter(has_text="95").wait_for(timeout=20_000)
-    _shot(page, "13-frontend-actualizar.png")
+    _frontend_shot(page, "13-frontend-actualizar.png")
+    _frontend_dark(page)
 
-    # Eliminar: se acepta la confirmación y la fila desaparece
-    page.once("dialog", lambda dialog: dialog.accept())
+    # Eliminar: se confirma en el diálogo de la página y la fila desaparece
     page.locator("table.itinerary-table tr", has_text=TRAVELER).get_by_role("button", name="Eliminar").click()
+    page.get_by_role("button", name="Eliminar itinerario").click()
     # La lista se vuelve a cargar: se espera a que esté dibujada otra vez y ya sin la fila
     page.wait_for_function(
         "name => document.querySelector('.itinerary-count') && !document.body.innerText.includes(name)",
         arg=TRAVELER,
         timeout=20_000,
     )
-    _shot(page, "14-frontend-eliminar.png")
+    _frontend_shot(page, "14-frontend-eliminar.png")
+
+
+def _frontend_dark(page: Page) -> None:
+    """Evidencia 21: modo oscuro a 1280 px, con la ruta del itinerario de ejemplo en el mapa."""
+    context = page.context.browser.new_context(
+        viewport={"width": 1280, "height": 900}, color_scheme="dark", locale="es-CO", timezone_id="America/Bogota",
+    )
+    dark = context.new_page()
+    dark.goto("http://localhost:8000/")
+    dark.click("#tab-itineraries")
+    dark.locator("table.itinerary-table tr", has_text=TRAVELER).locator(".route-button").click()
+    dark.wait_for_selector(".route-bar:not([hidden])", timeout=20_000)
+    dark.wait_for_selector("#section-airports .main-svg", timeout=30_000)
+    dark.wait_for_timeout(1500)  # termina de dibujar el mapa
+    _shot(dark, "21-frontend-modo-oscuro.png", full_page=False)
+    context.close()
 
 
 def _session_trace_id() -> str:

@@ -146,3 +146,17 @@ rama nueva desde `main`, con sus pruebas, y está registrada como nota en el ADR
 | `fix/sonarcloud-fiabilidad` (#33) | SonarCloud marcaba la **fiabilidad en C** (9 problemas en Airport Service): la conexión con Redis no se cerraba si el `lifespan` terminaba con error, y los manejadores de errores eran `async` sin ningún `await`. Además, el log `ERROR` de un 500 salía **sin `correlation_id`** en Airport e Itinerary Service, aunque la respuesta sí lo llevaba | Cierre de Redis en un `finally`, manejadores como funciones normales y el `correlation_id` del 500 tomado de `request.state`. Fiabilidad de **C a A** (evidencia [19](evidencias/19-sonarcloud.png)). 8 pruebas nuevas en Airport y 4 en Itinerary |
 
 Además, el equipo agregó las evidencias 19 (SonarCloud) y 20 (GitHub Actions) con los PR #31, #34 y #35.
+
+## Mejora del frontend
+
+Rama `feat/mejora-frontend` (2026-11-23), en tres entregas. Sigue siendo HTML, CSS y JavaScript sin framework, sin
+build y sin CDN, y solo habla con el gateway (nota en ADR-033).
+
+| Entrega | Qué cambió |
+|---|---|
+| Diseño visual | Paleta de «carta aeronáutica» en variables CSS, tema claro y oscuro con botón en la cabecera, fuente D-DIN local (SIL OFL 1.1), tarjetas, botones con estados, pie de página con el curso y el equipo, diseño para 375, 768 y 1280 px |
+| Experiencia de uso | Barra de carga, avisos que se cierran solos, confirmación con `<dialog>`, validación antes de enviar (reglas de ADR-015), llegada estimada (salida + duración), buscador de aeropuertos, ruta de un itinerario resaltada en el mapa y estado vacío |
+| Cierre | Pestañas con flechas, Inicio y Fin, enlace «Saltar al contenido», contraste AA comprobado en los dos temas, 7 pruebas nuevas en `test_static.py` (gateway: 60) y evidencias 10 a 14 regeneradas, más la 21 en modo oscuro |
+
+Error real corregido en la segunda entrega: al editar un itinerario, el formulario mostraba la hora UTC que devuelve la
+API como si fuera local; al guardar sin tocar la fecha, el viaje se corría 5 horas (en Colombia). Venía de la Fase 8.

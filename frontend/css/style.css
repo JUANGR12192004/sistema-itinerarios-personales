@@ -1,131 +1,631 @@
-/* Sistema de Itinerarios Personales — hoja de estilos principal (Fase 8) */
+/* Sistema de Itinerarios Personales — hoja de estilos principal.
+ *
+ * Dirección visual: «carta aeronáutica». Los colores vienen de las cartas de navegación
+ * aérea (aeropuertos en azul y magenta sobre papel claro) y la letra es D-DIN, de la
+ * familia DIN 1451 que se usa en la señalización.
+ *
+ * Todos los colores son variables en :root. El tema oscuro redefine las mismas variables:
+ *   - sigue al sistema operativo (prefers-color-scheme) si el usuario no eligió tema;
+ *   - o usa la elección del botón de la cabecera (atributo data-theme en <html>).
+ */
 
-/* --- Reset básico --------------------------------------------------------- */
+/* --- Fuente local (D-DIN, SIL OFL 1.1; licencia en fonts/OFL-1.1.txt) ---------- */
+@font-face {
+  font-family: 'D-DIN';
+  src: url('../fonts/D-DIN.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'D-DIN';
+  src: url('../fonts/D-DIN-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* --- Tokens: tema claro (por defecto) --------------------------------------------- */
+:root {
+  color-scheme: light;
+
+  /* Papel, superficies y tinta */
+  --paper: #eef2ef;
+  --surface: #ffffff;
+  --surface-sunken: #f5f7f5;
+  --ink: #1c2a35;
+  --muted: #52626e;
+  --line: #d3dcd8;
+  --line-strong: #aebbb5;
+  --field-border: #7f8d87; /* bordes de campos y botones secundarios: ≥ 3:1 (WCAG 1.4.11) */
+
+  /* Colores de la carta */
+  --chart-blue: #1f5fa8;
+  --chart-blue-hover: #174a85;
+  --chart-magenta: #a3166e;
+  --olive: #5e6b1f;
+  --pending: #6e767c;
+  --danger: #b3261e;
+  --danger-hover: #8f1e18;
+  --success: #2f6b3c;
+  --overlay: rgba(17, 26, 33, 0.55);
+  --on-accent: #ffffff;
+
+  /* Avisos y errores */
+  --warn-bg: #fdf3d8;
+  --warn-line: #b98a12;
+  --error-bg: #fbe9e7;
+  --error-line: #b3261e;
+
+  /* Mapa */
+  --map-land: #e3e7dc;
+  --map-water: #cfe1ea;
+  --map-border: #8f9c95;
+  --map-coast: #7c8a84;
+
+  --focus: #1f5fa8;
+
+  /* Tipografía: escala modular 1,25 sobre 16 px */
+  --font: 'D-DIN', 'DIN Alternate', 'Bahnschrift', system-ui, sans-serif;
+  --text-sm: 0.875rem;
+  --text-base: 1.0625rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.5625rem;
+  --text-xl: 1.953rem;
+
+  /* Espaciado: múltiplos de 4 px */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Radios: más grande cuanto más grande es el contenedor */
+  --radius-card: 10px;
+  --radius-control: 6px;
+
+  --content-width: 1200px;
+}
+
+/* --- Tokens: tema oscuro («carta nocturna») --------------------------------------- */
+/* El mismo bloque aparece dos veces: una para el sistema operativo (si no hay elección
+   guardada) y otra para la elección explícita del botón. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --paper: #111a21;
+    --surface: #18242d;
+    --surface-sunken: #1e2c36;
+    --ink: #e3eaee;
+    --muted: #9fb1bd;
+    --line: #2d3d49;
+    --line-strong: #465966;
+    --field-border: #6c8190;
+    --chart-blue: #86b6f0;
+    --chart-blue-hover: #a9cbf5;
+    --chart-magenta: #f08ac6;
+    --olive: #bac86f;
+    --pending: #9aa3a9;
+    --danger: #f28b82;
+    --danger-hover: #f6aba4;
+    --success: #8fd19e;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --on-accent: #0e1a23;
+    --warn-bg: #3a3118;
+    --warn-line: #d9b44a;
+    --error-bg: #3d1f1d;
+    --error-line: #f28b82;
+    --map-land: #22313b;
+    --map-water: #0d161c;
+    --map-border: #5d707c;
+    --map-coast: #6c808c;
+    --focus: #86b6f0;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #111a21;
+  --surface: #18242d;
+  --surface-sunken: #1e2c36;
+  --ink: #e3eaee;
+  --muted: #9fb1bd;
+  --line: #2d3d49;
+  --line-strong: #465966;
+  --field-border: #6c8190;
+  --chart-blue: #86b6f0;
+  --chart-blue-hover: #a9cbf5;
+  --chart-magenta: #f08ac6;
+  --olive: #bac86f;
+  --pending: #9aa3a9;
+  --danger: #f28b82;
+  --danger-hover: #f6aba4;
+  --success: #8fd19e;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --on-accent: #0e1a23;
+  --warn-bg: #3a3118;
+  --warn-line: #d9b44a;
+  --error-bg: #3d1f1d;
+  --error-line: #f28b82;
+  --map-land: #22313b;
+  --map-water: #0d161c;
+  --map-border: #5d707c;
+  --map-coast: #6c808c;
+  --focus: #86b6f0;
+}
+
+/* --- Reset básico ------------------------------------------------------------------ */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-/* --- Tipografía y fondo --------------------------------------------------- */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 1rem;
+  font-family: var(--font);
+  font-size: var(--text-base);
   line-height: 1.5;
-  color: #1a1a2e;
-  background: #f5f7fa;
+  color: var(--ink);
+  background: var(--paper);
   min-height: 100vh;
-}
-
-/* --- Cabecera -------------------------------------------------------------- */
-.site-header {
-  background: #16213e;
-  color: #fff;
-  padding: 0.75rem 1.5rem;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.header-content {
-  max-width: 1100px;
-  margin: 0 auto;
   display: flex;
-  align-items: center;
-  gap: 2rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  font-variant-numeric: tabular-nums;
 }
 
-.site-header h1 {
-  font-size: 1.25rem;
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* El atributo hidden siempre oculta, aunque una clase (.btn) defina otro display */
+[hidden] {
+  display: none !important;
+}
+
+/* Foco visible solo con teclado, del mismo color en todos los controles */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* <main> recibe el foco con «Saltar al contenido», pero no es un control: sin contorno */
+main:focus {
+  outline: none;
+}
+
+/* El texto de ejemplo de los campos usa el gris de la paleta (contraste AA en los dos temas) */
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* Enlace «Saltar al contenido»: fuera de la vista hasta que recibe el foco con Tab */
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 30;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px solid var(--focus);
+  border-radius: var(--radius-control);
   font-weight: 700;
-  letter-spacing: 0.01em;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
   white-space: nowrap;
 }
 
-/* --- Navegación por pestañas ---------------------------------------------- */
-.tab-nav {
+/* --- Cabecera ---------------------------------------------------------------------- */
+.site-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-content {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-4);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'brand theme'
+    'tabs  tabs';
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.brand {
+  grid-area: brand;
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Marca: el símbolo de aeropuerto con torre de las cartas (círculo con un punto) */
+.brand-mark {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  color: var(--chart-blue);
+}
+
+.site-header h1 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.005em;
+}
+
+.tab-nav {
+  grid-area: tabs;
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  justify-self: start;
 }
 
 .tab {
   background: transparent;
-  border: 2px solid transparent;
-  color: #ccd6f6;
-  padding: 0.4rem 1rem;
+  border: none;
   border-radius: 4px;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-4);
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.2;
+  transition: background-color 0.15s, color 0.15s;
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--ink);
 }
 
 .tab.active {
-  background: #0f3460;
-  border-color: #e94560;
-  color: #fff;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-strong);
 }
 
-/* --- Contenido principal -------------------------------------------------- */
+.theme-toggle {
+  grid-area: theme;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-sunken);
+  border-color: var(--muted);
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+@media (min-width: 768px) {
+  .header-content {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: 'brand tabs theme';
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-5);
+  }
+
+  .tab-nav {
+    justify-self: center;
+  }
+
+  .site-header h1 {
+    font-size: var(--text-lg);
+  }
+}
+
+/* --- Contenido principal ----------------------------------------------------------- */
 main {
-  max-width: 1100px;
-  margin: 2rem auto;
-  padding: 0 1.5rem;
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-7);
 }
 
-.section {
-  animation: fade-in 0.2s ease;
+@media (min-width: 768px) {
+  main {
+    padding: var(--space-6) var(--space-5) var(--space-7);
+  }
 }
 
 .section.hidden {
   display: none;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* --- Sección Aeropuertos --------------------------------------------------- */
-.airports-header {
+/* Encabezado de cada sección: título a la izquierda, dato de apoyo a la derecha */
+.section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
-.airports-count {
-  color: #666;
-  font-size: 0.9rem;
+.section-head h2 {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.section-meta {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* --- Tarjetas ---------------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.card-body {
+  padding: var(--space-5);
+}
+
+@media (max-width: 767px) {
+  .card-body {
+    padding: var(--space-4);
+  }
+}
+
+.card-title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: var(--space-4);
+}
+
+/* --- Sección Aeropuertos ----------------------------------------------------------- */
+/* Mapa a la izquierda y lista con buscador a la derecha (apilados en pantallas angostas) */
+.airports-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+.airports-layout > * {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .airports-layout {
+    grid-template-columns: 1fr 340px;
+    gap: var(--space-5);
+  }
+
+  /* La lista toma la altura del mapa (height: 0 + min-height: 100% dentro de un grid)
+     y se desplaza por dentro, en vez de alargar la página */
+  .airport-panel {
+    height: 0;
+    min-height: 100%;
+  }
+}
+
+.map-card {
+  overflow: hidden;
 }
 
 /* Contenedor del mapa de Plotly: necesita altura explícita */
 .airports-map {
   width: 100%;
-  height: 520px;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #f0f4f8;
+  height: 380px;
+  background: var(--map-water);
 }
 
-/* --- Estado de carga ------------------------------------------------------- */
+@media (min-width: 768px) {
+  .airports-map { height: 500px; }
+}
+
+@media (min-width: 1280px) {
+  .airports-map { height: 560px; }
+}
+
+.map-note {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* Ruta de un itinerario sobre el mapa */
+.route-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  border-left: 4px solid var(--chart-magenta);
+}
+
+.route-bar-info {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.route-bar-label {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+/* Panel con buscador y lista */
+.airport-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.airport-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.airport-search label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.airport-search input {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--text-base);
+  width: 100%;
+}
+
+.airport-search input:focus-visible {
+  outline-offset: 0;
+  border-color: var(--focus);
+}
+
+.airport-results {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.airport-list {
+  list-style: none;
+  overflow-y: auto;
+  max-height: 340px;
+  flex: 1;
+}
+
+@media (min-width: 1024px) {
+  .airport-list {
+    max-height: none;
+    min-height: 0;
+  }
+}
+
+.airport-item {
+  display: grid;
+  grid-template-columns: 10px 3rem 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-left: 4px solid transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.airport-item:hover {
+  background: var(--surface-sunken);
+}
+
+.airport-item:focus-visible {
+  outline-offset: -3px;
+}
+
+.airport-item[aria-pressed='true'] {
+  background: var(--surface-sunken);
+  border-left-color: var(--ink);
+}
+
+.type-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pending);
+}
+
+.type-internacional { background: var(--chart-blue); }
+.type-nacional { background: var(--chart-magenta); }
+.type-militar { background: var(--olive); }
+
+.airport-code {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.airport-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.airport-name {
+  line-height: 1.25;
+}
+
+.airport-place {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.airport-empty {
+  padding: var(--space-5) var(--space-4);
+  color: var(--muted);
+}
+
+/* --- Estado de carga --------------------------------------------------------------- */
 .loading {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  color: #555;
-  padding: 1rem 0;
+  gap: var(--space-3);
+  color: var(--muted);
+  padding: var(--space-5) 0;
 }
 
 .spinner {
   width: 20px;
   height: 20px;
-  border: 3px solid #ccd6f6;
-  border-top-color: #0f3460;
+  border: 3px solid var(--line);
+  border-top-color: var(--chart-blue);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
@@ -135,257 +635,800 @@ main {
   to { transform: rotate(360deg); }
 }
 
-/* --- Banners de error ------------------------------------------------------ */
+/* --- Banners de error -------------------------------------------------------------- */
 .error-banner {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-left: 4px solid #ffc107;
-  border-radius: 4px;
-  padding: 0.75rem 1rem;
-  margin: 1rem 0;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-left-width: 4px;
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-4) 0;
 }
 
 .error-banner.error {
-  background: #fdecea;
-  border-color: #e53935;
-  border-left-color: #e53935;
+  background: var(--error-bg);
+  border-color: var(--error-line);
 }
 
 .error-message strong {
   display: block;
-  margin-bottom: 0.25rem;
+  font-weight: 700;
 }
 
 .error-message p {
-  font-size: 0.9rem;
-  color: #444;
-  margin-top: 0.25rem;
+  font-size: var(--text-sm);
+  margin-top: var(--space-1);
 }
 
 .error-correlation {
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
-  color: #666;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .error-correlation code {
-  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 0.85em;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
   padding: 0.1em 0.4em;
-  border-radius: 3px;
-  font-family: monospace;
-  font-size: 0.9em;
+  border-radius: 4px;
   word-break: break-all;
 }
 
-/* --- Botones --------------------------------------------------------------- */
-.btn-copy {
-  background: transparent;
-  border: 1px solid #aaa;
-  border-radius: 3px;
-  padding: 0.1rem 0.5rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-copy:hover {
-  background: rgba(0, 0, 0, 0.07);
-}
-
+/* --- Botones ----------------------------------------------------------------------- */
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 1rem;
-  border: none;
-  border-radius: 4px;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: opacity 0.15s, background 0.15s;
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.2;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .btn:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .btn-primary {
-  background: #0f3460;
-  color: #fff;
+  background: var(--chart-blue);
+  color: var(--on-accent);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #16213e;
+  background: var(--chart-blue-hover);
 }
 
 .btn-secondary {
-  background: #e0e0e0;
-  color: #333;
+  background: var(--surface);
+  border-color: var(--field-border);
+  color: var(--ink);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #cfcfcf;
+  background: var(--surface-sunken);
+  border-color: var(--muted);
 }
 
 .btn-danger {
-  background: #e53935;
-  color: #fff;
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #c62828;
+  background: var(--danger);
+  color: var(--on-accent);
 }
 
 .btn-sm {
-  padding: 0.25rem 0.65rem;
-  font-size: 0.85rem;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
 }
 
-/* --- Sección Itinerarios --------------------------------------------------- */
-.section-title {
-  font-size: 1.1rem;
+.btn-copy {
+  background: var(--surface);
+  border: 1px solid var(--field-border);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 0.15rem 0.6rem;
+  font-size: var(--text-sm);
   font-weight: 700;
-  color: #16213e;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid #0f3460;
+  cursor: pointer;
 }
 
-.itinerary-wrapper {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 1.25rem;
-  margin-bottom: 2rem;
+.btn-copy:hover {
+  background: var(--surface-sunken);
 }
 
+/* --- Sección Itinerarios: dos columnas en escritorio ------------------------------- */
+.itinerary-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* Sin esto, un elemento de grid no se encoge por debajo del ancho de su tabla
+   y la página se desborda horizontalmente */
+.itinerary-layout > * {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .itinerary-layout {
+    grid-template-columns: minmax(320px, 360px) 1fr;
+    gap: var(--space-6);
+  }
+
+  /* El formulario queda a la vista mientras se recorre una lista larga */
+  .itinerary-wrapper {
+    position: sticky;
+    top: var(--space-4);
+  }
+}
+
+/* --- Formulario -------------------------------------------------------------------- */
 .itinerary-form {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem 1.5rem;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
 }
 
-@media (max-width: 600px) {
-  .itinerary-form { grid-template-columns: 1fr; }
+@media (min-width: 640px) and (max-width: 1023px) {
+  .itinerary-form {
+    grid-template-columns: 1fr 1fr;
+    column-gap: var(--space-5);
+  }
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .form-group label {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #333;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.required-mark {
+  color: var(--chart-magenta);
 }
 
 .form-group input,
 .form-group select {
-  padding: 0.45rem 0.6rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.95rem;
-  color: #1a1a2e;
-  background: #fff;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
   width: 100%;
+  font-size: var(--text-base);
 }
 
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: #0f3460;
-  box-shadow: 0 0 0 2px rgba(15, 52, 96, 0.15);
+.form-group input:hover,
+.form-group select:hover {
+  border-color: var(--muted);
 }
 
-/* Los botones abarcan ambas columnas del grid */
+.form-group input:focus-visible,
+.form-group select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+  border-color: var(--focus);
+}
+
+/* Vista previa de la ruta y los botones abarcan todo el ancho del formulario */
+.route-preview,
 .form-actions {
   grid-column: 1 / -1;
+}
+
+.form-actions {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.form-actions .btn-primary {
+  flex: 1 1 auto;
+}
+
+.form-error-zone:empty {
+  display: none;
+}
+
+/* --- Ruta: el elemento propio de la interfaz --------------------------------------- */
+/* Dos códigos grandes unidos por la línea de vuelo, como en una tarjeta de embarque. */
+.route {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  margin-top: 0.25rem;
+  gap: var(--space-2);
 }
 
-.form-error-zone {
-  margin-bottom: 0.75rem;
-}
-
-/* --- Tabla de itinerarios -------------------------------------------------- */
-.itinerary-list {
-  margin-top: 1rem;
-}
-
-.list-header {
+.route-end {
   display: flex;
-  align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.itinerary-count {
-  color: #666;
-  font-size: 0.9rem;
+.route-end:last-child {
+  text-align: right;
+}
+
+.route-code {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.route-city {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-line {
+  position: relative;
+  height: 20px;
+  min-width: 32px;
+  color: var(--chart-magenta);
+}
+
+.route-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px dashed currentColor;
+}
+
+.route-line svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  padding: 0 2px;
+  box-sizing: content-box;
+}
+
+/* Duración bajo el avión, a la altura de los nombres de ciudad */
+.route-duration {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 10px);
+  transform: translateX(-50%);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--chart-magenta);
+  white-space: nowrap;
+}
+
+.route.is-empty .route-code {
+  color: var(--muted);
+}
+
+.route.is-empty .route-line {
+  color: var(--line-strong);
+}
+
+/* Vista previa en el formulario: ruta + horas de salida y llegada */
+.route-preview {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: var(--space-4);
+}
+
+.route-preview .route-code {
+  font-size: var(--text-xl);
+}
+
+.route-preview .route-line svg {
+  background: var(--surface-sunken);
+}
+
+.route-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.route-times dt {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.route-times dd {
+  font-weight: 700;
+}
+
+.route-times div:last-child {
+  text-align: right;
+}
+
+/* --- Lista de itinerarios ---------------------------------------------------------- */
+.table-card {
+  overflow-x: auto;
+}
+
+.schedule-departure {
+  display: block;
+  white-space: nowrap;
+}
+
+.cell-schedule .secondary {
+  white-space: nowrap;
 }
 
 .itinerary-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  overflow: hidden;
 }
 
 .itinerary-table th {
-  background: #16213e;
-  color: #fff;
-  padding: 0.6rem 0.75rem;
   text-align: left;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--muted);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
+  background: var(--surface-sunken);
 }
 
 .itinerary-table td {
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid #eee;
-  vertical-align: top;
+  padding: var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
 }
 
-.itinerary-table tr:last-child td {
+.itinerary-table th:first-child,
+.itinerary-table td:first-child {
+  padding-left: var(--space-4);
+}
+
+.itinerary-table th:last-child,
+.itinerary-table td:last-child {
+  padding-right: var(--space-4);
+}
+
+.itinerary-table tbody tr:last-child td {
   border-bottom: none;
 }
 
-.itinerary-table tr:hover td {
-  background: #f5f7fa;
+.itinerary-table tbody tr:hover td {
+  background: var(--surface-sunken);
+}
+
+.itinerary-table tbody tr:hover .route-line svg {
+  background: var(--surface-sunken);
+}
+
+.itinerary-table .route {
+  width: 12rem;
+}
+
+.cell-traveler {
+  min-width: 9.5rem;
+}
+
+.traveler-name {
+  font-weight: 700;
 }
 
 /* Texto secundario dentro de una celda (p. ej. el correo bajo el nombre) */
 .secondary {
   display: block;
-  font-size: 0.8rem;
-  color: #888;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  overflow-wrap: break-word;
 }
 
-.action-btns {
-  display: flex;
-  gap: 0.4rem;
+.cell-nowrap {
   white-space: nowrap;
 }
 
+/* En la tabla de escritorio los botones se apilan: la columna queda angosta */
+.action-btns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .empty-state {
-  color: #888;
-  font-style: italic;
-  padding: 2rem;
+  color: var(--muted);
+  padding: var(--space-6) var(--space-5);
   text-align: center;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+}
+
+/* Tabla → tarjetas apiladas en pantallas angostas (sigue siendo una <table>) */
+@media (max-width: 767px) {
+  .itinerary-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .itinerary-table,
+  .itinerary-table tbody,
+  .itinerary-table tr,
+  .itinerary-table td {
+    display: block;
+  }
+
+  .itinerary-table tbody tr {
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .itinerary-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .itinerary-table td,
+  .itinerary-table td:first-child,
+  .itinerary-table td:last-child {
+    padding: var(--space-1) 0;
+    border: none;
+  }
+
+  .itinerary-table tbody tr:hover td,
+  .itinerary-table tbody tr:hover .route-line svg {
+    background: transparent;
+  }
+
+  /* Fecha, llegada y duración en una línea con su etiqueta */
+  .itinerary-table td[data-label] {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .itinerary-table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+
+  .itinerary-table .cell-schedule > div {
+    text-align: right;
+  }
+
+  .itinerary-table .cell-route {
+    padding: var(--space-3) 0;
+  }
+
+  .itinerary-table .route {
+    width: auto;
+  }
+
+  .cell-traveler {
+    min-width: 0;
+  }
+
+  .action-btns {
+    flex-direction: row;
+    padding-top: var(--space-2);
+  }
+
+  .action-btns .btn {
+    flex: 1;
+  }
+}
+
+/* --- Pie de página ----------------------------------------------------------------- */
+.site-footer {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.footer-content {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.footer-course {
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+
+.footer-facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.footer-facts dt {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+@media (min-width: 768px) {
+  .footer-content {
+    grid-template-columns: 1fr 2fr;
+    padding: var(--space-5);
+    align-items: start;
+  }
+
+  .footer-facts {
+    grid-template-columns: auto 1fr;
+    column-gap: var(--space-4);
+  }
+}
+
+/* --- Barra de carga (peticiones en curso) ------------------------------------------ */
+.site-header {
+  position: relative;
+}
+
+.progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: var(--chart-magenta);
+  animation: progress 1.1s ease-in-out infinite;
+}
+
+@keyframes progress {
+  from { left: -35%; }
+  to { left: 100%; }
+}
+
+/* Spinner pequeño dentro de un botón */
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+  border-color: currentColor;
+  border-top-color: transparent;
+}
+
+/* --- Mensajes de los campos -------------------------------------------------------- */
+.field-error,
+.field-hint {
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.field-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.field-hint {
+  color: var(--muted);
+  border-left: 3px solid var(--warn-line);
+  padding-left: var(--space-2);
+}
+
+.form-group [aria-invalid='true'] {
+  border-color: var(--danger);
+  border-width: 2px;
+}
+
+/* --- Botones de la tabla: ruta y eliminar ------------------------------------------ */
+/* La ruta es un botón que lleva al mapa */
+.route-button {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
+  margin: calc(-1 * var(--space-2));
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.route-button:hover {
+  border-color: var(--chart-magenta);
+}
+
+.route-button:hover .route-code {
+  color: var(--chart-magenta);
+}
+
+.list-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  margin: calc(-1 * var(--space-3)) 0 var(--space-3);
+}
+
+.btn-danger-solid {
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background: var(--danger-hover);
+}
+
+/* --- Estado vacío ------------------------------------------------------------------ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 28rem;
+  margin: 0 auto;
+}
+
+.empty-state .route {
+  width: 12rem;
+  margin-bottom: var(--space-2);
+}
+
+.empty-title {
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+/* --- Avisos (toasts) --------------------------------------------------------------- */
+.toast-stack {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+@media (min-width: 768px) {
+  .toast-stack {
+    left: auto;
+    width: 24rem;
+  }
+}
+
+.toast-region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-left: 5px solid var(--success);
+  border-radius: var(--radius-control);
+  box-shadow: 0 8px 24px var(--overlay);
+  pointer-events: auto;
+  animation: toast-in 0.2s ease-out;
+}
+
+.toast-error {
+  border-left-color: var(--danger);
+}
+
+.toast-message {
+  flex: 1;
+  font-weight: 700;
+  padding-top: 2px;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Diálogo de confirmación ------------------------------------------------------- */
+.confirm-dialog {
+  margin: auto;
+  width: min(28rem, calc(100% - 2 * var(--space-4)));
+  padding: var(--space-5);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-top: 5px solid var(--danger);
+  border-radius: var(--radius-card);
+}
+
+.confirm-dialog::backdrop {
+  background: var(--overlay);
+}
+
+.confirm-dialog h2 {
+  font-size: var(--text-md);
+  margin-bottom: var(--space-2);
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+/* --- Movimiento reducido ----------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Sin animación, la barra de carga queda fija y completa mientras hay peticiones */
+  .progress-bar::after {
+    animation: none !important;
+    left: 0;
+    width: 100%;
+  }
 }
