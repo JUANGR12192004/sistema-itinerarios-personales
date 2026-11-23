@@ -6,6 +6,8 @@
 
 import { apiFetch, renderError } from './api.js';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 export async function loadItineraries(container) {
   _showLoading(container);
 
@@ -39,10 +41,10 @@ function _showLoading(container) {
   container.appendChild(loading);
 }
 
-function _airportTableLabel(id, airportMap) {
-  const a = airportMap.get(id);
-  if (!a) return String(id);
-  return a.iata_code ? `${a.iata_code} — ${a.city}` : `${a.name} — ${a.city}`;
+// Código corto del aeropuerto: IATA si existe, si no OACI (algunos no tienen IATA)
+function _airportCode(airport) {
+  if (!airport) return '—';
+  return airport.iata_code ?? airport.oaci_code ?? '—';
 }
 
 function _airportOptionText(airport) {
@@ -50,11 +52,29 @@ function _airportOptionText(airport) {
   return `${airport.name}${iata} — ${airport.city}`;
 }
 
-function _formatDate(isoString) {
-  return new Date(isoString).toLocaleString('es', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-  });
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function _time(date) {
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+// "18 dic 2026, 08:00" (hora local del navegador)
+function _formatDate(date) {
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}, ${_time(date)}`;
+}
+
+// Llegada abreviada: solo la hora si es el mismo día de la salida; si no, el día y la hora
+function _formatArrival(departure, arrival) {
+  if (arrival.toDateString() === departure.toDateString()) return _time(arrival);
+  const year = arrival.getFullYear() !== departure.getFullYear() ? ` ${arrival.getFullYear()}` : '';
+  return `${arrival.getDate()} ${MONTHS[arrival.getMonth()]}${year}, ${_time(arrival)}`;
+}
+
+// Llegada estimada = salida + duración (el itinerario no guarda la hora de llegada)
+function _arrivalDate(departure, durationMinutes) {
+  return new Date(departure.getTime() + durationMinutes * 60_000);
 }
 
 // "2026-12-15T08:00" (datetime-local) → "2026-12-15T08:00:00-05:00" (ADR-017)
@@ -72,6 +92,68 @@ function _isoToLocal(isoString) {
   return isoString.substring(0, 16);
 }
 
+// ── Ruta: dos códigos unidos por la línea de vuelo ───────────────────────────
+
+function _planeIcon() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('fill', 'currentColor');
+  path.setAttribute(
+    'd',
+    'M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z',
+  );
+  // El avión del ícono apunta hacia arriba: se gira para que vaya de salida a llegada
+  path.setAttribute('transform', 'rotate(90 12 12)');
+  svg.appendChild(path);
+  return svg;
+}
+
+function _routeEnd(airport) {
+  const end = document.createElement('div');
+  end.className = 'route-end';
+  const code = document.createElement('span');
+  code.className = 'route-code';
+  code.textContent = _airportCode(airport);
+  const city = document.createElement('span');
+  city.className = 'route-city';
+  city.textContent = airport ? airport.city : 'Sin elegir';
+  end.append(code, city);
+  return end;
+}
+
+/**
+ * Construye el bloque de ruta; con aeropuertos nulos queda en estado vacío.
+ * La duración (si se conoce) va bajo la línea de vuelo, como en una tarjeta de embarque.
+ */
+function _buildRoute(departure, arrival, durationMinutes = null) {
+  const route = document.createElement('div');
+  route.className = 'route';
+  route.classList.toggle('is-empty', !departure || !arrival);
+
+  const lineEl = document.createElement('div');
+  lineEl.className = 'route-line';
+  lineEl.appendChild(_planeIcon());
+  if (durationMinutes > 0) {
+    const duration = document.createElement('span');
+    duration.className = 'route-duration';
+    duration.textContent = `${durationMinutes} min`;
+    lineEl.appendChild(duration);
+  }
+
+  route.append(_routeEnd(departure), lineEl, _routeEnd(arrival));
+
+  // Texto completo para lectores de pantalla (los códigos solos no se entienden)
+  if (departure && arrival) {
+    const duration = durationMinutes > 0 ? `, ${durationMinutes} minutos` : '';
+    route.setAttribute('role', 'img');
+    route.setAttribute('aria-label', `De ${departure.name} a ${arrival.name}${duration}`);
+  }
+  return route;
+}
+
 // ── Construcción del formulario ──────────────────────────────────────────────
 
 function _makeGroup(name, labelText, required) {
@@ -79,7 +161,14 @@ function _makeGroup(name, labelText, required) {
   group.className = 'form-group';
   const label = document.createElement('label');
   label.htmlFor = name;
-  label.textContent = labelText + (required ? ' *' : '');
+  label.textContent = labelText;
+  if (required) {
+    const mark = document.createElement('span');
+    mark.className = 'required-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = ' *';
+    label.appendChild(mark);
+  }
   group.appendChild(label);
   return group;
 }
@@ -112,53 +201,107 @@ function _addAirportOptions(select, airports, selectedId = null) {
   }
 }
 
+function _airportSelect(name, labelText, airports) {
+  const group = _makeGroup(name, labelText, true);
+  const select = document.createElement('select');
+  select.name = name;
+  select.id = name;
+  select.required = true;
+  _addAirportOptions(select, airports);
+  group.appendChild(select);
+  return group;
+}
+
+// ── Vista previa de la ruta en el formulario ─────────────────────────────────
+
+function _buildPreview() {
+  const preview = document.createElement('div');
+  preview.className = 'route-preview';
+  preview.setAttribute('aria-live', 'polite');
+
+  const routeSlot = document.createElement('div');
+
+  const times = document.createElement('dl');
+  times.className = 'route-times';
+  const makeTime = (label) => {
+    const wrap = document.createElement('div');
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = '—';
+    wrap.append(dt, dd);
+    times.appendChild(wrap);
+    return dd;
+  };
+  const departureEl = makeTime('Salida');
+  const arrivalEl = makeTime('Llegada estimada');
+
+  preview.append(routeSlot, times);
+  return { preview, routeSlot, departureEl, arrivalEl };
+}
+
+function _updatePreview(parts, form, airportMap) {
+  const dep = airportMap.get(Number(form.elements.departure_airport_id.value));
+  const arr = airportMap.get(Number(form.elements.arrival_airport_id.value));
+  const dateValue = form.elements.travel_date.value;
+  const duration = Number(form.elements.duration_minutes.value);
+  parts.routeSlot.replaceChildren(_buildRoute(dep, arr, duration));
+
+  const departure = dateValue ? new Date(dateValue) : null;
+  const validDeparture = departure && !Number.isNaN(departure.getTime());
+
+  parts.departureEl.textContent = validDeparture ? _formatDate(departure) : '—';
+  parts.arrivalEl.textContent =
+    validDeparture && duration > 0 ? _formatDate(_arrivalDate(departure, duration)) : '—';
+}
+
 // ── Render principal ─────────────────────────────────────────────────────────
 
 function _render(container, airports, airportMap, itineraries) {
   container.replaceChildren();
 
+  const layout = document.createElement('div');
+  layout.className = 'itinerary-layout';
+
   // ── Formulario ──────────────────────────────────────────────────────────────
   const wrapper = document.createElement('div');
-  wrapper.className = 'itinerary-wrapper';
+  wrapper.className = 'card itinerary-wrapper';
+  const wrapperBody = document.createElement('div');
+  wrapperBody.className = 'card-body';
+  wrapper.appendChild(wrapperBody);
 
   const title = document.createElement('h2');
-  title.className = 'section-title';
+  title.className = 'card-title';
   title.textContent = 'Nuevo itinerario';
-  wrapper.appendChild(title);
+  wrapperBody.appendChild(title);
 
   const errorZone = document.createElement('div');
   errorZone.className = 'form-error-zone';
-  wrapper.appendChild(errorZone);
+  wrapperBody.appendChild(errorZone);
 
   const form = document.createElement('form');
   form.className = 'itinerary-form';
 
-  // Fila 1: nombre y correo
-  form.appendChild(_makeField('traveler_name', 'Nombre del viajero', 'text', true));
-  form.appendChild(_makeField('traveler_email', 'Correo electrónico (opcional)', 'email', false));
+  const previewParts = _buildPreview();
+  form.appendChild(previewParts.preview);
 
-  // Fila 2: aeropuertos (select creado a mano para poder llenarlo)
-  const depGroup = _makeGroup('departure_airport_id', 'Aeropuerto de salida', true);
-  const depSelect = document.createElement('select');
-  depSelect.name = 'departure_airport_id';
-  depSelect.id = 'departure_airport_id';
-  depSelect.required = true;
-  _addAirportOptions(depSelect, airports);
-  depGroup.appendChild(depSelect);
-  form.appendChild(depGroup);
-
-  const arrGroup = _makeGroup('arrival_airport_id', 'Aeropuerto de llegada', true);
-  const arrSelect = document.createElement('select');
-  arrSelect.name = 'arrival_airport_id';
-  arrSelect.id = 'arrival_airport_id';
-  arrSelect.required = true;
-  _addAirportOptions(arrSelect, airports);
-  arrGroup.appendChild(arrSelect);
-  form.appendChild(arrGroup);
-
-  // Fila 3: fecha y duración
+  form.appendChild(_makeField('traveler_name', 'Nombre del viajero', 'text', true, {
+    autocomplete: 'name',
+  }));
+  form.appendChild(_makeField('traveler_email', 'Correo electrónico (opcional)', 'email', false, {
+    autocomplete: 'email',
+  }));
+  form.appendChild(_airportSelect('departure_airport_id', 'Aeropuerto de salida', airports));
+  form.appendChild(_airportSelect('arrival_airport_id', 'Aeropuerto de llegada', airports));
   form.appendChild(_makeField('travel_date', 'Fecha y hora de salida', 'datetime-local', true));
-  form.appendChild(_makeField('duration_minutes', 'Duración (minutos)', 'number', true, { min: 1, step: 1 }));
+  form.appendChild(_makeField('duration_minutes', 'Duración (minutos)', 'number', true, {
+    min: 1, step: 1, inputMode: 'numeric',
+  }));
+
+  const refreshPreview = () => _updatePreview(previewParts, form, airportMap);
+  form.addEventListener('input', refreshPreview);
+  form.addEventListener('change', refreshPreview);
+  refreshPreview();
 
   // Botones
   const actions = document.createElement('div');
@@ -172,16 +315,17 @@ function _render(container, airports, airportMap, itineraries) {
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn btn-secondary';
-  cancelBtn.textContent = 'Cancelar';
-  cancelBtn.style.display = 'none';
+  cancelBtn.textContent = 'Cancelar edición';
+  cancelBtn.hidden = true;
 
   cancelBtn.addEventListener('click', () => {
     form.reset();
     delete form.dataset.editId;
     title.textContent = 'Nuevo itinerario';
     submitBtn.textContent = 'Guardar itinerario';
-    cancelBtn.style.display = 'none';
+    cancelBtn.hidden = true;
     errorZone.replaceChildren();
+    refreshPreview();
   });
 
   actions.append(submitBtn, cancelBtn);
@@ -220,32 +364,34 @@ function _render(container, airports, airportMap, itineraries) {
     }
   });
 
-  wrapper.appendChild(form);
-  container.appendChild(wrapper);
+  wrapperBody.appendChild(form);
+  layout.appendChild(wrapper);
 
   // ── Lista ────────────────────────────────────────────────────────────────────
   const listSection = document.createElement('div');
   listSection.className = 'itinerary-list';
 
   const listHeader = document.createElement('div');
-  listHeader.className = 'list-header';
+  listHeader.className = 'section-head list-header';
   const listTitle = document.createElement('h2');
-  listTitle.className = 'section-title';
   listTitle.textContent = 'Itinerarios';
   const countEl = document.createElement('span');
-  countEl.className = 'itinerary-count';
+  countEl.className = 'section-meta itinerary-count';
   countEl.textContent =
     `${itineraries.length} registrado${itineraries.length !== 1 ? 's' : ''}`;
   listHeader.append(listTitle, countEl);
   listSection.appendChild(listHeader);
 
+  const listCard = document.createElement('div');
+  listCard.className = 'card table-card';
+
   if (itineraries.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';
-    empty.textContent = 'No hay itinerarios. Crea uno con el formulario de arriba.';
-    listSection.appendChild(empty);
+    empty.textContent = 'No hay itinerarios. Crea uno con el formulario.';
+    listCard.appendChild(empty);
   } else {
-    listSection.appendChild(
+    listCard.appendChild(
       _buildTable(itineraries, airportMap, {
         onEdit(itin) {
           // Rellenar el formulario con los datos del itinerario seleccionado
@@ -258,9 +404,10 @@ function _render(container, airports, airportMap, itineraries) {
           form.dataset.editId = itin.id;
           title.textContent = 'Editar itinerario';
           submitBtn.textContent = 'Actualizar itinerario';
-          cancelBtn.style.display = '';
+          cancelBtn.hidden = false;
           errorZone.replaceChildren();
-          wrapper.scrollIntoView({ behavior: 'smooth' });
+          refreshPreview();
+          wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
         },
         async onDelete(itin) {
           if (!confirm(`¿Eliminar el itinerario de ${itin.traveler_name}?`)) return;
@@ -269,17 +416,26 @@ function _render(container, airports, airportMap, itineraries) {
             await loadItineraries(container);
           } catch (error) {
             renderError(errorZone, error);
-            wrapper.scrollIntoView({ behavior: 'smooth' });
+            wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         },
       }),
     );
   }
 
-  container.appendChild(listSection);
+  listSection.appendChild(listCard);
+  layout.appendChild(listSection);
+  container.appendChild(layout);
 }
 
 // ── Tabla ────────────────────────────────────────────────────────────────────
+
+function _cell(label, className) {
+  const td = document.createElement('td');
+  if (label) td.setAttribute('data-label', label);
+  if (className) td.className = className;
+  return td;
+}
 
 function _buildTable(itineraries, airportMap, { onEdit, onDelete }) {
   const table = document.createElement('table');
@@ -287,8 +443,9 @@ function _buildTable(itineraries, airportMap, { onEdit, onDelete }) {
 
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  for (const col of ['Viajero', 'Salida', 'Llegada', 'Fecha', 'Duración', 'Acciones']) {
+  for (const col of ['Viajero', 'Ruta y duración', 'Horario', 'Acciones']) {
     const th = document.createElement('th');
+    th.scope = 'col';
     th.textContent = col;
     headerRow.appendChild(th);
   }
@@ -299,8 +456,11 @@ function _buildTable(itineraries, airportMap, { onEdit, onDelete }) {
   for (const itin of itineraries) {
     const tr = document.createElement('tr');
 
-    const tdViajero = document.createElement('td');
-    tdViajero.textContent = itin.traveler_name;
+    const tdViajero = _cell(null, 'cell-traveler');
+    const name = document.createElement('span');
+    name.className = 'traveler-name';
+    name.textContent = itin.traveler_name;
+    tdViajero.appendChild(name);
     if (itin.traveler_email) {
       const email = document.createElement('span');
       email.className = 'secondary';
@@ -308,19 +468,28 @@ function _buildTable(itineraries, airportMap, { onEdit, onDelete }) {
       tdViajero.appendChild(email);
     }
 
-    const tdSalida = document.createElement('td');
-    tdSalida.textContent = _airportTableLabel(itin.departure_airport_id, airportMap);
+    const tdRuta = _cell(null, 'cell-route');
+    tdRuta.appendChild(_buildRoute(
+      airportMap.get(itin.departure_airport_id),
+      airportMap.get(itin.arrival_airport_id),
+      itin.duration_minutes,
+    ));
 
-    const tdLlegada = document.createElement('td');
-    tdLlegada.textContent = _airportTableLabel(itin.arrival_airport_id, airportMap);
+    // Horario: salida y, debajo, la llegada estimada (salida + duración)
+    const departure = new Date(itin.travel_date);
+    const arrival = _arrivalDate(departure, itin.duration_minutes);
+    const tdHorario = _cell('Horario', 'cell-schedule');
+    const schedule = document.createElement('div');
+    const departureEl = document.createElement('span');
+    departureEl.className = 'schedule-departure';
+    departureEl.textContent = _formatDate(departure);
+    const arrivalEl = document.createElement('span');
+    arrivalEl.className = 'secondary';
+    arrivalEl.textContent = `Llega ${_formatArrival(departure, arrival)}`;
+    schedule.append(departureEl, arrivalEl);
+    tdHorario.appendChild(schedule);
 
-    const tdFecha = document.createElement('td');
-    tdFecha.textContent = _formatDate(itin.travel_date);
-
-    const tdDuracion = document.createElement('td');
-    tdDuracion.textContent = `${itin.duration_minutes} min`;
-
-    const tdAcciones = document.createElement('td');
+    const tdAcciones = _cell(null, 'cell-actions');
     const btnGroup = document.createElement('div');
     btnGroup.className = 'action-btns';
 
@@ -328,18 +497,20 @@ function _buildTable(itineraries, airportMap, { onEdit, onDelete }) {
     editBtn.type = 'button';
     editBtn.className = 'btn btn-secondary btn-sm';
     editBtn.textContent = 'Editar';
+    editBtn.setAttribute('aria-label', `Editar el itinerario de ${itin.traveler_name}`);
     editBtn.addEventListener('click', () => onEdit(itin));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn btn-danger btn-sm';
     deleteBtn.textContent = 'Eliminar';
+    deleteBtn.setAttribute('aria-label', `Eliminar el itinerario de ${itin.traveler_name}`);
     deleteBtn.addEventListener('click', () => onDelete(itin));
 
     btnGroup.append(editBtn, deleteBtn);
     tdAcciones.appendChild(btnGroup);
 
-    tr.append(tdViajero, tdSalida, tdLlegada, tdFecha, tdDuracion, tdAcciones);
+    tr.append(tdViajero, tdRuta, tdHorario, tdAcciones);
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);

@@ -4,24 +4,45 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sistema de Itinerarios Personales</title>
+  <meta name="color-scheme" content="light dark">
+  <!-- Aplica el tema guardado antes de pintar la página (evita un destello del tema equivocado). -->
+  <script src="/js/theme-init.js"></script>
+  <link rel="preload" href="/fonts/D-DIN.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/D-DIN-Bold.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="site-header">
     <div class="header-content">
-      <h1>Sistema de Itinerarios Personales</h1>
+      <div class="brand">
+        <!-- Símbolo de aeropuerto de las cartas aeronáuticas: círculo con un punto central -->
+        <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+          <circle cx="14" cy="14" r="11" fill="none" stroke="currentColor" stroke-width="3"/>
+          <circle cx="14" cy="14" r="3.5" fill="currentColor"/>
+          <path d="M14 0v5M14 23v5M0 14h5M23 14h5" stroke="currentColor" stroke-width="3"/>
+        </svg>
+        <h1>Sistema de Itinerarios Personales</h1>
+      </div>
       <nav class="tab-nav" role="tablist" aria-label="Secciones">
-        <button id="tab-airports" class="tab active"
+        <button id="tab-airports" class="tab active" type="button"
                 role="tab" aria-selected="true" aria-controls="section-airports">
           Aeropuertos
         </button>
-        <button id="tab-itineraries" class="tab"
+        <button id="tab-itineraries" class="tab" type="button"
                 role="tab" aria-selected="false" aria-controls="section-itineraries">
           Itinerarios
         </button>
       </nav>
+      <button id="theme-toggle" class="theme-toggle" type="button">
+        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+          <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M10 2a8 8 0 0 1 0 16z" fill="currentColor"/>
+        </svg>
+        <span class="theme-toggle-label">Tema oscuro</span>
+      </button>
     </div>
   </header>
+
   <main>
     <section id="section-airports" class="section"
              role="tabpanel" aria-labelledby="tab-airports">
@@ -30,6 +51,21 @@
              role="tabpanel" aria-labelledby="tab-itineraries">
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="footer-content">
+      <p class="footer-course">Arquitecturas de Software Emergentes</p>
+      <dl class="footer-facts">
+        <dt>Universidad</dt>
+        <dd>Universidad Central, periodo 2026-2</dd>
+        <dt>Docente</dt>
+        <dd>Otoniel Humberto Castañeda Rodriguez</dd>
+        <dt>Integrantes</dt>
+        <dd>Juan David Gutierrez Rincón, Santiago Chilito García y Gustavo Rincón Araujo</dd>
+      </dl>
+    </div>
+  </footer>
+
   <!-- Bundle parcial de Plotly (solo gráficos geo, sin Mapbox). Debe cargarse antes que main.js. -->
   <script src="/js/plotly-geo.min.js" defer></script>
   <script type="module" src="/js/main.js"></script>

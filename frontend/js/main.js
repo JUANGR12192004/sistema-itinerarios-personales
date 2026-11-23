@@ -1,11 +1,12 @@
 /**
  * Punto de entrada del frontend.
- * Gestiona las pestañas Aeropuertos / Itinerarios y carga cada sección
- * bajo demanda (8B: aeropuertos con mapa; 8C: CRUD de itinerarios).
+ * Gestiona las pestañas Aeropuertos / Itinerarios, el botón de tema y carga cada
+ * sección bajo demanda (aeropuertos con mapa; CRUD de itinerarios).
  */
 
 import { loadAirports } from './airports.js';
 import { loadItineraries } from './itineraries.js';
+import { initThemeToggle } from './theme.js';
 
 const TABS = {
   airports: {
@@ -32,6 +33,9 @@ function switchTab(active) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  const themeButton = document.getElementById('theme-toggle');
+  if (themeButton) initThemeToggle(themeButton);
+
   for (const [name, tab] of Object.entries(TABS)) {
     tab.btn = document.getElementById(tab.btnId);
     tab.section = document.getElementById(tab.sectionId);
