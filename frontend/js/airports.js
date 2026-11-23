@@ -113,6 +113,7 @@ export async function loadAirports(container) {
   } catch (error) {
     state.els = null;
     renderError(container, error);
+    showToast('No se cargaron los aeropuertos. El detalle está en la página.', 'error');
     return;
   }
 

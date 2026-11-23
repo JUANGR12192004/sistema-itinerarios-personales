@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+  <!-- Primer elemento con Tab: permite saltar la cabecera con el teclado -->
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
   <header class="site-header">
     <!-- Barra de carga: visible mientras hay peticiones al gateway en curso (api.js) -->
     <div id="progress-bar" class="progress-bar" role="progressbar" aria-label="Cargando datos" hidden></div>
@@ -30,7 +32,7 @@
                 role="tab" aria-selected="true" aria-controls="section-airports">
           Aeropuertos
         </button>
-        <button id="tab-itineraries" class="tab" type="button"
+        <button id="tab-itineraries" class="tab" type="button" tabindex="-1"
                 role="tab" aria-selected="false" aria-controls="section-itineraries">
           Itinerarios
         </button>
@@ -45,7 +47,7 @@
     </div>
   </header>
 
-  <main>
+  <main id="contenido" tabindex="-1">
     <section id="section-airports" class="section"
              role="tabpanel" aria-labelledby="tab-airports">
     </section>
@@ -70,7 +72,7 @@
       <p id="confirm-message"></p>
       <div class="confirm-actions">
         <button type="submit" value="cancel" class="btn btn-secondary confirm-cancel">Cancelar</button>
-        <button type="submit" value="confirm" class="btn btn-danger-solid confirm-accept"></button>
+        <button type="submit" value="confirm" class="btn btn-danger-solid confirm-accept">Confirmar</button>
       </div>
     </form>
   </dialog>

@@ -27,6 +27,7 @@ export async function loadItineraries(container, { quiet = false } = {}) {
     ]);
   } catch (error) {
     renderError(container, error);
+    showToast('No se cargaron los itinerarios. El detalle está en la página.', 'error');
     return;
   }
 

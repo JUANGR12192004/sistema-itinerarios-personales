@@ -196,6 +196,36 @@ button, input, select {
   outline-offset: 2px;
 }
 
+/* <main> recibe el foco con «Saltar al contenido», pero no es un control: sin contorno */
+main:focus {
+  outline: none;
+}
+
+/* El texto de ejemplo de los campos usa el gris de la paleta (contraste AA en los dos temas) */
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* Enlace «Saltar al contenido»: fuera de la vista hasta que recibe el foco con Tab */
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 30;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px solid var(--focus);
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -900,7 +930,7 @@ main {
 }
 
 .route.is-empty .route-code {
-  color: var(--line-strong);
+  color: var(--muted);
 }
 
 .route.is-empty .route-line {
