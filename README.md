@@ -145,7 +145,7 @@ notificación. La parte síncrona termina en el 201; todo lo demás ocurre despu
 | Componente | Responsabilidad | Carpeta | Puerto | Datos |
 |---|---|---|---|---|
 | API Gateway | Punto único de entrada: enrutar, limitar solicitudes, propagar headers y servir el frontend. Sin lógica de negocio | `gateway/` | 8000 | — |
-| Frontend | Mapa de aeropuertos (Plotly JS) y CRUD de itinerarios; solo habla con el gateway | `frontend/` | (8000) | — |
+| Frontend | Mapa de aeropuertos (Plotly JS) con buscador y ruta de un itinerario, CRUD de itinerarios con validación, tema claro y oscuro; solo habla con el gateway | `frontend/` | (8000) | — |
 | Airport Service | Consultar API Colombia mediante un Adapter, traducir al modelo interno, caché y resiliencia | `services/airport-service/` | 8001 | Redis (solo caché) |
 | Itinerary Service | CRUD de itinerarios, reglas de negocio, validar aeropuertos y registrar el evento en la outbox | `services/itinerary-service/` | 8002 | `itinerary_db` |
 | Outbox Relay | Proceso aparte (misma imagen) que publica en RabbitMQ los eventos pendientes de la outbox | `services/itinerary-service/` | 9101 (métricas) | `itinerary_db` |
@@ -340,7 +340,7 @@ Pattern*, ADR-040). **A fondo:** ADR-034 a ADR-040 y [`docs/02-arquitectura.md`]
 | Mensajería | RabbitMQ 3.13 (cliente `pika`) |
 | Caché | Redis 7.4 |
 | Serverless | Imagen oficial de AWS Lambda para Python 3.12 con el Runtime Interface Emulator (ADR-008) |
-| Frontend | HTML, CSS y JavaScript (ES modules, sin build) con Plotly JS 4.3.0 |
+| Frontend | HTML, CSS y JavaScript (ES modules, sin build) con Plotly JS 4.3.0 y la fuente D-DIN (SIL OFL 1.1), ambos locales |
 | Contenedores | Docker y Docker Compose (`docker-compose.yml` en la raíz, ADR-041) |
 | Observabilidad | OpenTelemetry, Jaeger 2.23, Prometheus 2.55 y Grafana 11.3 |
 | Documentación de API | Swagger / OpenAPI y AsyncAPI 3.0 |
@@ -795,6 +795,10 @@ Resultado con todo el sistema encendido (2026-11-19, macOS, `docker compose` con
 | Punta a punta | `tests/e2e` | 14 | El sistema con el simulador (abajo) |
 | **Total** | | **642** | **0 fallos, 0 omitidas, 0 advertencias** |
 
+Después de la mejora del frontend (rama `feat/mejora-frontend`, 2026-11-23) la suite del gateway tiene **60** pruebas:
+7 nuevas en `test_static.py` comprueban que la fuente y los módulos nuevos se sirvan con su tipo. La tabla y la
+evidencia 01 conservan los totales de su fecha.
+
 Sin los servicios, las pruebas de integración quedan **SKIPPED** (no fallan). Las de integración usan bases propias
 (`itinerary_db_test`, `notification_db_test`) y colas con nombres `test-<id>.`: se pueden correr durante una
 demostración sin perder datos. El workflow "Pruebas" de GitHub Actions las ejecuta en cada pull request: un job por componente (sin servicios, así
@@ -845,7 +849,8 @@ el mapa mostraría 4 durante 10 minutos).
 ## Evidencias
 
 Capturas y salidas de terminal del sistema funcionando, obtenidas el 2026-11-18 en una sola sesión con Docker Compose
-y la API Colombia real (la 01 se regeneró el 2026-11-19 con los totales vigentes; la 19 y la 20 las tomó el equipo).
+y la API Colombia real (la 01 se regeneró el 2026-11-19 con los totales vigentes; las del frontend, 10 a 14, y la
+nueva 21 en modo oscuro, el 2026-11-23 tras la mejora del frontend; la 19 y la 20 las tomó el equipo).
 El índice completo, con qué debe verse en cada una y cómo regenerarlas con los scripts de
 `scripts/`, está en [`docs/evidencias/README.md`](docs/evidencias/README.md).
 
@@ -871,6 +876,7 @@ El índice completo, con qué debe verse en cada una y cómo regenerarlas con lo
 | 18 | Mensaje de la DLQ con `x-death` | [`18-rabbitmq-dlq-mensaje.png`](docs/evidencias/18-rabbitmq-dlq-mensaje.png) |
 | 19 | SonarCloud sobre `main`: Quality Gate aprobado, seguridad, fiabilidad y mantenibilidad en A, 2,2 % de duplicación | [`19-sonarcloud.png`](docs/evidencias/19-sonarcloud.png) |
 | 20 | GitHub Actions: los 8 checks del PR de la Fase 12 en verde (7 jobs de pruebas y SonarCloud) | [`20-github-actions.png`](docs/evidencias/20-github-actions.png) |
+| 21 | Frontend en modo oscuro (1280 px): la ruta de un itinerario resaltada en el mapa | [`21-frontend-modo-oscuro.png`](docs/evidencias/21-frontend-modo-oscuro.png) |
 
 Así se ven el mapa y la traza:
 
@@ -964,7 +970,7 @@ sistema-itinerarios-personales/
 │   ├── send-notification-function/ ← app/ (handler.py hexagonal), alembic/, events/, Dockerfile
 │   └── event-trigger/            ← app/ (consumidor, invocador, replay_dlq.py), demo/
 ├── gateway/                      ← nginx.conf, templates/default.conf.template, Dockerfile, tests/
-├── frontend/                     ← index.html, css/, js/ (Plotly local)
+├── frontend/                     ← index.html, css/, js/, fonts/ (Plotly y D-DIN locales)
 ├── libs/observability/           ← logging, trazas y métricas comunes (Microservice Chassis)
 ├── observability/                ← configuración de Prometheus y Grafana (dashboard)
 ├── scripts/                      ← lock_requirements.py y los scripts de las evidencias

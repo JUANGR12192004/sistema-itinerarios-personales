@@ -1175,6 +1175,26 @@ como único punto de entrada. El bundle local de Plotly permite la demostración
 - Nginx resuelve el `Content-Type` por la extensión: las ubicaciones que devuelven errores JSON fijan su tipo con
   `types { }` vacío (corrección de la rama `fix/gateway-404-json`).
 
+*Actualización (mejora del frontend, rama `feat/mejora-frontend`, 2026-11-23):* se mantiene lo decidido (sin
+framework, sin build, sin CDN, Plotly local, solo el gateway, `textContent`, `correlation_id` y "Copiar" en los 5xx) y
+se agrega:
+
+- **Modo oscuro.** Los colores son variables CSS en `:root`; el tema oscuro las redefine. Sin elección del usuario sigue
+  al sistema operativo (`prefers-color-scheme`); el botón de la cabecera fija el tema con `data-theme` en `<html>` y lo
+  guarda en `localStorage` dentro de `try/catch` (`js/theme.js`; `js/theme-init.js` lo aplica antes de pintar).
+  Plotly no lee variables CSS: el mapa lee los colores del tema activo y se vuelve a dibujar al cambiarlo. Contraste
+  WCAG AA comprobado en los dos temas (en el oscuro, el azul y el magenta de la carta son más claros).
+- **Fuente D-DIN** (Datto, SIL OFL 1.1), de la familia DIN 1451 de la señalización, en `frontend/fonts/` como `.woff2`
+  (regular y negrita, unos 43 KB) con su licencia (`OFL-1.1.txt`) y su `FONTLOG.txt`. DIN Alternate (macOS), Bahnschrift
+  (Windows) y `system-ui` quedan como respaldo. Es un recurso estático local, no una dependencia: no hay CDN ni build.
+- Módulos nuevos `js/ui.js` (avisos con `aria-live` y confirmación con `<dialog>` nativo, que reemplaza a `confirm()`)
+  y `js/route.js` (bloque de ruta compartido). Validación del formulario en el navegador con las reglas de ADR-015
+  (la fecha futura solo al crear, igual que el dominio), lista de aeropuertos con buscador y ruta de un itinerario
+  resaltada en el mapa.
+- Corrección: al editar, el formulario tomaba la hora UTC de la API como hora local y al guardar corría el viaje 5
+  horas en Colombia. Ahora convierte la fecha a la hora local del navegador.
+- `test_static.py` comprueba que la fuente se sirva como `font/woff2` y que los módulos nuevos lleguen con su tipo.
+
 ## ADR-034 — Logs JSON estructurados con python-json-logger (Fase 9)
 
 **Estado:** Aceptada (Fase 9, entrega 9A).

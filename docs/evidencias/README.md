@@ -4,7 +4,9 @@ Capturas y salidas de terminal que muestran el sistema funcionando. Las evidenci
 **2026-11-18 en una sola sesión** (macOS con Apple Silicon, Docker Desktop 29.9.3), con el sistema levantado con
 Docker Compose y la **API Colombia real**. La evidencia 01 se **regeneró el 2026-11-19** en el mismo equipo, después de
 las correcciones posteriores a la Fase 12 (PR #32 y #33), para que sus totales coincidan con el README; sus pruebas E2E
-usan el simulador. Todos los datos son de ejemplo: nombres inventados y correos `@example.com`.
+usan el simulador. Las del frontend (10 a 14) se **regeneraron el 2026-11-23** con el mismo método, después de la
+mejora del frontend (rama `feat/mejora-frontend`), y se agregó la **21** en modo oscuro. Todos los datos son de ejemplo:
+nombres inventados y correos `@example.com`.
 
 Las evidencias 19 y 20 las tomó el equipo desde su cuenta de SonarCloud y de GitHub. No queda ninguna evidencia
 pendiente.
@@ -22,17 +24,18 @@ pendiente.
 | 07 | [`07-dlq-evento-invalido.txt`](07-dlq-evento-invalido.txt) | Un evento que no cumple el contrato: el trigger registra el rechazo (fallo permanente) y la DLQ queda con 1 mensaje | `evidencias_terminal.py dlq` (API del panel de RabbitMQ) |
 | 08 | [`08-swagger-airport.png`](08-swagger-airport.png) | Swagger de Airport Service (`http://localhost:8001/docs`) con sus endpoints | `capturar_evidencias.py swagger` |
 | 09 | [`09-swagger-itinerary.png`](09-swagger-itinerary.png) | Swagger de Itinerary Service (`http://localhost:8002/docs`) con el CRUD | `capturar_evidencias.py swagger` |
-| 10 | [`10-frontend-mapa.png`](10-frontend-mapa.png) | Mapa de Plotly con **51 aeropuertos** (el 43 no tiene coordenadas) y un color por tipo | `capturar_evidencias.py frontend` |
-| 11 | [`11-frontend-crear.png`](11-frontend-crear.png) | CRUD, crear: formulario lleno (María Rodríguez, Armenia → Cali, 80 min) antes de guardar | `capturar_evidencias.py frontend` |
-| 12 | [`12-frontend-consultar.png`](12-frontend-consultar.png) | CRUD, consultar: el itinerario nuevo en la tabla, con los aeropuertos por nombre | `capturar_evidencias.py frontend` |
-| 13 | [`13-frontend-actualizar.png`](13-frontend-actualizar.png) | CRUD, actualizar: la misma fila con la duración cambiada a 95 min | `capturar_evidencias.py frontend` |
-| 14 | [`14-frontend-eliminar.png`](14-frontend-eliminar.png) | CRUD, eliminar: tras confirmar, la fila ya no está | `capturar_evidencias.py frontend` |
+| 10 | [`10-frontend-mapa.png`](10-frontend-mapa.png) | Mapa de Plotly con **51 aeropuertos** (el 43 no tiene coordenadas), un color por tipo y, al lado, la lista con buscador (2026-11-23) | `capturar_evidencias.py frontend` |
+| 11 | [`11-frontend-crear.png`](11-frontend-crear.png) | CRUD, crear: formulario lleno (María Rodríguez, Armenia → Cali, 80 min) antes de guardar, con la vista previa de la ruta y la llegada estimada | `capturar_evidencias.py frontend` |
+| 12 | [`12-frontend-consultar.png`](12-frontend-consultar.png) | CRUD, consultar: el itinerario nuevo al final de la tabla, con la ruta AXM → CLO, la duración y el horario | `capturar_evidencias.py frontend` |
+| 13 | [`13-frontend-actualizar.png`](13-frontend-actualizar.png) | CRUD, actualizar: la misma fila con la duración cambiada a 95 min y la misma salida (2 ene 2027, 09:30; antes de la mejora del frontend, editar corría la salida 5 horas) | `capturar_evidencias.py frontend` |
+| 14 | [`14-frontend-eliminar.png`](14-frontend-eliminar.png) | CRUD, eliminar: tras confirmar en el diálogo de la página, la fila ya no está | `capturar_evidencias.py frontend` |
 | 15 | [`15-jaeger-traza.png`](15-jaeger-traza.png) | La traza del `POST` de la evidencia 03 con **6 servicios**: gateway → Itinerary → Airport (dos validaciones) → PostgreSQL → Outbox Relay → Event Trigger → función | `capturar_evidencias.py jaeger` |
 | 16 | [`16-grafana-dashboard.png`](16-grafana-dashboard.png) | Dashboard "Sistema de Itinerarios Personales": itinerarios creados, notificaciones, mensajes en DLQ (1, igual que RabbitMQ), solicitudes, latencias, relay y trigger | `capturar_evidencias.py grafana` |
 | 17 | [`17-rabbitmq-colas.png`](17-rabbitmq-colas.png) | Panel de RabbitMQ: la cola `notification.itinerary-created` vacía y con su consumidor, y `notification.itinerary-created.dlq` con 1 mensaje | `capturar_evidencias.py rabbitmq` |
 | 18 | [`18-rabbitmq-dlq-mensaje.png`](18-rabbitmq-dlq-mensaje.png) | El mensaje de la DLQ leído sin sacarlo de la cola: header `x-death` con `reason: rejected` y la cola de origen | `capturar_evidencias.py rabbitmq` |
 | 19 | [`19-sonarcloud.png`](19-sonarcloud.png) | Resumen de SonarCloud sobre `main` en *Overall Code* (análisis del commit `baaf05a9`, merge del PR #33): Quality Gate **aprobado**, seguridad **A** (0 problemas), fiabilidad **A** (0 problemas), mantenibilidad **A** (32 problemas), 0 problemas aceptados y **2,2 %** de duplicación | Captura manual en sonarcloud.io, tomada por el equipo |
 | 20 | [`20-github-actions.png`](20-github-actions.png) | Los **8 checks** del pull request de la Fase 12 (#30) en verde ("All checks have passed"): los 7 jobs del workflow "Pruebas" (Airport Service, API Gateway, Docker Compose, Event Trigger, Itinerary Service, libs/observability y SendNotificationFunction) y *SonarCloud Code Analysis* con "Quality Gate passed" | Captura manual del pull request en GitHub, tomada por el equipo |
+| 21 | [`21-frontend-modo-oscuro.png`](21-frontend-modo-oscuro.png) | Frontend en **modo oscuro** a 1280 px: la ruta del itinerario de la evidencia 13 (AXM → CLO, 95 min) resaltada en magenta en el mapa, con el resto de aeropuertos atenuados (2026-11-23) | `capturar_evidencias.py frontend` |
 
 Notas para leerlas:
 
@@ -140,7 +143,7 @@ python3.12 scripts/evidencias_terminal.py
 Sin argumentos ejecuta, en orden, `estado gateway notificacion outbox rate-limit dlq` (unos 40 s; el paso `outbox`
 detiene y vuelve a levantar RabbitMQ). Cada paso se puede ejecutar solo, por ejemplo `... evidencias_terminal.py estado`.
 
-### 5. Evidencias 08 a 18
+### 5. Evidencias 08 a 18 y 21
 
 **PowerShell y CMD:**
 
